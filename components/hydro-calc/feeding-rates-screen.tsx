@@ -326,8 +326,8 @@ function PartEntry({
 type SafetyTone = "safe" | "caution" | "danger"
 
 const SAFETY_TONE_CLASSES: Record<SafetyTone, string> = {
-  safe: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  caution: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  safe: "bg-emerald-500/15 text-emerald-300",
+  caution: "bg-amber-500/15 text-amber-300",
   danger: "bg-destructive/15 text-destructive",
 }
 
@@ -409,8 +409,8 @@ function PrecipitationWarning({
       role="alert"
       className="flex items-start gap-3 rounded-lg border-2 border-amber-500/50 bg-amber-500/10 p-4"
     >
-      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-      <div className="space-y-2 text-sm leading-relaxed text-amber-900 dark:text-amber-100">
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+      <div className="space-y-2 text-sm leading-relaxed text-amber-100">
         <p className="font-semibold">{title}</p>
         {body}
       </div>

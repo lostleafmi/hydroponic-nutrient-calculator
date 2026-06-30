@@ -142,7 +142,7 @@ export default function HydroCalcPage() {
         {/* Header */}
         <header className="mb-8 text-center">
           <div className="mb-2 flex items-center justify-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-primary/30 bg-primary/10">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
@@ -151,7 +151,7 @@ export default function HydroCalcPage() {
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="h-6 w-6 text-accent-foreground"
+                className="h-6 w-6 text-primary"
               >
                 <path d="M12 2v10" />
                 <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
@@ -173,10 +173,10 @@ export default function HydroCalcPage() {
             <div key={screen} className="flex items-center gap-2 sm:gap-4">
               <button
                 onClick={() => goToScreen(screen)}
-                className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
+                className={`flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition-all sm:px-4 ${
                   currentScreen === screen
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                    ? "border-primary/50 bg-primary text-primary-foreground shadow-sm shadow-primary/20"
+                    : "border-border bg-secondary text-secondary-foreground hover:border-primary/30 hover:bg-secondary/80"
                 }`}
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-background/20 text-xs font-bold sm:h-6 sm:w-6">

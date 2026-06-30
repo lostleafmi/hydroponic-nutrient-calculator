@@ -219,12 +219,12 @@ function PartAnalysisCard({
         <div className="flex items-center gap-2">
           {/* Photo Upload Status */}
           {part.photoUrl && (
-            <div className="flex items-center gap-2 rounded-lg bg-green-500/10 px-3 py-1.5 text-sm text-green-700">
+            <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-300">
               <ImageIcon className="h-4 w-4" />
               <span className="hidden sm:inline max-w-24 truncate">{part.photoName}</span>
               <button 
                 onClick={onRemovePhoto}
-                className="hover:text-green-900"
+                className="hover:text-emerald-100"
                 aria-label="Remove photo"
               >
                 <X className="h-3.5 w-3.5" />

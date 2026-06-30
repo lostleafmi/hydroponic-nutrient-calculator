@@ -647,8 +647,8 @@ export function RecipeScreen({
 
               {hasValidData && !hasAnyMicro && (
                 <div className="mt-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                  <p className="text-xs leading-relaxed text-amber-700">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                  <p className="text-xs leading-relaxed text-amber-300">
                     We didn&apos;t see any micronutrients in your label data. Add at least one micro
                     (Iron is the easiest) back on Step 1 and we&apos;ll fill in the rest for a
                     complete recipe.
@@ -675,8 +675,8 @@ export function RecipeScreen({
               role="alert"
               className="flex items-start gap-3 rounded-lg border-2 border-amber-500/60 bg-amber-500/10 p-4"
             >
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-              <div className="space-y-1 text-sm leading-relaxed text-amber-900 dark:text-amber-100">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+              <div className="space-y-1 text-sm leading-relaxed text-amber-100">
                 <p className="font-semibold">
                   Don&apos;t pour your stock tanks into each other.
                 </p>
@@ -693,8 +693,8 @@ export function RecipeScreen({
             </div>
 
             <div className="flex items-start gap-3 rounded-lg border-2 border-sky-500/50 bg-sky-500/10 p-4">
-              <Info className="mt-0.5 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
-              <p className="text-sm leading-relaxed text-sky-900 dark:text-sky-100">
+              <Info className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
+              <p className="text-sm leading-relaxed text-sky-100">
                 A paddle mixer with a drill are recommended for mixing stock tanks. If you are
                 mixing your tanks into 5 gallon buckets it&apos;s easier to only prepare 3 to 4
                 gallons of stock solution. Ensure that you use a precise measuring tool like a
@@ -984,7 +984,7 @@ export function RecipeScreen({
                   <Fragment key={item.key}>
                     <ShoppingItem name={item.name} note={item.note} />
                     {item.disclaimer && (
-                      <p className="col-span-full rounded border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 text-xs leading-snug text-amber-900 dark:text-amber-100">
+                      <p className="col-span-full rounded border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 text-xs leading-snug text-amber-100">
                         {item.disclaimer}
                       </p>
                     )}
@@ -1122,7 +1122,7 @@ function PerPartStockTankCards({
 
   if (tanks.length === 0) {
     return (
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-100">
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
         Enter your feed-chart doses on Step 2 to see one stock tank recipe per part.
       </div>
     )
@@ -1227,8 +1227,8 @@ function MixingSafetyBanner({
   if (option === "separate") {
     return (
       <div className="flex items-start gap-3 rounded-lg border-2 border-emerald-500/50 bg-emerald-500/10 p-4">
-        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-        <div className="space-y-1 text-sm leading-relaxed text-emerald-900 dark:text-emerald-100">
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+        <div className="space-y-1 text-sm leading-relaxed text-emerald-100">
           <p className="font-semibold">Safest setup</p>
           <p>
             Calcium nitrate sits in its own stock tank, so it&apos;s easy to taper at the end of
@@ -1245,8 +1245,8 @@ function MixingSafetyBanner({
         role="alert"
         className="flex items-start gap-3 rounded-lg border-2 border-amber-500/50 bg-amber-500/10 p-4"
       >
-        <Gauge className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-        <div className="space-y-1 text-sm leading-relaxed text-amber-900 dark:text-amber-100">
+        <Gauge className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+        <div className="space-y-1 text-sm leading-relaxed text-amber-100">
           <p className="font-semibold">Doser / Injector setup — check your hardware first</p>
           <p>
             {separateCaLayout
@@ -1267,8 +1267,8 @@ function MixingSafetyBanner({
         role="alert"
         className="flex items-start gap-3 rounded-lg border-2 border-amber-500/50 bg-amber-500/10 p-4"
       >
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-        <div className="space-y-1 text-sm leading-relaxed text-amber-900 dark:text-amber-100">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+        <div className="space-y-1 text-sm leading-relaxed text-amber-100">
           <p className="font-semibold">One stock tank per part</p>
           <p>
             We created {partCount} stock tank{partCount === 1 ? "" : "s"} to match the parts in
@@ -1343,7 +1343,7 @@ function RecommendedRatioCard({
     tone === "danger"
       ? "text-destructive"
       : tone === "warning"
-        ? "text-amber-600 dark:text-amber-400"
+        ? "text-amber-400"
         : "text-primary"
 
   return (
