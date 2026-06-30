@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import { ClerkProvider } from '@clerk/nextjs'
 import { Analytics } from '@vercel/analytics/next'
+import { clerkAppearance } from '@/lib/clerk-appearance'
 import './globals.css'
 
 const geist = Geist({ subsets: ["latin"] });
@@ -37,8 +39,10 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className={`${geist.className} min-h-screen bg-background text-foreground antialiased`}>
-        {children}
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        <ClerkProvider appearance={clerkAppearance}>
+          {children}
+          {process.env.NODE_ENV === 'production' && <Analytics />}
+        </ClerkProvider>
       </body>
     </html>
   )
