@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { ClerkProvider } from '@clerk/nextjs'
 import { Analytics } from '@vercel/analytics/next'
 import { clerkAppearance } from '@/lib/clerk-appearance'
+import { Toaster } from '@/components/ui/toaster'
 import './globals.css'
 
 const geist = Geist({ subsets: ["latin"] });
@@ -42,6 +43,7 @@ export default function RootLayout({
         <ClerkProvider appearance={clerkAppearance}>
           {children}
           {process.env.NODE_ENV === 'production' && <Analytics />}
+          <Toaster />
         </ClerkProvider>
       </body>
     </html>

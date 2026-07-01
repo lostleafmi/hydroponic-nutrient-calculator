@@ -1,11 +1,13 @@
 "use client"
 
 import { Fragment, useEffect, useMemo, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useToast } from "@/hooks/use-toast"
 import {
   HelpCircle,
   ArrowLeft,
@@ -19,6 +21,8 @@ import {
   Gauge,
   Info,
   Droplets,
+  BookmarkPlus,
+  Loader2,
 } from "lucide-react"
 import type { PartAnalysis } from "./guaranteed-analysis-screen"
 import type { NutrientPart, StockTankOption } from "./feeding-rates-screen"
@@ -67,12 +71,19 @@ const MICRO_SALT_KEYS = new Set<SaltKey>([
   "sodiumMolybdate",
 ])
 
+const DASHBOARD_API_URL =
+  process.env.NEXT_PUBLIC_DASHBOARD_API_URL ?? "https://localhost:3005/api/formulations/save"
+
 export function RecipeScreen({
   partsAnalysis,
   parts,
   stockTankOption,
   onBack,
 }: RecipeScreenProps) {
+  const { getToken } = useAuth()
+  const { toast } = useToast()
+  const [isSaving, setIsSaving] = useState(false)
+
   const [stockTankSize, setStockTankSize] = useState("5")
   const [stockTankUnit, setStockTankUnit] = useState<"gallons" | "liters">("gallons")
   const [concentrationRatio, setConcentrationRatio] = useState("100")
@@ -338,6 +349,56 @@ export function RecipeScreen({
 
   const mlPerGallon = stockTankMlPerGallon(dilutionRatio)
   const mlPerLiter = stockTankMlPerLiter(dilutionRatio)
+
+  const handleSaveToDashboard = async () => {
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      const token = await getToken()
+      const payload = {
+        // Strip local blob URLs from photo fields before sending
+        partsAnalysis: partsAnalysis.map(({ photoUrl: _photoUrl, photoName: _photoName, ...p }) => p),
+        parts,
+        stockTankOption,
+        stockTankSize,
+        stockTankUnit,
+        concentrationRatio: dilutionRatio,
+        targetEc: parsedTargetEc > 0 ? parsedTargetEc : estimatedEc,
+        ecScaleFactor,
+        elementalTargets: targets,
+        estimatedEc,
+        doserLayout: stockTankOption === "doser" ? doserLayout : undefined,
+        savedAt: new Date().toISOString(),
+      }
+
+      const res = await fetch(DASHBOARD_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "")
+        throw new Error(errText || `Server responded with ${res.status}`)
+      }
+
+      toast({
+        title: "Formulation saved to Dashboard",
+        description: "You can view and manage it on your main dashboard.",
+      })
+    } catch (err) {
+      toast({
+        title: "Failed to save formulation",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -1007,11 +1068,26 @@ export function RecipeScreen({
       )}
 
       {/* Navigation */}
-      <div className="flex justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Button variant="outline" onClick={onBack} className="gap-2">
           <ArrowLeft className="h-4 w-4" />
           Back to Feeding Rates
         </Button>
+
+        {hasValidData && (
+          <Button
+            onClick={handleSaveToDashboard}
+            disabled={isSaving}
+            className="gap-2 bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90 disabled:opacity-70"
+          >
+            {isSaving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <BookmarkPlus className="h-4 w-4" />
+            )}
+            {isSaving ? "Saving…" : "Save to Dashboard"}
+          </Button>
+        )}
       </div>
     </div>
   )
