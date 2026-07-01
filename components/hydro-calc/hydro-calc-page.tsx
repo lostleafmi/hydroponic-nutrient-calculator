@@ -1,14 +1,22 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
+import { Loader2 } from "lucide-react"
 import {
   GuaranteedAnalysisScreen,
   type PartAnalysis,
   createEmptyPartAnalysis,
 } from "@/components/hydro-calc/guaranteed-analysis-screen"
 import { FeedingRatesScreen, type NutrientPart, type StockTankOption } from "@/components/hydro-calc/feeding-rates-screen"
-import { RecipeScreen } from "@/components/hydro-calc/recipe-screen"
+import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-calc/recipe-screen"
 import { isSeparateNitrogenAvailable } from "@/lib/hydro-calc/recipe-calculator"
+import { toast } from "@/hooks/use-toast"
+
+const DASHBOARD_API_BASE =
+  process.env.NEXT_PUBLIC_DASHBOARD_API_URL
+    ? process.env.NEXT_PUBLIC_DASHBOARD_API_URL.replace(/\/save$/, "")
+    : "https://lost-art-of-growingv2.vercel.app/api/formulations"
 
 type Screen = "analysis" | "feeding" | "recipe"
 
@@ -97,12 +105,91 @@ function syncAnalysisPartsFromFeeding(
   })
 }
 
-export function HydroCalcPage() {
+export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: string }) {
+  const { getToken } = useAuth()
   const [initialState] = useState(createInitialWizardState)
   const [currentScreen, setCurrentScreen] = useState<Screen>("analysis")
   const [partsAnalysis, setPartsAnalysis] = useState<PartAnalysis[]>(initialState.partsAnalysis)
   const [parts, setParts] = useState<NutrientPart[]>(initialState.parts)
   const [stockTankOption, setStockTankOption] = useState<StockTankOption>("separate")
+
+  // Tracks which recipeInitialSettings generation is in use — incrementing forces
+  // RecipeScreen to remount so its useState picks up the new initial values.
+  const [recipeKey, setRecipeKey] = useState(0)
+  const [recipeInitialSettings, setRecipeInitialSettings] = useState<RecipeInitialSettings>({})
+
+  const [isLoadingFormulation, setIsLoadingFormulation] = useState(!!loadFormulationId)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  // Prevent double-fetch in StrictMode
+  const hasFetched = useRef(false)
+
+  useEffect(() => {
+    if (!loadFormulationId || hasFetched.current) return
+    hasFetched.current = true
+
+    const load = async () => {
+      setIsLoadingFormulation(true)
+      setLoadError(null)
+      try {
+        const token = await getToken()
+        const res = await fetch(`${DASHBOARD_API_BASE}/${loadFormulationId}`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "")
+          throw new Error(errText || `Server responded with ${res.status}`)
+        }
+
+        const data = await res.json()
+
+        // --- Populate wizard state ---
+        if (Array.isArray(data.partsAnalysis) && data.partsAnalysis.length > 0) {
+          setPartsAnalysis(data.partsAnalysis)
+        }
+        if (Array.isArray(data.parts) && data.parts.length > 0) {
+          setParts(data.parts)
+        }
+        if (data.stockTankOption) {
+          setStockTankOption(data.stockTankOption as StockTankOption)
+        }
+
+        // --- Pre-fill recipe screen settings ---
+        const settings: RecipeInitialSettings = {}
+        if (data.stockTankSize) settings.stockTankSize = String(data.stockTankSize)
+        if (data.stockTankUnit) settings.stockTankUnit = data.stockTankUnit
+        if (data.concentrationRatio) settings.concentrationRatio = String(data.concentrationRatio)
+        if (data.doserLayout) settings.doserLayout = data.doserLayout
+        if (data.targetEc != null) settings.targetEcInput = String(data.targetEc)
+        setRecipeInitialSettings(settings)
+        setRecipeKey((k) => k + 1)
+
+        // Clean the URL so a refresh doesn't re-trigger the load
+        window.history.replaceState({}, "", window.location.pathname)
+
+        toast({
+          title: "Formulation loaded",
+          description: "Your saved formulation has been pre-filled into the calculator.",
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not load formulation."
+        setLoadError(message)
+        toast({
+          title: "Failed to load formulation",
+          description: message,
+          variant: "destructive",
+        })
+      } finally {
+        setIsLoadingFormulation(false)
+      }
+    }
+
+    load()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadFormulationId])
 
   useEffect(() => {
     if (!isSeparateNitrogenAvailable(parts.length) && stockTankOption === "separate") {
@@ -136,6 +223,18 @@ export function HydroCalcPage() {
     recipe: "Recipe & Shopping List",
   }
 
+  if (isLoadingFormulation) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+          <p className="text-lg font-medium text-foreground">Loading your formulation…</p>
+          <p className="text-sm text-muted-foreground">Fetching saved data from your Dashboard</p>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
@@ -166,6 +265,14 @@ export function HydroCalcPage() {
             Nutrient Replication Calculator
           </p>
         </header>
+
+        {/* Load-error banner (non-blocking — calculator still usable) */}
+        {loadError && (
+          <div className="mb-6 flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <span className="font-semibold">Could not load formulation:</span>
+            <span>{loadError}</span>
+          </div>
+        )}
 
         {/* Step Indicator */}
         <div className="mb-8 flex flex-wrap items-center justify-center gap-2 sm:gap-4">
@@ -214,9 +321,11 @@ export function HydroCalcPage() {
         )}
         {currentScreen === "recipe" && (
           <RecipeScreen
+            key={recipeKey}
             partsAnalysis={partsAnalysis}
             parts={parts}
             stockTankOption={stockTankOption}
+            initialSettings={recipeInitialSettings}
             onBack={() => goToScreen("feeding")}
           />
         )}

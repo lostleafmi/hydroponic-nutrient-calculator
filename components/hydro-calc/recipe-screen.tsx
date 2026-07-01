@@ -55,10 +55,19 @@ import {
   type SaltKey,
 } from "@/lib/hydro-calc/recipe-calculator"
 
+export interface RecipeInitialSettings {
+  stockTankSize?: string
+  stockTankUnit?: "gallons" | "liters"
+  concentrationRatio?: string
+  doserLayout?: "per-part" | "separate-ca"
+  targetEcInput?: string
+}
+
 interface RecipeScreenProps {
   partsAnalysis: PartAnalysis[]
   parts: NutrientPart[]
   stockTankOption: StockTankOption
+  initialSettings?: RecipeInitialSettings
   onBack: () => void
 }
 
@@ -78,24 +87,32 @@ export function RecipeScreen({
   partsAnalysis,
   parts,
   stockTankOption,
+  initialSettings = {},
   onBack,
 }: RecipeScreenProps) {
   const { getToken } = useAuth()
   const { toast } = useToast()
   const [isSaving, setIsSaving] = useState(false)
 
-  const [stockTankSize, setStockTankSize] = useState("5")
-  const [stockTankUnit, setStockTankUnit] = useState<"gallons" | "liters">("gallons")
-  const [concentrationRatio, setConcentrationRatio] = useState("100")
+  const [stockTankSize, setStockTankSize] = useState(initialSettings.stockTankSize ?? "5")
+  const [stockTankUnit, setStockTankUnit] = useState<"gallons" | "liters">(
+    initialSettings.stockTankUnit ?? "gallons"
+  )
+  const [concentrationRatio, setConcentrationRatio] = useState(
+    initialSettings.concentrationRatio ?? "100"
+  )
   // Once the user types a custom value, we stop auto-syncing the input to the
   // recommended ratio so we never overwrite their choice mid-edit.
-  const [ratioIsManual, setRatioIsManual] = useState(false)
+  // If we loaded a saved ratio, treat it as manual so the auto-sync won't overwrite it.
+  const [ratioIsManual, setRatioIsManual] = useState(!!initialSettings.concentrationRatio)
 
-  const [targetEcInput, setTargetEcInput] = useState("")
-  const [targetEcIsManual, setTargetEcIsManual] = useState(false)
+  const [targetEcInput, setTargetEcInput] = useState(initialSettings.targetEcInput ?? "")
+  const [targetEcIsManual, setTargetEcIsManual] = useState(!!initialSettings.targetEcInput)
 
   // Sub-layout toggle for doser mode: one tank per part vs. separate Ca(NO₃)₂ tank
-  const [doserLayout, setDoserLayout] = useState<"per-part" | "separate-ca">("per-part")
+  const [doserLayout, setDoserLayout] = useState<"per-part" | "separate-ca">(
+    initialSettings.doserLayout ?? "per-part"
+  )
 
   // Reset to per-part when the recipe grows beyond 3 parts (separate Ca requires ≤3)
   useEffect(() => {
