@@ -377,24 +377,24 @@ function PartAnalysisCard({
               <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                 NPK
               </p>
-              <NutrientInput 
-                label="N" 
-                fullLabel="Total Nitrogen"
+              <NutrientInput
+                label="Total Nitrogen"
+                fullLabel="N"
                 value={part.nitrogen}
                 onChange={(v) => onUpdate({ nitrogen: v })}
                 tooltip="Nitrogen promotes vegetative growth and leaf development."
                 highlight
               />
-              <NutrientInput 
-                label="P₂O₅" 
-                fullLabel="Phosphate"
+              <NutrientInput
+                label="Available Phosphate"
+                fullLabel="P₂O₅"
                 value={part.phosphate}
                 onChange={(v) => onUpdate({ phosphate: v })}
                 tooltip="Phosphorus supports root development and flowering."
               />
-              <NutrientInput 
-                label="K₂O" 
-                fullLabel="Potassium"
+              <NutrientInput
+                label="Soluble Potash"
+                fullLabel="K₂O"
                 value={part.potash}
                 onChange={(v) => onUpdate({ potash: v })}
                 tooltip="Potassium regulates water uptake and plant health."
@@ -407,23 +407,23 @@ function PartAnalysisCard({
                 </p>
               </div>
               
-              <NutrientInput 
-                label="Ca" 
-                fullLabel="Calcium"
+              <NutrientInput
+                label="Calcium"
+                fullLabel="Ca"
                 value={part.calcium}
                 onChange={(v) => onUpdate({ calcium: v })}
                 tooltip="Calcium strengthens cell walls."
               />
-              <NutrientInput 
-                label="Mg" 
-                fullLabel="Magnesium"
+              <NutrientInput
+                label="Magnesium"
+                fullLabel="Mg"
                 value={part.magnesium}
                 onChange={(v) => onUpdate({ magnesium: v })}
                 tooltip="Magnesium is essential for photosynthesis."
               />
-              <NutrientInput 
-                label="S" 
-                fullLabel="Sulfur"
+              <NutrientInput
+                label="Sulfur"
+                fullLabel="S"
                 value={part.sulfur}
                 onChange={(v) => onUpdate({ sulfur: v })}
                 tooltip="Sulfur is essential for protein synthesis."
@@ -435,44 +435,44 @@ function PartAnalysisCard({
                 </p>
               </div>
 
-              <NutrientInput 
-                label="Fe" 
-                fullLabel="Iron"
+              <NutrientInput
+                label="Chelated Iron"
+                fullLabel="Fe"
                 value={part.iron}
                 onChange={(v) => onUpdate({ iron: v })}
                 tooltip="Iron is crucial for chlorophyll synthesis."
               />
-              <NutrientInput 
-                label="Mn" 
-                fullLabel="Manganese"
+              <NutrientInput
+                label="Chelated Manganese"
+                fullLabel="Mn"
                 value={part.manganese}
                 onChange={(v) => onUpdate({ manganese: v })}
                 tooltip="Manganese assists in photosynthesis."
               />
-              <NutrientInput 
-                label="Zn" 
-                fullLabel="Zinc"
+              <NutrientInput
+                label="Chelated Zinc"
+                fullLabel="Zn"
                 value={part.zinc}
                 onChange={(v) => onUpdate({ zinc: v })}
                 tooltip="Zinc is important for enzyme activation."
               />
-              <NutrientInput 
-                label="B" 
-                fullLabel="Boron"
+              <NutrientInput
+                label="Boron"
+                fullLabel="B"
                 value={part.boron}
                 onChange={(v) => onUpdate({ boron: v })}
                 tooltip="Boron aids in cell wall formation."
               />
-              <NutrientInput 
-                label="Cu" 
-                fullLabel="Copper"
+              <NutrientInput
+                label="Chelated Copper"
+                fullLabel="Cu"
                 value={part.copper}
                 onChange={(v) => onUpdate({ copper: v })}
                 tooltip="Copper is involved in photosynthesis."
               />
-              <NutrientInput 
-                label="Mo" 
-                fullLabel="Molybdenum"
+              <NutrientInput
+                label="Molybdenum"
+                fullLabel="Mo"
                 value={part.molybdenum}
                 onChange={(v) => onUpdate({ molybdenum: v })}
                 tooltip="Molybdenum is essential for nitrogen fixation."
@@ -572,9 +572,9 @@ function NutrientInput({
     }`}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={`flex cursor-help items-center gap-1.5 text-foreground font-mono ${compact ? "text-xs" : "text-sm"}`}>
-            <span className="font-bold">{label}</span>
-            {!compact && <span className="text-muted-foreground text-xs">({fullLabel})</span>}
+          <span className={`flex cursor-help items-center gap-1.5 text-foreground ${compact ? "text-xs font-mono" : "text-sm"}`}>
+            <span className="font-medium">{label}</span>
+            {!compact && <span className="font-mono text-muted-foreground text-xs">({fullLabel})</span>}
             <HelpCircle className="h-3 w-3 text-muted-foreground" />
           </span>
         </TooltipTrigger>
