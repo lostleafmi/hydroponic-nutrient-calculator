@@ -182,31 +182,31 @@ export interface SaltCheckboxOption {
 }
 
 export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
-  { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "Ca(NO₃)₂", saltKeys: ["calciumNitrate"] },
-  { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "KNO₃", saltKeys: ["potassiumNitrate"] },
-  { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "K₂SO₄", saltKeys: ["potassiumSulfate"] },
+  { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
+  { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
+  { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
   {
     id: "monoPotassiumPhosphate",
-    label: "Monopotassium Phosphate (MKP)",
-    sublabel: "KH₂PO₄",
+    label: "Monopotassium Phosphate",
+    sublabel: "",
     saltKeys: ["monoPotassiumPhosphate"],
   },
   {
     id: "magnesiumSulfate",
-    label: "Magnesium Sulfate (Epsom Salt)",
-    sublabel: "MgSO₄·7H₂O",
+    label: "Magnesium Sulfate",
+    sublabel: "",
     saltKeys: ["magnesiumSulfate"],
   },
   {
     id: "ammoniumNitrateOrSulfate",
     label: "Ammonium Nitrate / Ammonium Sulfate",
-    sublabel: "NH₄NO₃ / (NH₄)₂SO₄",
+    sublabel: "",
     saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
   },
   {
     id: "chelatedMicronutrients",
     label: "Chelated Micronutrients (Fe, Mn, Zn, B, Cu, Mo)",
-    sublabel: "Fe-DTPA / MnSO₄ / ZnSO₄ / H₃BO₃ / CuSO₄ / Na₂MoO₄",
+    sublabel: "Iron EDTA/DTPA, Manganese EDTA, Copper EDTA, Zinc EDTA, Boric Acid, Sodium Molybdate, etc.",
     saltKeys: ["ironDTPA", "manganeseSulfate", "zincSulfate", "boricAcid", "copperSulfate", "sodiumMolybdate"],
   },
 ]

@@ -214,16 +214,10 @@ export function GuaranteedAnalysisScreen({
         <CardContent className="space-y-4">
           <div className="rounded-lg border border-border bg-secondary/30 p-4">
             <h4 className="mb-1 font-semibold text-foreground">
-              Check only the salts listed on your bottle
+              Check only the salts listed on the &quot;Derived from&quot; section of your label
             </h4>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Look at the &quot;guaranteed analysis&quot; or &quot;derived from&quot; section on your
-              product&apos;s label and check each salt that appears there. Most commercial nutrient
-              lines (Athena, Drip Hydro, HGV, House &amp; Garden, etc.) include a full chelated
-              micronutrient package — check &quot;Chelated Micronutrients&quot; if your label lists
-              iron, manganese, zinc, boron, copper, or molybdenum. The recipe solver will only use
-              the salts you select; if a perfect match isn&apos;t possible, we&apos;ll build the
-              closest recipe we can and flag what&apos;s off.
+              Look at the &quot;Derived from&quot; section of the guaranteed analysis on your nutrient label and check off the ingredients that are listed.
             </p>
           </div>
 
@@ -286,7 +280,7 @@ function SaltCheckboxRow({
       />
       <Label htmlFor={inputId} className="flex flex-1 cursor-pointer flex-col gap-0.5">
         <span className="font-medium text-foreground">{label}</span>
-        <span className="font-mono text-xs text-muted-foreground">{sublabel}</span>
+        {sublabel && <span className="text-xs text-muted-foreground">{sublabel}</span>}
       </Label>
     </div>
   )
