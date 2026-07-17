@@ -164,7 +164,7 @@ export function FeedingRatesScreen({
             <StockTankOptionCard
               value="ab"
               title="Combine into A + B Tanks"
-              description={`One stock tank per part in your nutrient line (${parts.length} tank${parts.length === 1 ? "" : "s"}) — matches how most multi-part feeds are used.`}
+              description="Matches your nutrient line's exact configuration"
               icon={<FlaskConical className="h-5 w-5" />}
               selected={stockTankOption === "ab"}
             />
