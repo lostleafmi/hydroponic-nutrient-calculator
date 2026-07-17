@@ -11,7 +11,7 @@ import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon,
 import {
   SALT_CHECKBOX_OPTIONS,
   type IncludedSaltsSelection,
-} from "@/lib/hydro-calc/recipe-calculator"
+} from "@/lib/hydro-calc/recipe-types"
 
 // Analysis for a single part/bottle
 export interface PartAnalysis {

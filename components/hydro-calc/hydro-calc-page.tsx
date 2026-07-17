@@ -15,7 +15,7 @@ import {
   ALL_SALTS_SELECTED,
   isSeparateNitrogenAvailable,
   type IncludedSaltsSelection,
-} from "@/lib/hydro-calc/recipe-calculator"
+} from "@/lib/hydro-calc/recipe-types"
 import { toast } from "@/hooks/use-toast"
 
 const DASHBOARD_API_BASE =

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,16 +28,15 @@ import {
 import type { PartAnalysis } from "./guaranteed-analysis-screen"
 import type { NutrientPart, StockTankOption } from "./feeding-rates-screen"
 import {
+  calculateRecipeAction,
+  type CalculateRecipeResult,
+} from "@/app/actions/calculate-recipe"
+import {
   DOSER_PRESET_RATIOS,
   RAW_SALTS,
-  applyMicroEstimates,
-  calculateDirectMixRecipe,
-  calculateDoserMultiPartRecipe,
-  calculateElementalTargets,
-  calculateMultiPartStockTankRecipe,
-  calculateSeparateCalciumRecipe,
   checkRecipeSolubility,
-  estimateEcFromElementalTargets,
+  emptyElementalTargets,
+  emptySaltAmounts,
   formatEc,
   formatGrams,
   formatMl,
@@ -51,12 +50,37 @@ import {
   roundDownToNiceRatio,
   stockTankMlPerGallon,
   stockTankMlPerLiter,
+  type DirectMixRecipe,
   type IncludedSaltsSelection,
+  type MicroKey,
+  type MultiPartTankRecipe,
   type MultiTankSolubilityReport,
   type PartStockTank,
   type SaltGapWarning,
   type SaltKey,
-} from "@/lib/hydro-calc/recipe-calculator"
+  type ThreeTankRecipe,
+} from "@/lib/hydro-calc/recipe-types"
+
+/** Rendered before the first Server Action response arrives */
+const EMPTY_TARGETS = emptyElementalTargets()
+const EMPTY_THREE_TANK_RECIPE: ThreeTankRecipe = {
+  tank1: emptySaltAmounts(),
+  tank2: emptySaltAmounts(),
+  tank3: emptySaltAmounts(),
+  hasMicroTank: false,
+  hasMicronutrients: false,
+  warnings: [],
+  isApproximate: false,
+}
+const EMPTY_MULTI_PART_RECIPE: MultiPartTankRecipe = { tanks: [], warnings: [], isApproximate: false }
+const EMPTY_DIRECT_RECIPE: DirectMixRecipe = {
+  salts: emptySaltAmounts(),
+  warnings: [],
+  isApproximate: false,
+}
+
+/** Debounce for recalculating via the server action while the user is typing */
+const CALCULATE_DEBOUNCE_MS = 250
 
 export interface RecipeInitialSettings {
   stockTankSize?: string
@@ -160,45 +184,57 @@ export function RecipeScreen({
 
   const dilutionRatio = parseFloat(concentrationRatio) || 100
 
-  const rawTargets = useMemo(
-    () => calculateElementalTargets(partsAnalysis, parts),
-    [partsAnalysis, parts]
-  )
+  // The actual recipe math (elemental targets, salt solving, EC estimate)
+  // runs exclusively on the server via `calculateRecipeAction` — this
+  // component only sends inputs and renders the plain-data result it gets
+  // back. See `lib/hydro-calc/recipe-calculator.ts` and
+  // `app/actions/calculate-recipe.ts`.
+  const [calcResult, setCalcResult] = useState<CalculateRecipeResult | null>(null)
+  const [isCalculating, setIsCalculating] = useState(false)
+  const calcRequestIdRef = useRef(0)
+  const hasCalculatedOnceRef = useRef(false)
 
-  const { targets, estimated, anchor } = useMemo(
-    () => applyMicroEstimates(rawTargets),
-    [rawTargets]
-  )
+  useEffect(() => {
+    const requestId = ++calcRequestIdRef.current
+    const delay = hasCalculatedOnceRef.current ? CALCULATE_DEBOUNCE_MS : 0
 
-  const estimatedEc = useMemo(
-    () => estimateEcFromElementalTargets(targets, includedSalts),
-    [targets, includedSalts]
-  )
-
-  const threeTankRecipe = useMemo(
-    () =>
-      calculateSeparateCalciumRecipe(
-        targets,
+    const timer = setTimeout(() => {
+      setIsCalculating(true)
+      calculateRecipeAction({
+        partsAnalysis,
+        parts,
+        stockTankOption,
+        includedSalts,
         stockVolumeLiters,
         dilutionRatio,
-        includedSalts,
-        keepMicrosSeparate
-      ),
-    [targets, stockVolumeLiters, dilutionRatio, includedSalts, keepMicrosSeparate]
-  )
+        keepMicrosSeparate,
+      })
+        .then((result) => {
+          if (calcRequestIdRef.current !== requestId) return
+          hasCalculatedOnceRef.current = true
+          setCalcResult(result)
+        })
+        .catch((err) => {
+          console.error("Recipe calculation failed:", err)
+        })
+        .finally(() => {
+          if (calcRequestIdRef.current === requestId) setIsCalculating(false)
+        })
+    }, delay)
 
-  const multiPartRecipe = useMemo(
-    () =>
-      stockTankOption === "doser"
-        ? calculateDoserMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts)
-        : calculateMultiPartStockTankRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts),
-    [stockTankOption, partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts]
-  )
+    return () => clearTimeout(timer)
+  }, [partsAnalysis, parts, stockTankOption, includedSalts, stockVolumeLiters, dilutionRatio, keepMicrosSeparate])
 
-  const directRecipe = useMemo(
-    () => calculateDirectMixRecipe(targets, stockVolumeLiters, includedSalts),
-    [targets, stockVolumeLiters, includedSalts]
+  const targets = calcResult?.targets ?? EMPTY_TARGETS
+  const anchor = calcResult?.anchor ?? null
+  const estimated = useMemo(
+    () => new Set<MicroKey>(calcResult?.estimatedMicros ?? []),
+    [calcResult]
   )
+  const estimatedEc = calcResult?.estimatedEc ?? null
+  const threeTankRecipe = calcResult?.threeTankRecipe ?? EMPTY_THREE_TANK_RECIPE
+  const multiPartRecipe = calcResult?.multiPartRecipe ?? EMPTY_MULTI_PART_RECIPE
+  const directRecipe = calcResult?.directRecipe ?? EMPTY_DIRECT_RECIPE
 
   // Unified warning surface — whichever mode is active drives which recipe's
   // gaps get reported to the user.
@@ -747,6 +783,12 @@ export function RecipeScreen({
                     the reservoir, based on the label percentages and feed-chart doses you entered.
                   </TooltipContent>
                 </Tooltip>
+                {isCalculating && hasValidData && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Calculating…
+                  </span>
+                )}
               </CardTitle>
               <CardDescription>
                 How much of each nutrient ends up in your reservoir, in ppm (parts per million).

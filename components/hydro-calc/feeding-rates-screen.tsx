@@ -28,7 +28,7 @@ export interface NutrientPart {
   unit: "ml_per_gallon" | "g_per_gallon"
 }
 
-import { isSeparateNitrogenAvailable } from "@/lib/hydro-calc/recipe-calculator"
+import { isSeparateNitrogenAvailable } from "@/lib/hydro-calc/recipe-types"
 
 export type StockTankOption = "separate" | "doser" | "ab" | "direct"
 
