@@ -750,12 +750,30 @@ export function calculateStockTankRecipe(
     tankB[key] = grams
   }
 
-  // Calcium — Ca(NO₃)₂ is the only Ca source we model
+  // Calcium & Nitrogen are solved together because Ca(NO₃)₂ is the primary
+  // source of *both*. Sizing it off the Calcium target alone (the old
+  // behavior) routinely under-supplies Nitrogen for "Core + Bloom" style
+  // two-part lines (Athena Core, and equivalents from other brands) that
+  // ship Ca(NO₃)₂ as their only enabled Nitrogen salt — the solver would
+  // then warn about an unmet Nitrogen target even though bumping up the
+  // one already-enabled Calcium Nitrate a bit further would close the gap.
+  //
+  // Strategy: size Ca(NO₃)₂ off the Calcium target first (as before), then
+  // check how much Nitrogen that leaves unmet. If there's a gap, prefer
+  // KNO₃ when available (extra Nitrogen with no Calcium overshoot), then
+  // fall back to topping up Calcium Nitrate itself before reaching for
+  // ammonium sources — more Ca(NO₃)₂ still delivers clean nitrate-form N,
+  // whereas ammonium salts introduce ammoniacal-N and (for (NH₄)₂SO₄) extra
+  // sulfate. Only once no enabled salt can supply Nitrogen at all do we
+  // report the gap.
+  let calciumNitrateGrams = 0
   if (targets.calcium > 0) {
     if (isEnabled("calciumNitrate")) {
-      assignToTankA(
-        "calciumNitrate",
-        saltGramsForTargetPpm(targets.calcium, RAW_SALTS.calciumNitrate.ca, stockVolumeLiters, dilutionRatio)
+      calciumNitrateGrams = saltGramsForTargetPpm(
+        targets.calcium,
+        RAW_SALTS.calciumNitrate.ca,
+        stockVolumeLiters,
+        dilutionRatio
       )
     } else {
       warnings.push({ element: "calcium", label: "Calcium" })
@@ -763,19 +781,32 @@ export function calculateStockTankRecipe(
   }
 
   const nitrogenFromCalciumNitrate = ppmFromSaltInStock(
-    tankA.calciumNitrate,
+    calciumNitrateGrams,
     RAW_SALTS.calciumNitrate.n,
     stockVolumeLiters,
     dilutionRatio
   )
 
-  // Remaining N — try KNO₃ first, then NH₄NO₃, then (NH₄)₂SO₄, in priority order
+  // Priority for the remaining N: KNO₃ → more Ca(NO₃)₂ → NH₄NO₃ → (NH₄)₂SO₄
   const remainingNitrogenPpm = Math.max(0, targets.nitrogen - nitrogenFromCalciumNitrate)
   if (remainingNitrogenPpm > 0) {
     if (isEnabled("potassiumNitrate")) {
       assignToTankA(
         "potassiumNitrate",
         saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.potassiumNitrate.n, stockVolumeLiters, dilutionRatio)
+      )
+    } else if (isEnabled("calciumNitrate")) {
+      // No dedicated nitrate-only salt is enabled, but Calcium Nitrate is —
+      // re-size it off the full Nitrogen target instead of the Calcium
+      // target. This grams value is always ≥ the Calcium-based amount
+      // above (it's solving for a strictly larger requirement on the same
+      // salt), so the Calcium target stays fully met, just with some
+      // unavoidable Calcium overshoot as the trade-off for hitting Nitrogen.
+      calciumNitrateGrams = saltGramsForTargetPpm(
+        targets.nitrogen,
+        RAW_SALTS.calciumNitrate.n,
+        stockVolumeLiters,
+        dilutionRatio
       )
     } else if (isEnabled("ammoniumNitrate")) {
       assignToTankA(
@@ -791,6 +822,8 @@ export function calculateStockTankRecipe(
       warnings.push({ element: "nitrogen", label: "Nitrogen" })
     }
   }
+
+  assignToTankA("calciumNitrate", calciumNitrateGrams)
 
   // Iron — Fe-DTPA is the only chelate we model
   if (targets.iron > 0) {
