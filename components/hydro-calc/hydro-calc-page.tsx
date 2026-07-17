@@ -12,6 +12,7 @@ import { FeedingRatesScreen, type NutrientPart, type StockTankOption } from "@/c
 import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-calc/recipe-screen"
 import {
   DEFAULT_INCLUDED_SALTS,
+  ALL_SALTS_SELECTED,
   isSeparateNitrogenAvailable,
   type IncludedSaltsSelection,
 } from "@/lib/hydro-calc/recipe-calculator"
@@ -161,9 +162,15 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
         if (data.stockTankOption) {
           setStockTankOption(data.stockTankOption as StockTankOption)
         }
-        // Older saved formulations won't have this field — default keeps them working as before.
+        // Older saved formulations won't have this field — default to all-enabled so they
+        // continue working without hitting the new "select at least one salt" validation.
         if (data.includedSalts && typeof data.includedSalts === "object") {
-          setIncludedSalts({ ...DEFAULT_INCLUDED_SALTS, ...data.includedSalts })
+          // Strip deprecated fields (other, otherText) that may exist in old saves
+          const { other: _other, otherText: _otherText, ...validSalts } = data.includedSalts as Record<string, unknown>
+          setIncludedSalts({ ...DEFAULT_INCLUDED_SALTS, ...(validSalts as Partial<IncludedSaltsSelection>) })
+        } else {
+          // Pre-salt-selection formulation — treat as all salts included
+          setIncludedSalts(ALL_SALTS_SELECTED)
         }
 
         // --- Pre-fill recipe screen settings ---

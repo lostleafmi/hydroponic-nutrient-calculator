@@ -1,13 +1,13 @@
 "use client"
 
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical } from "lucide-react"
+import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical, AlertCircle } from "lucide-react"
 import {
   SALT_CHECKBOX_OPTIONS,
   type IncludedSaltsSelection,
@@ -81,6 +81,8 @@ export function GuaranteedAnalysisScreen({
   onIncludedSaltsChange,
   onNext 
 }: GuaranteedAnalysisScreenProps) {
+  const [saltError, setSaltError] = useState<string | null>(null)
+
   const addPart = () => {
     const partLetter = String.fromCharCode(65 + partsAnalysis.length)
     const newPart = createEmptyPartAnalysis(`Part ${partLetter}`)
@@ -115,8 +117,22 @@ export function GuaranteedAnalysisScreen({
     updatePart(partId, { photoUrl: undefined, photoName: undefined })
   }
 
-  const toggleSalt = (id: keyof Omit<IncludedSaltsSelection, "otherText">, checked: boolean) => {
-    onIncludedSaltsChange({ ...includedSalts, [id]: checked })
+  const toggleSalt = (id: keyof IncludedSaltsSelection, checked: boolean) => {
+    const updated = { ...includedSalts, [id]: checked }
+    onIncludedSaltsChange(updated)
+    if (saltError && SALT_CHECKBOX_OPTIONS.some((opt) => updated[opt.id])) {
+      setSaltError(null)
+    }
+  }
+
+  const handleNext = () => {
+    const anyChecked = SALT_CHECKBOX_OPTIONS.some((opt) => includedSalts[opt.id])
+    if (!anyChecked) {
+      setSaltError("Please select at least one salt/input that is present in your product.")
+      return
+    }
+    setSaltError(null)
+    onNext()
   }
 
   return (
@@ -188,9 +204,9 @@ export function GuaranteedAnalysisScreen({
                 <HelpCircle className="h-4 w-4 cursor-help text-muted-foreground" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                Restricting the recipe to only the salts you have on hand keeps your shopping list
-                short. Leave everything checked if you&apos;re not sure — we&apos;ll build your
-                recipe from any common hydroponic salt.
+                Only check the salts that are actually listed on your bottle&apos;s guaranteed analysis
+                or &quot;derived from&quot; section. This tells the solver which raw salts to use when
+                replicating your product.
               </TooltipContent>
             </Tooltip>
           </CardTitle>
@@ -198,13 +214,13 @@ export function GuaranteedAnalysisScreen({
         <CardContent className="space-y-4">
           <div className="rounded-lg border border-border bg-secondary/30 p-4">
             <h4 className="mb-1 font-semibold text-foreground">
-              Salts / Inputs Listed on the Guaranteed Analysis or &quot;Derived From&quot;
-              (check all that apply)
+              Check only the salts listed on your bottle
             </h4>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              We&apos;ll only use the salts you check below to build your recipe. If a perfect
-              match isn&apos;t possible with just these, we&apos;ll show you the closest recipe we
-              can and flag what&apos;s off.
+              Look at the &quot;guaranteed analysis&quot; or &quot;derived from&quot; section on your
+              product&apos;s label and check each salt that appears there. The recipe solver will
+              only use the salts you select. If a perfect match isn&apos;t possible with just
+              these, we&apos;ll build the closest recipe we can and flag what&apos;s off.
             </p>
           </div>
 
@@ -219,40 +235,18 @@ export function GuaranteedAnalysisScreen({
                 onCheckedChange={(checked) => toggleSalt(option.id, checked)}
               />
             ))}
-
-            {/* Other — free-text custom salts, informational only */}
-            <div
-              className={`flex flex-col gap-2 rounded-lg border-2 p-3 transition-colors sm:col-span-2 ${
-                includedSalts.other ? "border-primary/40 bg-primary/5" : "border-border bg-secondary/20"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Checkbox
-                  id="salt-other"
-                  checked={includedSalts.other}
-                  onCheckedChange={(checked) => toggleSalt("other", checked === true)}
-                />
-                <Label htmlFor="salt-other" className="cursor-pointer font-medium text-foreground">
-                  Other
-                </Label>
-              </div>
-              <Input
-                value={includedSalts.otherText}
-                onChange={(e) => onIncludedSaltsChange({ ...includedSalts, otherText: e.target.value })}
-                placeholder="e.g., Calcium Chloride, Magnesium Nitrate…"
-                className="border-2 border-border bg-background"
-              />
-              <p className="text-xs text-muted-foreground">
-                Custom salts are saved with your formulation for reference, but aren&apos;t used by
-                the recipe solver yet.
-              </p>
-            </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
-        <Button onClick={onNext} className="gap-2">
+      <div className="flex flex-col items-end gap-2">
+        {saltError && (
+          <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{saltError}</span>
+          </div>
+        )}
+        <Button onClick={handleNext} className="gap-2">
           Continue to Feeding Rates
           <ArrowRight className="h-4 w-4" />
         </Button>

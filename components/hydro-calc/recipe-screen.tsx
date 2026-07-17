@@ -1137,18 +1137,6 @@ export function RecipeScreen({
                   </Fragment>
                 ))}
             </div>
-            {includedSalts.other && includedSalts.otherText.trim() && (
-              <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">
-                  Other salts you noted
-                </p>
-                <p className="text-sm text-foreground">{includedSalts.otherText}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Saved with your formulation for reference — not yet factored into the recipe
-                  above.
-                </p>
-              </div>
-            )}
             <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-4">
               <h4 className="font-medium text-foreground mb-2">Where to Buy</h4>
               <p className="text-sm text-muted-foreground">

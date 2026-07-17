@@ -1,0 +1,8 @@
+allowBuilds:
+  '@clerk/shared': set this to true or false
+  sharp: set this to true or false
+minimumReleaseAgeExclude:
+  - '@clerk/backend@3.9.0'
+  - '@clerk/nextjs@7.5.11'
+  - '@clerk/react@6.11.3'
+  - '@clerk/shared@4.23.0'

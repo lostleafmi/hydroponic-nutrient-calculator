@@ -141,52 +141,60 @@ export type SaltKey = keyof typeof RAW_SALTS
 export interface IncludedSaltsSelection {
   calciumNitrate: boolean
   potassiumNitrate: boolean
-  magnesiumSulfate: boolean
-  monoPotassiumPhosphate: boolean
   potassiumSulfate: boolean
+  monoPotassiumPhosphate: boolean
+  magnesiumSulfate: boolean
   ammoniumNitrateOrSulfate: boolean
   ironChelate: boolean
-  other: boolean
-  otherText: string
 }
 
+/** Default for new sessions — all unchecked so the user consciously selects what is in their product. */
 export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
+  calciumNitrate: false,
+  potassiumNitrate: false,
+  potassiumSulfate: false,
+  monoPotassiumPhosphate: false,
+  magnesiumSulfate: false,
+  ammoniumNitrateOrSulfate: false,
+  ironChelate: false,
+}
+
+/** Used when loading old saved formulations that pre-date per-salt selection. */
+export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
   calciumNitrate: true,
   potassiumNitrate: true,
-  magnesiumSulfate: true,
-  monoPotassiumPhosphate: true,
   potassiumSulfate: true,
+  monoPotassiumPhosphate: true,
+  magnesiumSulfate: true,
   ammoniumNitrateOrSulfate: true,
   ironChelate: true,
-  other: true,
-  otherText: "",
 }
 
 /** Checkbox options rendered on the "Salts & Inputs Included" screen */
 export interface SaltCheckboxOption {
-  id: keyof Omit<IncludedSaltsSelection, "otherText">
+  id: keyof IncludedSaltsSelection
   label: string
   sublabel: string
-  /** Underlying solver salt keys this checkbox gates (empty for "Other") */
+  /** Underlying solver salt keys this checkbox gates */
   saltKeys: SaltKey[]
 }
 
 export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "Ca(NO₃)₂", saltKeys: ["calciumNitrate"] },
   { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "KNO₃", saltKeys: ["potassiumNitrate"] },
-  {
-    id: "magnesiumSulfate",
-    label: "Magnesium Sulfate (Epsom Salt)",
-    sublabel: "MgSO₄·7H₂O",
-    saltKeys: ["magnesiumSulfate"],
-  },
+  { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "K₂SO₄", saltKeys: ["potassiumSulfate"] },
   {
     id: "monoPotassiumPhosphate",
     label: "Monopotassium Phosphate (MKP)",
     sublabel: "KH₂PO₄",
     saltKeys: ["monoPotassiumPhosphate"],
   },
-  { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "K₂SO₄", saltKeys: ["potassiumSulfate"] },
+  {
+    id: "magnesiumSulfate",
+    label: "Magnesium Sulfate (Epsom Salt)",
+    sublabel: "MgSO₄·7H₂O",
+    saltKeys: ["magnesiumSulfate"],
+  },
   {
     id: "ammoniumNitrateOrSulfate",
     label: "Ammonium Nitrate / Ammonium Sulfate",
