@@ -2,11 +2,23 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -24,7 +36,16 @@ import {
   Droplets,
   BookmarkPlus,
   Loader2,
+  CalendarPlus,
+  CalendarCheck2,
 } from "lucide-react"
+import {
+  addFeedingScheduleEntry,
+  getFeedingScheduleEntries,
+  formatWeekRanges,
+  STAGE_WEEK_COUNT,
+  type FeedingStage,
+} from "@/lib/hydro-calc/feeding-scheduler"
 import type { PartAnalysis } from "./guaranteed-analysis-screen"
 import type { NutrientPart, StockTankOption } from "./feeding-rates-screen"
 import {
@@ -123,6 +144,30 @@ export function RecipeScreen({
   const { getToken } = useAuth()
   const { toast } = useToast()
   const [isSaving, setIsSaving] = useState(false)
+
+  const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState(false)
+  const [isSavingSchedulerEntry, setIsSavingSchedulerEntry] = useState(false)
+  const [schedulerRecipeName, setSchedulerRecipeName] = useState("")
+  const [schedulerStage, setSchedulerStage] = useState<FeedingStage>("Vegetative")
+  const [schedulerWeeks, setSchedulerWeeks] = useState<Set<number>>(new Set())
+  const [schedulerNotes, setSchedulerNotes] = useState("")
+  const [schedulerEntryCount, setSchedulerEntryCount] = useState(0)
+
+  // Pick up any entries already saved (Clerk or localStorage) so the "Added
+  // to Scheduler" indicator reflects reality across reloads, not just this session.
+  useEffect(() => {
+    let isMounted = true
+    getFeedingScheduleEntries()
+      .then((entries) => {
+        if (isMounted) setSchedulerEntryCount(entries.length)
+      })
+      .catch((err) => {
+        console.error("Failed to load feeding schedule entries:", err)
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const [stockTankSize, setStockTankSize] = useState(initialSettings.stockTankSize ?? "5")
   const [stockTankUnit, setStockTankUnit] = useState<"gallons" | "liters">(
@@ -533,6 +578,95 @@ export function RecipeScreen({
       })
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  // Sensible starting point for the scheduler modal's editable name field —
+  // there's no persisted "formulation name" concept yet, so we fall back to
+  // a name built from the nutrient parts currently in the recipe.
+  const defaultSchedulerRecipeName = useMemo(() => {
+    const partNames = parts.map((p) => p.name.trim()).filter(Boolean)
+    return partNames.length > 0 ? `${partNames.join(" + ")} Recipe` : "My Recipe"
+  }, [parts])
+
+  const openSchedulerModal = () => {
+    setSchedulerRecipeName(defaultSchedulerRecipeName)
+    setSchedulerStage("Vegetative")
+    setSchedulerWeeks(new Set())
+    setSchedulerNotes("")
+    setIsSchedulerModalOpen(true)
+  }
+
+  const handleSchedulerStageChange = (value: string) => {
+    setSchedulerStage(value as FeedingStage)
+    // Week ranges differ per stage, so clear the selection to avoid carrying
+    // over weeks that don't exist in the newly selected stage.
+    setSchedulerWeeks(new Set())
+  }
+
+  const toggleSchedulerWeek = (week: number) => {
+    setSchedulerWeeks((prev) => {
+      const next = new Set(prev)
+      if (next.has(week)) {
+        next.delete(week)
+      } else {
+        next.add(week)
+      }
+      return next
+    })
+  }
+
+  const schedulerWeekCount = STAGE_WEEK_COUNT[schedulerStage]
+  const selectAllSchedulerWeeks = () =>
+    setSchedulerWeeks(new Set(Array.from({ length: schedulerWeekCount }, (_, i) => i + 1)))
+  const clearSchedulerWeeks = () => setSchedulerWeeks(new Set())
+
+  const handleSaveToScheduler = async () => {
+    if (isSavingSchedulerEntry) return
+
+    const trimmedName = schedulerRecipeName.trim()
+    if (!trimmedName) {
+      toast({
+        title: "Recipe name required",
+        description: "Give this recipe a name before adding it to the scheduler.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (schedulerWeeks.size === 0) {
+      toast({
+        title: "Select at least one week",
+        description: "Choose which weeks this recipe applies to.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSavingSchedulerEntry(true)
+    try {
+      const trimmedNotes = schedulerNotes.trim()
+      const entry = await addFeedingScheduleEntry({
+        recipeName: trimmedName,
+        stage: schedulerStage,
+        weeks: Array.from(schedulerWeeks),
+        notes: trimmedNotes || undefined,
+      })
+
+      setSchedulerEntryCount((count) => count + 1)
+      setIsSchedulerModalOpen(false)
+
+      toast({
+        title: "Added to Feeding Scheduler",
+        description: `${entry.recipeName} — ${entry.stage}, ${formatWeekRanges(entry.weeks)}`,
+      })
+    } catch (err) {
+      toast({
+        title: "Failed to add to Feeding Scheduler",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingSchedulerEntry(false)
     }
   }
 
@@ -1333,6 +1467,34 @@ export function RecipeScreen({
         </Card>
       )}
 
+      {/* Feeding Scheduler integration — first step toward a full scheduler feature */}
+      {hasValidData && (
+        <Card className="border-2 border-primary/30 bg-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl text-foreground">
+              <CalendarPlus className="h-5 w-5 text-primary" />
+              <span>Feeding Scheduler</span>
+            </CardTitle>
+            <CardDescription>
+              Assign this recipe to a grow stage and week range so you can track it in your
+              Feeding Scheduler.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-3">
+            <Button onClick={openSchedulerModal} variant="outline" className="gap-2">
+              <CalendarPlus className="h-4 w-4" />
+              Add to Feeding Scheduler
+            </Button>
+            {schedulerEntryCount > 0 && (
+              <Badge variant="secondary" className="gap-1.5 py-1 text-emerald-700 dark:text-emerald-400">
+                <CalendarCheck2 className="h-3.5 w-3.5" />
+                Added to Scheduler{schedulerEntryCount > 1 ? ` (${schedulerEntryCount})` : ""}
+              </Badge>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button variant="outline" onClick={onBack} className="gap-2">
@@ -1355,6 +1517,133 @@ export function RecipeScreen({
           </Button>
         )}
       </div>
+
+      {/* Add to Feeding Scheduler modal */}
+      <Dialog open={isSchedulerModalOpen} onOpenChange={setIsSchedulerModalOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add to Feeding Scheduler</DialogTitle>
+            <DialogDescription>
+              Save this recipe to a grow stage and week range so you can track it later.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div>
+              <Label htmlFor="scheduler-recipe-name" className="mb-1.5 block text-sm font-medium">
+                Recipe name
+              </Label>
+              <Input
+                id="scheduler-recipe-name"
+                value={schedulerRecipeName}
+                onChange={(e) => setSchedulerRecipeName(e.target.value)}
+                placeholder="e.g. Blue Dream Veg Mix"
+                className="border-2 border-border"
+              />
+            </div>
+
+            <div>
+              <Label className="mb-1.5 block text-sm font-medium">Growth stage</Label>
+              <RadioGroup
+                value={schedulerStage}
+                onValueChange={handleSchedulerStageChange}
+                className="grid grid-cols-2 gap-2"
+              >
+                {(["Vegetative", "Flowering"] as const).map((stage) => (
+                  <Label
+                    key={stage}
+                    htmlFor={`scheduler-stage-${stage}`}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-colors ${
+                      schedulerStage === stage
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-secondary/20 text-muted-foreground hover:border-primary/50"
+                    }`}
+                  >
+                    <RadioGroupItem value={stage} id={`scheduler-stage-${stage}`} />
+                    {stage}
+                  </Label>
+                ))}
+              </RadioGroup>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">
+                  Weeks (1–{schedulerWeekCount} {schedulerStage})
+                </Label>
+                <div className="flex gap-3 text-xs">
+                  <button
+                    type="button"
+                    onClick={selectAllSchedulerWeeks}
+                    className="text-primary underline-offset-2 hover:underline"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSchedulerWeeks}
+                    className="text-muted-foreground underline-offset-2 hover:underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-5">
+                {Array.from({ length: schedulerWeekCount }, (_, i) => i + 1).map((week) => (
+                  <Label
+                    key={week}
+                    htmlFor={`scheduler-week-${week}`}
+                    className={`flex cursor-pointer items-center gap-1.5 rounded border-2 px-2 py-1.5 text-xs font-medium transition-colors ${
+                      schedulerWeeks.has(week)
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-secondary/20 text-muted-foreground hover:border-primary/50"
+                    }`}
+                  >
+                    <Checkbox
+                      id={`scheduler-week-${week}`}
+                      checked={schedulerWeeks.has(week)}
+                      onCheckedChange={() => toggleSchedulerWeek(week)}
+                    />
+                    Wk {week}
+                  </Label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="scheduler-notes" className="mb-1.5 block text-sm font-medium">
+                Notes <span className="text-muted-foreground">(optional)</span>
+              </Label>
+              <Textarea
+                id="scheduler-notes"
+                value={schedulerNotes}
+                onChange={(e) => setSchedulerNotes(e.target.value)}
+                placeholder="Any adjustments or reminders for this stage…"
+                rows={3}
+                className="border-2 border-border"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsSchedulerModalOpen(false)}
+              disabled={isSavingSchedulerEntry}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveToScheduler} disabled={isSavingSchedulerEntry} className="gap-2">
+              {isSavingSchedulerEntry ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CalendarPlus className="h-4 w-4" />
+              )}
+              {isSavingSchedulerEntry ? "Saving…" : "Save to Scheduler"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
