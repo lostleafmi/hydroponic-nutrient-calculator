@@ -3,9 +3,15 @@
 import { useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X } from "lucide-react"
+import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical } from "lucide-react"
+import {
+  SALT_CHECKBOX_OPTIONS,
+  type IncludedSaltsSelection,
+} from "@/lib/hydro-calc/recipe-calculator"
 
 // Analysis for a single part/bottle
 export interface PartAnalysis {
@@ -46,6 +52,8 @@ export interface NutrientAnalysis {
 interface GuaranteedAnalysisScreenProps {
   partsAnalysis: PartAnalysis[]
   onPartsAnalysisChange: (parts: PartAnalysis[]) => void
+  includedSalts: IncludedSaltsSelection
+  onIncludedSaltsChange: (salts: IncludedSaltsSelection) => void
   onNext: () => void
 }
 
@@ -69,6 +77,8 @@ export const createEmptyPartAnalysis = (name: string, id?: string): PartAnalysis
 export function GuaranteedAnalysisScreen({ 
   partsAnalysis, 
   onPartsAnalysisChange, 
+  includedSalts,
+  onIncludedSaltsChange,
   onNext 
 }: GuaranteedAnalysisScreenProps) {
   const addPart = () => {
@@ -103,6 +113,10 @@ export function GuaranteedAnalysisScreen({
     const part = partsAnalysis.find(p => p.id === partId)
     if (part?.photoUrl) URL.revokeObjectURL(part.photoUrl)
     updatePart(partId, { photoUrl: undefined, photoName: undefined })
+  }
+
+  const toggleSalt = (id: keyof Omit<IncludedSaltsSelection, "otherText">, checked: boolean) => {
+    onIncludedSaltsChange({ ...includedSalts, [id]: checked })
   }
 
   return (
@@ -163,12 +177,120 @@ export function GuaranteedAnalysisScreen({
         </CardContent>
       </Card>
 
+      {/* Salts & Inputs Included */}
+      <Card className="border-2 border-border bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-xl text-foreground">
+            <FlaskConical className="h-5 w-5 text-primary" />
+            <span>Salts & Inputs Included</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="h-4 w-4 cursor-help text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                Restricting the recipe to only the salts you have on hand keeps your shopping list
+                short. Leave everything checked if you&apos;re not sure — we&apos;ll build your
+                recipe from any common hydroponic salt.
+              </TooltipContent>
+            </Tooltip>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <h4 className="mb-1 font-semibold text-foreground">
+              Salts / Inputs Listed on the Guaranteed Analysis or &quot;Derived From&quot;
+              (check all that apply)
+            </h4>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              We&apos;ll only use the salts you check below to build your recipe. If a perfect
+              match isn&apos;t possible with just these, we&apos;ll show you the closest recipe we
+              can and flag what&apos;s off.
+            </p>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            {SALT_CHECKBOX_OPTIONS.map((option) => (
+              <SaltCheckboxRow
+                key={option.id}
+                id={option.id}
+                label={option.label}
+                sublabel={option.sublabel}
+                checked={includedSalts[option.id]}
+                onCheckedChange={(checked) => toggleSalt(option.id, checked)}
+              />
+            ))}
+
+            {/* Other — free-text custom salts, informational only */}
+            <div
+              className={`flex flex-col gap-2 rounded-lg border-2 p-3 transition-colors sm:col-span-2 ${
+                includedSalts.other ? "border-primary/40 bg-primary/5" : "border-border bg-secondary/20"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="salt-other"
+                  checked={includedSalts.other}
+                  onCheckedChange={(checked) => toggleSalt("other", checked === true)}
+                />
+                <Label htmlFor="salt-other" className="cursor-pointer font-medium text-foreground">
+                  Other
+                </Label>
+              </div>
+              <Input
+                value={includedSalts.otherText}
+                onChange={(e) => onIncludedSaltsChange({ ...includedSalts, otherText: e.target.value })}
+                placeholder="e.g., Calcium Chloride, Magnesium Nitrate…"
+                className="border-2 border-border bg-background"
+              />
+              <p className="text-xs text-muted-foreground">
+                Custom salts are saved with your formulation for reference, but aren&apos;t used by
+                the recipe solver yet.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex justify-end">
         <Button onClick={onNext} className="gap-2">
           Continue to Feeding Rates
           <ArrowRight className="h-4 w-4" />
         </Button>
       </div>
+    </div>
+  )
+}
+
+function SaltCheckboxRow({
+  id,
+  label,
+  sublabel,
+  checked,
+  onCheckedChange,
+}: {
+  id: string
+  label: string
+  sublabel: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  const inputId = `salt-${id}`
+  return (
+    <div
+      className={`flex items-start gap-3 rounded-lg border-2 p-3 transition-colors ${
+        checked ? "border-primary/40 bg-primary/5" : "border-border bg-secondary/20"
+      }`}
+    >
+      <Checkbox
+        id={inputId}
+        checked={checked}
+        onCheckedChange={(next) => onCheckedChange(next === true)}
+        className="mt-0.5"
+      />
+      <Label htmlFor={inputId} className="flex flex-1 cursor-pointer flex-col gap-0.5">
+        <span className="font-medium text-foreground">{label}</span>
+        <span className="font-mono text-xs text-muted-foreground">{sublabel}</span>
+      </Label>
     </div>
   )
 }

@@ -78,6 +78,8 @@ export interface SaltAmounts {
   monoPotassiumPhosphate: number
   magnesiumSulfate: number
   potassiumSulfate: number
+  ammoniumNitrate: number
+  ammoniumSulfate: number
   ironDTPA: number
   manganeseSulfate: number
   zincSulfate: number
@@ -86,9 +88,19 @@ export interface SaltAmounts {
   sodiumMolybdate: number
 }
 
+/** An element target that couldn't be (fully) matched with the currently-enabled salts */
+export interface SaltGapWarning {
+  element: keyof ElementalTargets
+  label: string
+}
+
 export interface TankRecipe {
   tankA: SaltAmounts
   tankB: SaltAmounts
+  /** Targets that couldn't be matched because the salt that would supply them is unchecked */
+  warnings?: SaltGapWarning[]
+  /** True when one or more targets couldn't be perfectly matched with the enabled salts */
+  isApproximate?: boolean
 }
 
 export interface ThreeTankRecipe {
@@ -97,6 +109,8 @@ export interface ThreeTankRecipe {
   tank3: SaltAmounts
   /** True when Tank 3 actually holds any salt — false for micro-free recipes. */
   hasMicroTank: boolean
+  warnings?: SaltGapWarning[]
+  isApproximate?: boolean
 }
 
 export const RAW_SALTS = {
@@ -105,6 +119,8 @@ export const RAW_SALTS = {
   monoPotassiumPhosphate: { name: "Mono Potassium Phosphate (MKP)", formula: "KH₂PO₄", k: 0.287, p: 0.228 },
   magnesiumSulfate: { name: "Magnesium Sulfate (Epsom Salt)", formula: "MgSO₄·7H₂O", mg: 0.099, s: 0.130 },
   potassiumSulfate: { name: "Potassium Sulfate", formula: "K₂SO₄", k: 0.449, s: 0.184 },
+  ammoniumNitrate: { name: "Ammonium Nitrate", formula: "NH₄NO₃", n: 0.35 },
+  ammoniumSulfate: { name: "Ammonium Sulfate", formula: "(NH₄)₂SO₄", n: 0.212, s: 0.243 },
   ironDTPA: { name: "Iron DTPA 11%", formula: "Fe-DTPA", fe: 0.11 },
   manganeseSulfate: { name: "Manganese Sulfate", formula: "MnSO₄·H₂O", mn: 0.325 },
   zincSulfate: { name: "Zinc Sulfate", formula: "ZnSO₄·7H₂O", zn: 0.227 },
@@ -114,6 +130,112 @@ export const RAW_SALTS = {
 } as const
 
 export type SaltKey = keyof typeof RAW_SALTS
+
+/**
+ * User-facing "Salts & Inputs Included" selection captured on the Guaranteed
+ * Analysis screen. Mirrors the checkboxes shown in the UI — each boolean
+ * gates one or more underlying `SaltKey`s in the solver (see
+ * `getEnabledSaltKeys`). Micronutrient sulfates (Mn, Zn, B, Cu, Mo) aren't
+ * gated here since there's no practical alternative source for them.
+ */
+export interface IncludedSaltsSelection {
+  calciumNitrate: boolean
+  potassiumNitrate: boolean
+  magnesiumSulfate: boolean
+  monoPotassiumPhosphate: boolean
+  potassiumSulfate: boolean
+  ammoniumNitrateOrSulfate: boolean
+  ironChelate: boolean
+  other: boolean
+  otherText: string
+}
+
+export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
+  calciumNitrate: true,
+  potassiumNitrate: true,
+  magnesiumSulfate: true,
+  monoPotassiumPhosphate: true,
+  potassiumSulfate: true,
+  ammoniumNitrateOrSulfate: true,
+  ironChelate: true,
+  other: true,
+  otherText: "",
+}
+
+/** Checkbox options rendered on the "Salts & Inputs Included" screen */
+export interface SaltCheckboxOption {
+  id: keyof Omit<IncludedSaltsSelection, "otherText">
+  label: string
+  sublabel: string
+  /** Underlying solver salt keys this checkbox gates (empty for "Other") */
+  saltKeys: SaltKey[]
+}
+
+export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
+  { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "Ca(NO₃)₂", saltKeys: ["calciumNitrate"] },
+  { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "KNO₃", saltKeys: ["potassiumNitrate"] },
+  {
+    id: "magnesiumSulfate",
+    label: "Magnesium Sulfate (Epsom Salt)",
+    sublabel: "MgSO₄·7H₂O",
+    saltKeys: ["magnesiumSulfate"],
+  },
+  {
+    id: "monoPotassiumPhosphate",
+    label: "Monopotassium Phosphate (MKP)",
+    sublabel: "KH₂PO₄",
+    saltKeys: ["monoPotassiumPhosphate"],
+  },
+  { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "K₂SO₄", saltKeys: ["potassiumSulfate"] },
+  {
+    id: "ammoniumNitrateOrSulfate",
+    label: "Ammonium Nitrate / Ammonium Sulfate",
+    sublabel: "NH₄NO₃ / (NH₄)₂SO₄",
+    saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
+  },
+  {
+    id: "ironChelate",
+    label: "Iron Chelate (EDTA / DTPA)",
+    sublabel: "Fe-EDTA / Fe-DTPA",
+    saltKeys: ["ironDTPA"],
+  },
+]
+
+/** Salts that are always available to the solver — no realistic alternative source exists */
+const ALWAYS_ON_SALT_KEYS: SaltKey[] = [
+  "manganeseSulfate",
+  "zincSulfate",
+  "boricAcid",
+  "copperSulfate",
+  "sodiumMolybdate",
+]
+
+/**
+ * Resolve which raw salts the solver is allowed to use from the checkbox
+ * selection. When `selection` is omitted, or when every gateable checkbox is
+ * unchecked, we fall back to "any common salt" (the pre-feature behavior) so
+ * existing users and empty/default state never produce an impossible recipe.
+ */
+export function getEnabledSaltKeys(selection?: IncludedSaltsSelection): Set<SaltKey> {
+  const allSaltKeys = Object.keys(RAW_SALTS) as SaltKey[]
+
+  if (!selection) {
+    return new Set(allSaltKeys)
+  }
+
+  const anyChecked = SALT_CHECKBOX_OPTIONS.some((opt) => selection[opt.id])
+  if (!anyChecked) {
+    return new Set(allSaltKeys)
+  }
+
+  const enabled = new Set<SaltKey>(ALWAYS_ON_SALT_KEYS)
+  for (const opt of SALT_CHECKBOX_OPTIONS) {
+    if (selection[opt.id]) {
+      for (const key of opt.saltKeys) enabled.add(key)
+    }
+  }
+  return enabled
+}
 
 /** Max parts for which the Separate Nitrogen tapering layout is offered */
 export const SEPARATE_NITROGEN_MAX_PARTS = 3
@@ -126,10 +248,12 @@ export function isSeparateNitrogenAvailable(partCount: number): boolean {
 export const SALT_DISPLAY_ORDER: SaltKey[] = [
   "calciumNitrate",
   "potassiumNitrate",
+  "ammoniumNitrate",
   "ironDTPA",
   "monoPotassiumPhosphate",
   "magnesiumSulfate",
   "potassiumSulfate",
+  "ammoniumSulfate",
   "manganeseSulfate",
   "zincSulfate",
   "boricAcid",
@@ -149,6 +273,8 @@ export interface PartStockTank {
 
 export interface MultiPartTankRecipe {
   tanks: PartStockTank[]
+  warnings?: SaltGapWarning[]
+  isApproximate?: boolean
 }
 
 /**
@@ -165,6 +291,7 @@ export interface MultiPartTankRecipe {
 export const TANK_A_SALTS = [
   "calciumNitrate",
   "potassiumNitrate",
+  "ammoniumNitrate",
   "ironDTPA",
 ] as const satisfies readonly SaltKey[]
 
@@ -172,6 +299,7 @@ export const TANK_B_SALTS = [
   "monoPotassiumPhosphate",
   "magnesiumSulfate",
   "potassiumSulfate",
+  "ammoniumSulfate",
   "manganeseSulfate",
   "zincSulfate",
   "boricAcid",
@@ -195,9 +323,11 @@ export const TANK_1_SALTS = ["calciumNitrate"] as const satisfies readonly SaltK
 
 export const TANK_2_SALTS = [
   "potassiumNitrate",
+  "ammoniumNitrate",
   "monoPotassiumPhosphate",
   "magnesiumSulfate",
   "potassiumSulfate",
+  "ammoniumSulfate",
 ] as const satisfies readonly SaltKey[]
 
 export const TANK_3_SALTS = [
@@ -253,6 +383,8 @@ export const SOLUBILITY_LIMITS_G_PER_L: Record<SaltKey, number> = {
   monoPotassiumPhosphate: 226,
   magnesiumSulfate: 710,
   potassiumSulfate: 111,
+  ammoniumNitrate: 1920,
+  ammoniumSulfate: 754,
   ironDTPA: 500,
   manganeseSulfate: 700,
   zincSulfate: 960,
@@ -442,6 +574,8 @@ function emptySaltAmounts(): SaltAmounts {
     monoPotassiumPhosphate: 0,
     magnesiumSulfate: 0,
     potassiumSulfate: 0,
+    ammoniumNitrate: 0,
+    ammoniumSulfate: 0,
     ironDTPA: 0,
     manganeseSulfate: 0,
     zincSulfate: 0,
@@ -579,23 +713,34 @@ function ppmFromSaltInStock(
 
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
- * Tank A — Ca(NO₃)₂, KNO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
- * Tank B — MKP, MgSO₄, K₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
+ * Tank A — Ca(NO₃)₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
+ * Tank B — MKP, MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
  * never coexist in a concentrated stock solution where they would precipitate.
+ *
+ * `includedSalts` restricts which salts the solver is allowed to reach for
+ * (see `getEnabledSaltKeys`). When a target's only source salt is disabled,
+ * that target is left unmet and reported in `warnings` — the caller should
+ * surface a "closest possible recipe" notice. Micronutrient sulfates are
+ * always available regardless of the selection.
  */
 export function calculateStockTankRecipe(
   targets: ElementalTargets,
   stockVolumeLiters: number,
-  dilutionRatio: number
+  dilutionRatio: number,
+  includedSalts?: IncludedSaltsSelection
 ): TankRecipe {
   const tankA = emptySaltAmounts()
   const tankB = emptySaltAmounts()
+  const warnings: SaltGapWarning[] = []
 
   if (stockVolumeLiters <= 0 || dilutionRatio <= 0) {
-    return { tankA, tankB }
+    return { tankA, tankB, warnings, isApproximate: false }
   }
+
+  const enabled = getEnabledSaltKeys(includedSalts)
+  const isEnabled = (key: SaltKey) => enabled.has(key)
 
   const assignToTankA = (key: (typeof TANK_A_SALTS)[number], grams: number) => {
     tankA[key] = grams
@@ -604,16 +749,17 @@ export function calculateStockTankRecipe(
     tankB[key] = grams
   }
 
-  // Tank A — calcium-side (Ca²⁺ + nitrates + chelated Fe)
-  assignToTankA(
-    "calciumNitrate",
-    saltGramsForTargetPpm(
-      targets.calcium,
-      RAW_SALTS.calciumNitrate.ca,
-      stockVolumeLiters,
-      dilutionRatio
-    )
-  )
+  // Calcium — Ca(NO₃)₂ is the only Ca source we model
+  if (targets.calcium > 0) {
+    if (isEnabled("calciumNitrate")) {
+      assignToTankA(
+        "calciumNitrate",
+        saltGramsForTargetPpm(targets.calcium, RAW_SALTS.calciumNitrate.ca, stockVolumeLiters, dilutionRatio)
+      )
+    } else {
+      warnings.push({ element: "calcium", label: "Calcium" })
+    }
+  }
 
   const nitrogenFromCalciumNitrate = ppmFromSaltInStock(
     tankA.calciumNitrate,
@@ -622,47 +768,64 @@ export function calculateStockTankRecipe(
     dilutionRatio
   )
 
+  // Remaining N — try KNO₃ first, then NH₄NO₃, then (NH₄)₂SO₄, in priority order
   const remainingNitrogenPpm = Math.max(0, targets.nitrogen - nitrogenFromCalciumNitrate)
-  assignToTankA(
-    "potassiumNitrate",
-    saltGramsForTargetPpm(
-      remainingNitrogenPpm,
-      RAW_SALTS.potassiumNitrate.n,
-      stockVolumeLiters,
-      dilutionRatio
-    )
-  )
+  if (remainingNitrogenPpm > 0) {
+    if (isEnabled("potassiumNitrate")) {
+      assignToTankA(
+        "potassiumNitrate",
+        saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.potassiumNitrate.n, stockVolumeLiters, dilutionRatio)
+      )
+    } else if (isEnabled("ammoniumNitrate")) {
+      assignToTankA(
+        "ammoniumNitrate",
+        saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.ammoniumNitrate.n, stockVolumeLiters, dilutionRatio)
+      )
+    } else if (isEnabled("ammoniumSulfate")) {
+      assignToTankB(
+        "ammoniumSulfate",
+        saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.ammoniumSulfate.n, stockVolumeLiters, dilutionRatio)
+      )
+    } else {
+      warnings.push({ element: "nitrogen", label: "Nitrogen" })
+    }
+  }
 
-  assignToTankA(
-    "ironDTPA",
-    saltGramsForTargetPpm(
-      targets.iron,
-      RAW_SALTS.ironDTPA.fe,
-      stockVolumeLiters,
-      dilutionRatio
-    )
-  )
+  // Iron — Fe-DTPA is the only chelate we model
+  if (targets.iron > 0) {
+    if (isEnabled("ironDTPA")) {
+      assignToTankA(
+        "ironDTPA",
+        saltGramsForTargetPpm(targets.iron, RAW_SALTS.ironDTPA.fe, stockVolumeLiters, dilutionRatio)
+      )
+    } else {
+      warnings.push({ element: "iron", label: "Iron" })
+    }
+  }
 
-  // Tank B — phosphate/sulfate-side (kept apart from Ca to prevent precipitation)
-  assignToTankB(
-    "monoPotassiumPhosphate",
-    saltGramsForTargetPpm(
-      targets.phosphorus,
-      RAW_SALTS.monoPotassiumPhosphate.p,
-      stockVolumeLiters,
-      dilutionRatio
-    )
-  )
+  // Phosphorus — MKP is the only P source we model
+  if (targets.phosphorus > 0) {
+    if (isEnabled("monoPotassiumPhosphate")) {
+      assignToTankB(
+        "monoPotassiumPhosphate",
+        saltGramsForTargetPpm(targets.phosphorus, RAW_SALTS.monoPotassiumPhosphate.p, stockVolumeLiters, dilutionRatio)
+      )
+    } else {
+      warnings.push({ element: "phosphorus", label: "Phosphorus" })
+    }
+  }
 
-  assignToTankB(
-    "magnesiumSulfate",
-    saltGramsForTargetPpm(
-      targets.magnesium,
-      RAW_SALTS.magnesiumSulfate.mg,
-      stockVolumeLiters,
-      dilutionRatio
-    )
-  )
+  // Magnesium — MgSO₄ is the only Mg source we model
+  if (targets.magnesium > 0) {
+    if (isEnabled("magnesiumSulfate")) {
+      assignToTankB(
+        "magnesiumSulfate",
+        saltGramsForTargetPpm(targets.magnesium, RAW_SALTS.magnesiumSulfate.mg, stockVolumeLiters, dilutionRatio)
+      )
+    } else {
+      warnings.push({ element: "magnesium", label: "Magnesium" })
+    }
+  }
 
   const potassiumFromMkp = ppmFromSaltInStock(
     tankB.monoPotassiumPhosphate,
@@ -683,71 +846,49 @@ export function calculateStockTankRecipe(
     targets.potassium - potassiumFromMkp - potassiumFromPotassiumNitrate
   )
 
-  assignToTankB(
-    "potassiumSulfate",
-    saltGramsForTargetPpm(
-      remainingPotassiumPpm,
-      RAW_SALTS.potassiumSulfate.k,
-      stockVolumeLiters,
-      dilutionRatio
-    )
-  )
+  if (remainingPotassiumPpm > 0) {
+    if (isEnabled("potassiumSulfate")) {
+      assignToTankB(
+        "potassiumSulfate",
+        saltGramsForTargetPpm(remainingPotassiumPpm, RAW_SALTS.potassiumSulfate.k, stockVolumeLiters, dilutionRatio)
+      )
+    } else {
+      warnings.push({ element: "potassium", label: "Potassium" })
+    }
+  }
 
-  // Sulfur is supplied as a byproduct of MgSO₄ + K₂SO₄. We intentionally do
-  // NOT add more K₂SO₄ to chase the sulfur target — that would overshoot K.
-  // Hydroponic plants tolerate a wide S range, so any deficit is acceptable.
+  // Sulfur is supplied as a byproduct of MgSO₄ + K₂SO₄ (+ (NH₄)₂SO₄ when used
+  // for nitrogen). We intentionally do NOT add extra salt just to chase the
+  // sulfur target — that would overshoot other elements. Hydroponic plants
+  // tolerate a wide S range, so any deficit is acceptable and not warned on.
 
+  // Micronutrients — always available; no realistic alternative source exists
   assignToTankB(
     "manganeseSulfate",
-    saltGramsForTargetPpm(
-      targets.manganese,
-      RAW_SALTS.manganeseSulfate.mn,
-      stockVolumeLiters,
-      dilutionRatio
-    )
+    saltGramsForTargetPpm(targets.manganese, RAW_SALTS.manganeseSulfate.mn, stockVolumeLiters, dilutionRatio)
   )
 
   assignToTankB(
     "zincSulfate",
-    saltGramsForTargetPpm(
-      targets.zinc,
-      RAW_SALTS.zincSulfate.zn,
-      stockVolumeLiters,
-      dilutionRatio
-    )
+    saltGramsForTargetPpm(targets.zinc, RAW_SALTS.zincSulfate.zn, stockVolumeLiters, dilutionRatio)
   )
 
   assignToTankB(
     "boricAcid",
-    saltGramsForTargetPpm(
-      targets.boron,
-      RAW_SALTS.boricAcid.b,
-      stockVolumeLiters,
-      dilutionRatio
-    )
+    saltGramsForTargetPpm(targets.boron, RAW_SALTS.boricAcid.b, stockVolumeLiters, dilutionRatio)
   )
 
   assignToTankB(
     "copperSulfate",
-    saltGramsForTargetPpm(
-      targets.copper,
-      RAW_SALTS.copperSulfate.cu,
-      stockVolumeLiters,
-      dilutionRatio
-    )
+    saltGramsForTargetPpm(targets.copper, RAW_SALTS.copperSulfate.cu, stockVolumeLiters, dilutionRatio)
   )
 
   assignToTankB(
     "sodiumMolybdate",
-    saltGramsForTargetPpm(
-      targets.molybdenum,
-      RAW_SALTS.sodiumMolybdate.mo,
-      stockVolumeLiters,
-      dilutionRatio
-    )
+    saltGramsForTargetPpm(targets.molybdenum, RAW_SALTS.sodiumMolybdate.mo, stockVolumeLiters, dilutionRatio)
   )
 
-  return { tankA, tankB }
+  return { tankA, tankB, warnings, isApproximate: warnings.length > 0 }
 }
 
 /**
@@ -763,19 +904,27 @@ export function calculateStockTankRecipe(
 export function calculateSeparateCalciumRecipe(
   targets: ElementalTargets,
   stockVolumeLiters: number,
-  dilutionRatio: number
+  dilutionRatio: number,
+  includedSalts?: IncludedSaltsSelection
 ): ThreeTankRecipe {
-  const { tankA, tankB } = calculateStockTankRecipe(targets, stockVolumeLiters, dilutionRatio)
+  const { tankA, tankB, warnings = [], isApproximate = false } = calculateStockTankRecipe(
+    targets,
+    stockVolumeLiters,
+    dilutionRatio,
+    includedSalts
+  )
 
   const tank1 = emptySaltAmounts()
   const tank2 = emptySaltAmounts()
   const tank3 = emptySaltAmounts()
 
+  const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>(["potassiumNitrate", "ammoniumNitrate"])
+
   for (const key of TANK_1_SALTS) {
     tank1[key] = tankA[key]
   }
   for (const key of TANK_2_SALTS) {
-    tank2[key] = key === "potassiumNitrate" ? tankA[key] : tankB[key]
+    tank2[key] = TANK_A_KEYS_IN_TANK_2.has(key) ? tankA[key] : tankB[key]
   }
   for (const key of TANK_3_SALTS) {
     tank3[key] = key === "ironDTPA" ? tankA[key] : tankB[key]
@@ -783,7 +932,7 @@ export function calculateSeparateCalciumRecipe(
 
   const hasMicroTank = (Object.values(tank3) as number[]).some((g) => g > 0)
 
-  return { tank1, tank2, tank3, hasMicroTank }
+  return { tank1, tank2, tank3, hasMicroTank, warnings, isApproximate }
 }
 
 function combineSaltAmounts(a: SaltAmounts, b: SaltAmounts): SaltAmounts {
@@ -812,10 +961,12 @@ export function calculateMultiPartStockTankRecipe(
   partsAnalysis: PartAnalysis[],
   parts: NutrientPart[],
   stockVolumeLiters: number,
-  dilutionRatio: number
+  dilutionRatio: number,
+  includedSalts?: IncludedSaltsSelection
 ): MultiPartTankRecipe {
   const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
   const tanks: PartStockTank[] = []
+  const warningsByElement = new Map<string, SaltGapWarning>()
   let tankIndex = 0
 
   for (const feedingPart of parts) {
@@ -828,11 +979,14 @@ export function calculateMultiPartStockTankRecipe(
     if (!hasAnyElement) continue
 
     const { targets } = applyMicroEstimates(rawTargets)
-    const { tankA, tankB } = calculateStockTankRecipe(
+    const { tankA, tankB, warnings = [] } = calculateStockTankRecipe(
       targets,
       stockVolumeLiters,
-      dilutionRatio
+      dilutionRatio,
+      includedSalts
     )
+    for (const warning of warnings) warningsByElement.set(warning.element, warning)
+
     const salts = combineSaltAmounts(tankA, tankB)
     if (!saltAmountsHasContent(salts)) continue
 
@@ -846,7 +1000,8 @@ export function calculateMultiPartStockTankRecipe(
     })
   }
 
-  return { tanks }
+  const warnings = Array.from(warningsByElement.values())
+  return { tanks, warnings, isApproximate: warnings.length > 0 }
 }
 
 /**
@@ -866,11 +1021,13 @@ export function calculateDoserMultiPartRecipe(
   partsAnalysis: PartAnalysis[],
   parts: NutrientPart[],
   stockVolumeLiters: number,
-  dilutionRatio: number
+  dilutionRatio: number,
+  includedSalts?: IncludedSaltsSelection
 ): MultiPartTankRecipe {
   const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
   const macroTanks: PartStockTank[] = []
   const consolidatedMicros = emptySaltAmounts()
+  const warningsByElement = new Map<string, SaltGapWarning>()
   let tankIndex = 0
 
   const microKeys = new Set<SaltKey>(TANK_3_SALTS)
@@ -885,7 +1042,13 @@ export function calculateDoserMultiPartRecipe(
     if (!hasAnyElement) continue
 
     const { targets } = applyMicroEstimates(rawTargets)
-    const { tankA, tankB } = calculateStockTankRecipe(targets, stockVolumeLiters, dilutionRatio)
+    const { tankA, tankB, warnings = [] } = calculateStockTankRecipe(
+      targets,
+      stockVolumeLiters,
+      dilutionRatio,
+      includedSalts
+    )
+    for (const warning of warnings) warningsByElement.set(warning.element, warning)
     const allSalts = combineSaltAmounts(tankA, tankB)
 
     const macroSalts = emptySaltAmounts()
@@ -923,13 +1086,24 @@ export function calculateDoserMultiPartRecipe(
     })
   }
 
-  return { tanks }
+  const warnings = Array.from(warningsByElement.values())
+  return { tanks, warnings, isApproximate: warnings.length > 0 }
+}
+
+export interface DirectMixRecipe {
+  salts: SaltAmounts
+  warnings: SaltGapWarning[]
+  isApproximate: boolean
 }
 
 /** Working-strength recipe for direct mixing into a reservoir of `reservoirLiters` litres */
-export function calculateDirectMixRecipe(targets: ElementalTargets, reservoirLiters: number): SaltAmounts {
+export function calculateDirectMixRecipe(
+  targets: ElementalTargets,
+  reservoirLiters: number,
+  includedSalts?: IncludedSaltsSelection
+): DirectMixRecipe {
   // A 1:1 stock tank of exactly reservoirLiters is equivalent to working-strength direct mix.
-  const stockRecipe = calculateStockTankRecipe(targets, reservoirLiters, 1)
+  const stockRecipe = calculateStockTankRecipe(targets, reservoirLiters, 1, includedSalts)
 
   const combined = emptySaltAmounts()
   const keys = Object.keys(combined) as Array<keyof SaltAmounts>
@@ -938,7 +1112,11 @@ export function calculateDirectMixRecipe(targets: ElementalTargets, reservoirLit
     combined[key] = stockRecipe.tankA[key] + stockRecipe.tankB[key]
   }
 
-  return combined
+  return {
+    salts: combined,
+    warnings: stockRecipe.warnings ?? [],
+    isApproximate: stockRecipe.isApproximate ?? false,
+  }
 }
 
 export function hasValidRecipeInput(partsAnalysis: PartAnalysis[], parts: NutrientPart[]): boolean {
@@ -1015,6 +1193,9 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
   const nFromCaNo3 = salts.calciumNitrate * RAW_SALTS.calciumNitrate.n * 1000
   const kFromKno3 = salts.potassiumNitrate * RAW_SALTS.potassiumNitrate.k * 1000
   const nFromKno3 = salts.potassiumNitrate * RAW_SALTS.potassiumNitrate.n * 1000
+  const nFromNh4no3 = salts.ammoniumNitrate * RAW_SALTS.ammoniumNitrate.n * 1000
+  const nFromNh4so4 = salts.ammoniumSulfate * RAW_SALTS.ammoniumSulfate.n * 1000
+  const sFromNh4so4 = salts.ammoniumSulfate * RAW_SALTS.ammoniumSulfate.s * 1000
   const kFromMkp = salts.monoPotassiumPhosphate * RAW_SALTS.monoPotassiumPhosphate.k * 1000
   const pFromMkp = salts.monoPotassiumPhosphate * RAW_SALTS.monoPotassiumPhosphate.p * 1000
   const mgPpm = salts.magnesiumSulfate * RAW_SALTS.magnesiumSulfate.mg * 1000
@@ -1023,8 +1204,8 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
   const sFromK2SO4 = salts.potassiumSulfate * RAW_SALTS.potassiumSulfate.s * 1000
 
   const kPpm = kFromKno3 + kFromMkp + kFromK2SO4
-  const nPpm = nFromCaNo3 + nFromKno3
-  const sPpm = sFromMgSO4 + sFromK2SO4
+  const nPpm = nFromCaNo3 + nFromKno3 + nFromNh4no3 + nFromNh4so4
+  const sPpm = sFromMgSO4 + sFromK2SO4 + sFromNh4so4
 
   return (
     ecContribution(ppmToMolPerLiter(kPpm, ION_ATOMIC_WEIGHT.K), ION_CONDUCTIVITY.K) +
@@ -1061,7 +1242,10 @@ const EC_ADDITIVE_BUFFER_MS_CM = 0.08
  * Micronutrients are excluded from the ionic sum (negligible contribution)
  * but their aggregate effect is captured by the additive buffer.
  */
-export function estimateEcFromElementalTargets(targets: ElementalTargets): number | null {
+export function estimateEcFromElementalTargets(
+  targets: ElementalTargets,
+  includedSalts?: IncludedSaltsSelection
+): number | null {
   const hasMacro =
     targets.nitrogen > 0 ||
     targets.phosphorus > 0 ||
@@ -1072,7 +1256,7 @@ export function estimateEcFromElementalTargets(targets: ElementalTargets): numbe
 
   if (!hasMacro) return null
 
-  const stockRecipe = calculateStockTankRecipe(targets, 1, 1)
+  const stockRecipe = calculateStockTankRecipe(targets, 1, 1, includedSalts)
   const salts = emptySaltAmounts()
   for (const key of Object.keys(salts) as SaltKey[]) {
     salts[key] = stockRecipe.tankA[key] + stockRecipe.tankB[key]

@@ -50,8 +50,10 @@ import {
   roundDownToNiceRatio,
   stockTankMlPerGallon,
   stockTankMlPerLiter,
+  type IncludedSaltsSelection,
   type MultiTankSolubilityReport,
   type PartStockTank,
+  type SaltGapWarning,
   type SaltKey,
 } from "@/lib/hydro-calc/recipe-calculator"
 
@@ -67,6 +69,7 @@ interface RecipeScreenProps {
   partsAnalysis: PartAnalysis[]
   parts: NutrientPart[]
   stockTankOption: StockTankOption
+  includedSalts: IncludedSaltsSelection
   initialSettings?: RecipeInitialSettings
   onBack: () => void
 }
@@ -87,6 +90,7 @@ export function RecipeScreen({
   partsAnalysis,
   parts,
   stockTankOption,
+  includedSalts,
   initialSettings = {},
   onBack,
 }: RecipeScreenProps) {
@@ -158,27 +162,45 @@ export function RecipeScreen({
   )
 
   const estimatedEc = useMemo(
-    () => estimateEcFromElementalTargets(targets),
-    [targets]
+    () => estimateEcFromElementalTargets(targets, includedSalts),
+    [targets, includedSalts]
   )
 
   const threeTankRecipe = useMemo(
-    () => calculateSeparateCalciumRecipe(targets, stockVolumeLiters, dilutionRatio),
-    [targets, stockVolumeLiters, dilutionRatio]
+    () => calculateSeparateCalciumRecipe(targets, stockVolumeLiters, dilutionRatio, includedSalts),
+    [targets, stockVolumeLiters, dilutionRatio, includedSalts]
   )
 
   const multiPartRecipe = useMemo(
     () =>
       stockTankOption === "doser"
-        ? calculateDoserMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)
-        : calculateMultiPartStockTankRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio),
-    [stockTankOption, partsAnalysis, parts, stockVolumeLiters, dilutionRatio]
+        ? calculateDoserMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts)
+        : calculateMultiPartStockTankRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts),
+    [stockTankOption, partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts]
   )
 
   const directRecipe = useMemo(
-    () => calculateDirectMixRecipe(targets, stockVolumeLiters),
-    [targets, stockVolumeLiters]
+    () => calculateDirectMixRecipe(targets, stockVolumeLiters, includedSalts),
+    [targets, stockVolumeLiters, includedSalts]
   )
+
+  // Unified warning surface — whichever mode is active drives which recipe's
+  // gaps get reported to the user.
+  const activeRecipeWarnings: SaltGapWarning[] = useMemo(() => {
+    if (stockTankOption === "direct") return directRecipe.warnings
+    if (usesSeparateNitrogenLayout) return threeTankRecipe.warnings ?? []
+    if (usesPerPartTanks) return multiPartRecipe.warnings ?? []
+    return []
+  }, [
+    stockTankOption,
+    usesSeparateNitrogenLayout,
+    usesPerPartTanks,
+    directRecipe.warnings,
+    threeTankRecipe.warnings,
+    multiPartRecipe.warnings,
+  ])
+
+  const isRecipeApproximate = activeRecipeWarnings.length > 0
 
   // Solubility-aware safety check for the chosen mode. We feed in the *actual*
   // tank groupings used in the UI so the limiting-salt report matches the
@@ -296,7 +318,7 @@ export function RecipeScreen({
 
   const neededSalts = useMemo(() => {
     if (stockTankOption === "direct") {
-      return Object.entries(directRecipe).filter(([, amount]) => amount > 0)
+      return Object.entries(directRecipe.salts).filter(([, amount]) => amount > 0)
     }
 
     const combined: Record<string, number> = {}
@@ -326,6 +348,8 @@ export function RecipeScreen({
     { key: "monoPotassiumPhosphate", name: "Mono Potassium Phosphate", note: "MKP, KH₂PO₄" },
     { key: "magnesiumSulfate", name: "Magnesium Sulfate", note: "Epsom salt, MgSO₄·7H₂O" },
     { key: "potassiumSulfate", name: "Potassium Sulfate", note: "K₂SO₄ - sulfate of potash" },
+    { key: "ammoniumNitrate", name: "Ammonium Nitrate", note: "NH₄NO₃" },
+    { key: "ammoniumSulfate", name: "Ammonium Sulfate", note: "(NH₄)₂SO₄" },
     { key: "ironDTPA", name: "Iron DTPA 11%", note: "Chelated iron for hydroponics" },
     { key: "manganeseSulfate", name: "Manganese Sulfate", note: "MnSO₄·H₂O" },
     { key: "zincSulfate", name: "Zinc Sulfate", note: "ZnSO₄·7H₂O" },
@@ -377,6 +401,7 @@ export function RecipeScreen({
         partsAnalysis: partsAnalysis.map(({ photoUrl: _photoUrl, photoName: _photoName, ...p }) => p),
         parts,
         stockTankOption,
+        includedSalts,
         stockTankSize,
         stockTankUnit,
         concentrationRatio: dilutionRatio,
@@ -738,6 +763,29 @@ export function RecipeScreen({
         </CardContent>
       </Card>
 
+      {/* Salt-selection mismatch warning — shown when the checked salts can't fully cover the targets */}
+      {hasValidData && isRecipeApproximate && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-lg border-2 border-amber-500/60 bg-amber-500/10 p-4"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+          <div className="space-y-1.5 text-sm leading-relaxed text-amber-100">
+            <p className="font-semibold">
+              Cannot perfectly match all targets with only the selected salts. Closest possible
+              recipe shown.
+            </p>
+            <p>
+              <strong className="text-amber-50">{activeRecipeWarnings.map((w) => w.label).join(", ")}</strong>{" "}
+              couldn&apos;t be fully matched because the salt that would supply{" "}
+              {activeRecipeWarnings.length === 1 ? "it" : "them"} is unchecked on Step 1. Check
+              more salts in the &quot;Salts &amp; Inputs Included&quot; section, or leave it as-is
+              if you know you don&apos;t have that input on hand.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Mixing-safety banner — non-doser modes only (doser banner shown above settings) */}
       {hasValidData && stockTankOption !== "doser" && (
         <MixingSafetyBanner option={stockTankOption} partCount={multiPartRecipe.tanks.length} />
@@ -850,6 +898,11 @@ export function RecipeScreen({
                   amount={scaledGrams(threeTankRecipe.tank2.potassiumNitrate)}
                 />
                 <SaltRow
+                  name={RAW_SALTS.ammoniumNitrate.name}
+                  formula={RAW_SALTS.ammoniumNitrate.formula}
+                  amount={scaledGrams(threeTankRecipe.tank2.ammoniumNitrate)}
+                />
+                <SaltRow
                   name={RAW_SALTS.monoPotassiumPhosphate.name}
                   formula={RAW_SALTS.monoPotassiumPhosphate.formula}
                   amount={scaledGrams(threeTankRecipe.tank2.monoPotassiumPhosphate)}
@@ -863,6 +916,11 @@ export function RecipeScreen({
                   name={RAW_SALTS.potassiumSulfate.name}
                   formula={RAW_SALTS.potassiumSulfate.formula}
                   amount={scaledGrams(threeTankRecipe.tank2.potassiumSulfate)}
+                />
+                <SaltRow
+                  name={RAW_SALTS.ammoniumSulfate.name}
+                  formula={RAW_SALTS.ammoniumSulfate.formula}
+                  amount={scaledGrams(threeTankRecipe.tank2.ammoniumSulfate)}
                 />
               </div>
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
@@ -979,62 +1037,72 @@ export function RecipeScreen({
               <SaltRow
                 name={RAW_SALTS.calciumNitrate.name}
                 formula={RAW_SALTS.calciumNitrate.formula}
-                amount={scaledGrams(directRecipe.calciumNitrate)}
+                amount={scaledGrams(directRecipe.salts.calciumNitrate)}
               />
               <SaltRow
                 name={RAW_SALTS.potassiumNitrate.name}
                 formula={RAW_SALTS.potassiumNitrate.formula}
-                amount={scaledGrams(directRecipe.potassiumNitrate)}
+                amount={scaledGrams(directRecipe.salts.potassiumNitrate)}
+              />
+              <SaltRow
+                name={RAW_SALTS.ammoniumNitrate.name}
+                formula={RAW_SALTS.ammoniumNitrate.formula}
+                amount={scaledGrams(directRecipe.salts.ammoniumNitrate)}
               />
               <SaltRow
                 name={RAW_SALTS.monoPotassiumPhosphate.name}
                 formula={RAW_SALTS.monoPotassiumPhosphate.formula}
-                amount={scaledGrams(directRecipe.monoPotassiumPhosphate)}
+                amount={scaledGrams(directRecipe.salts.monoPotassiumPhosphate)}
               />
               <SaltRow
                 name={RAW_SALTS.magnesiumSulfate.name}
                 formula={RAW_SALTS.magnesiumSulfate.formula}
-                amount={scaledGrams(directRecipe.magnesiumSulfate)}
+                amount={scaledGrams(directRecipe.salts.magnesiumSulfate)}
               />
               <SaltRow
                 name={RAW_SALTS.potassiumSulfate.name}
                 formula={RAW_SALTS.potassiumSulfate.formula}
-                amount={scaledGrams(directRecipe.potassiumSulfate)}
+                amount={scaledGrams(directRecipe.salts.potassiumSulfate)}
+              />
+              <SaltRow
+                name={RAW_SALTS.ammoniumSulfate.name}
+                formula={RAW_SALTS.ammoniumSulfate.formula}
+                amount={scaledGrams(directRecipe.salts.ammoniumSulfate)}
               />
               <SaltRow
                 name={RAW_SALTS.ironDTPA.name}
                 formula={RAW_SALTS.ironDTPA.formula}
-                amount={scaledGrams(directRecipe.ironDTPA)}
+                amount={scaledGrams(directRecipe.salts.ironDTPA)}
                 micro
               />
               <SaltRow
                 name={RAW_SALTS.manganeseSulfate.name}
                 formula={RAW_SALTS.manganeseSulfate.formula}
-                amount={scaledGrams(directRecipe.manganeseSulfate)}
+                amount={scaledGrams(directRecipe.salts.manganeseSulfate)}
                 micro
               />
               <SaltRow
                 name={RAW_SALTS.zincSulfate.name}
                 formula={RAW_SALTS.zincSulfate.formula}
-                amount={scaledGrams(directRecipe.zincSulfate)}
+                amount={scaledGrams(directRecipe.salts.zincSulfate)}
                 micro
               />
               <SaltRow
                 name={RAW_SALTS.boricAcid.name}
                 formula={RAW_SALTS.boricAcid.formula}
-                amount={scaledGrams(directRecipe.boricAcid)}
+                amount={scaledGrams(directRecipe.salts.boricAcid)}
                 micro
               />
               <SaltRow
                 name={RAW_SALTS.copperSulfate.name}
                 formula={RAW_SALTS.copperSulfate.formula}
-                amount={scaledGrams(directRecipe.copperSulfate)}
+                amount={scaledGrams(directRecipe.salts.copperSulfate)}
                 micro
               />
               <SaltRow
                 name={RAW_SALTS.sodiumMolybdate.name}
                 formula={RAW_SALTS.sodiumMolybdate.formula}
-                amount={scaledGrams(directRecipe.sodiumMolybdate)}
+                amount={scaledGrams(directRecipe.salts.sodiumMolybdate)}
                 micro
               />
             </div>
@@ -1069,6 +1137,18 @@ export function RecipeScreen({
                   </Fragment>
                 ))}
             </div>
+            {includedSalts.other && includedSalts.otherText.trim() && (
+              <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                  Other salts you noted
+                </p>
+                <p className="text-sm text-foreground">{includedSalts.otherText}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Saved with your formulation for reference — not yet factored into the recipe
+                  above.
+                </p>
+              </div>
+            )}
             <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-4">
               <h4 className="font-medium text-foreground mb-2">Where to Buy</h4>
               <p className="text-sm text-muted-foreground">

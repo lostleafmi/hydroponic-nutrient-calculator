@@ -10,7 +10,11 @@ import {
 } from "@/components/hydro-calc/guaranteed-analysis-screen"
 import { FeedingRatesScreen, type NutrientPart, type StockTankOption } from "@/components/hydro-calc/feeding-rates-screen"
 import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-calc/recipe-screen"
-import { isSeparateNitrogenAvailable } from "@/lib/hydro-calc/recipe-calculator"
+import {
+  DEFAULT_INCLUDED_SALTS,
+  isSeparateNitrogenAvailable,
+  type IncludedSaltsSelection,
+} from "@/lib/hydro-calc/recipe-calculator"
 import { toast } from "@/hooks/use-toast"
 
 const DASHBOARD_API_BASE =
@@ -112,6 +116,7 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
   const [partsAnalysis, setPartsAnalysis] = useState<PartAnalysis[]>(initialState.partsAnalysis)
   const [parts, setParts] = useState<NutrientPart[]>(initialState.parts)
   const [stockTankOption, setStockTankOption] = useState<StockTankOption>("separate")
+  const [includedSalts, setIncludedSalts] = useState<IncludedSaltsSelection>(DEFAULT_INCLUDED_SALTS)
 
   // Tracks which recipeInitialSettings generation is in use — incrementing forces
   // RecipeScreen to remount so its useState picks up the new initial values.
@@ -155,6 +160,10 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
         }
         if (data.stockTankOption) {
           setStockTankOption(data.stockTankOption as StockTankOption)
+        }
+        // Older saved formulations won't have this field — default keeps them working as before.
+        if (data.includedSalts && typeof data.includedSalts === "object") {
+          setIncludedSalts({ ...DEFAULT_INCLUDED_SALTS, ...data.includedSalts })
         }
 
         // --- Pre-fill recipe screen settings ---
@@ -306,6 +315,8 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
           <GuaranteedAnalysisScreen
             partsAnalysis={partsAnalysis}
             onPartsAnalysisChange={handlePartsAnalysisChange}
+            includedSalts={includedSalts}
+            onIncludedSaltsChange={setIncludedSalts}
             onNext={() => goToScreen("feeding")}
           />
         )}
@@ -325,6 +336,7 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
             partsAnalysis={partsAnalysis}
             parts={parts}
             stockTankOption={stockTankOption}
+            includedSalts={includedSalts}
             initialSettings={recipeInitialSettings}
             onBack={() => goToScreen("feeding")}
           />
