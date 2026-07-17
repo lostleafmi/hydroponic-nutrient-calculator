@@ -218,9 +218,12 @@ export function GuaranteedAnalysisScreen({
             </h4>
             <p className="text-sm leading-relaxed text-muted-foreground">
               Look at the &quot;guaranteed analysis&quot; or &quot;derived from&quot; section on your
-              product&apos;s label and check each salt that appears there. The recipe solver will
-              only use the salts you select. If a perfect match isn&apos;t possible with just
-              these, we&apos;ll build the closest recipe we can and flag what&apos;s off.
+              product&apos;s label and check each salt that appears there. Most commercial nutrient
+              lines (Athena, Drip Hydro, HGV, House &amp; Garden, etc.) include a full chelated
+              micronutrient package — check &quot;Chelated Micronutrients&quot; if your label lists
+              iron, manganese, zinc, boron, copper, or molybdenum. The recipe solver will only use
+              the salts you select; if a perfect match isn&apos;t possible, we&apos;ll build the
+              closest recipe we can and flag what&apos;s off.
             </p>
           </div>
 

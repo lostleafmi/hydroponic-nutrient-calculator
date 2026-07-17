@@ -165,9 +165,20 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
         // Older saved formulations won't have this field — default to all-enabled so they
         // continue working without hitting the new "select at least one salt" validation.
         if (data.includedSalts && typeof data.includedSalts === "object") {
-          // Strip deprecated fields (other, otherText) that may exist in old saves
-          const { other: _other, otherText: _otherText, ...validSalts } = data.includedSalts as Record<string, unknown>
-          setIncludedSalts({ ...DEFAULT_INCLUDED_SALTS, ...(validSalts as Partial<IncludedSaltsSelection>) })
+          // Strip deprecated fields (other, otherText) that may exist in old saves.
+          // Migrate ironChelate → chelatedMicronutrients so pre-refactor saves carry
+          // their iron selection forward as a full micro package.
+          const {
+            other: _other,
+            otherText: _otherText,
+            ironChelate,
+            ...validSalts
+          } = data.includedSalts as Record<string, unknown>
+          const migrated: Partial<IncludedSaltsSelection> = validSalts as Partial<IncludedSaltsSelection>
+          if (ironChelate === true && !("chelatedMicronutrients" in validSalts)) {
+            migrated.chelatedMicronutrients = true
+          }
+          setIncludedSalts({ ...DEFAULT_INCLUDED_SALTS, ...migrated })
         } else {
           // Pre-salt-selection formulation — treat as all salts included
           setIncludedSalts(ALL_SALTS_SELECTED)

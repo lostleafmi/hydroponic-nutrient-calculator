@@ -133,10 +133,12 @@ export type SaltKey = keyof typeof RAW_SALTS
 
 /**
  * User-facing "Salts & Inputs Included" selection captured on the Guaranteed
- * Analysis screen. Mirrors the checkboxes shown in the UI — each boolean
- * gates one or more underlying `SaltKey`s in the solver (see
- * `getEnabledSaltKeys`). Micronutrient sulfates (Mn, Zn, B, Cu, Mo) aren't
- * gated here since there's no practical alternative source for them.
+ * Analysis screen. Each boolean gates one or more underlying `SaltKey`s in
+ * the solver (see `getEnabledSaltKeys`).
+ *
+ * `chelatedMicronutrients` replaces the old `ironChelate` field and now gates
+ * the full micronutrient package: Fe-DTPA, MnSO₄, ZnSO₄, H₃BO₃, CuSO₄,
+ * Na₂MoO₄. Most commercial nutrient lines ship all six together.
  */
 export interface IncludedSaltsSelection {
   calciumNitrate: boolean
@@ -145,7 +147,7 @@ export interface IncludedSaltsSelection {
   monoPotassiumPhosphate: boolean
   magnesiumSulfate: boolean
   ammoniumNitrateOrSulfate: boolean
-  ironChelate: boolean
+  chelatedMicronutrients: boolean
 }
 
 /** Default for new sessions — all unchecked so the user consciously selects what is in their product. */
@@ -156,7 +158,7 @@ export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
   monoPotassiumPhosphate: false,
   magnesiumSulfate: false,
   ammoniumNitrateOrSulfate: false,
-  ironChelate: false,
+  chelatedMicronutrients: false,
 }
 
 /** Used when loading old saved formulations that pre-date per-salt selection. */
@@ -167,7 +169,7 @@ export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
   monoPotassiumPhosphate: true,
   magnesiumSulfate: true,
   ammoniumNitrateOrSulfate: true,
-  ironChelate: true,
+  chelatedMicronutrients: true,
 }
 
 /** Checkbox options rendered on the "Salts & Inputs Included" screen */
@@ -202,20 +204,11 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
     saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
   },
   {
-    id: "ironChelate",
-    label: "Iron Chelate (EDTA / DTPA)",
-    sublabel: "Fe-EDTA / Fe-DTPA",
-    saltKeys: ["ironDTPA"],
+    id: "chelatedMicronutrients",
+    label: "Chelated Micronutrients (Fe, Mn, Zn, B, Cu, Mo)",
+    sublabel: "Fe-DTPA / MnSO₄ / ZnSO₄ / H₃BO₃ / CuSO₄ / Na₂MoO₄",
+    saltKeys: ["ironDTPA", "manganeseSulfate", "zincSulfate", "boricAcid", "copperSulfate", "sodiumMolybdate"],
   },
-]
-
-/** Salts that are always available to the solver — no realistic alternative source exists */
-const ALWAYS_ON_SALT_KEYS: SaltKey[] = [
-  "manganeseSulfate",
-  "zincSulfate",
-  "boricAcid",
-  "copperSulfate",
-  "sodiumMolybdate",
 ]
 
 /**
@@ -236,7 +229,7 @@ export function getEnabledSaltKeys(selection?: IncludedSaltsSelection): Set<Salt
     return new Set(allSaltKeys)
   }
 
-  const enabled = new Set<SaltKey>(ALWAYS_ON_SALT_KEYS)
+  const enabled = new Set<SaltKey>()
   for (const opt of SALT_CHECKBOX_OPTIONS) {
     if (selection[opt.id]) {
       for (const key of opt.saltKeys) enabled.add(key)
