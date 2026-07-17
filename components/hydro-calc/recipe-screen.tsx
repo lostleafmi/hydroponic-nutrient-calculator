@@ -357,6 +357,11 @@ export function RecipeScreen({
     return Object.entries(combined).filter(([, amount]) => amount > 0)
   }, [threeTankRecipe, multiPartRecipe, directRecipe, stockTankOption, usesSeparateNitrogenLayout, usesPerPartTanks])
 
+  // When the user selected "Chelated Micronutrients" on Step 1, show the chelated
+  // (EDTA/DTPA) product names in the shopping list rather than the raw sulfate
+  // salts the solver uses internally for elemental-fraction math.
+  const usesChelatedMicros = includedSalts.chelatedMicronutrients
+
   const shoppingItems: Array<{ key: SaltKey; name: string; note: string; disclaimer?: string }> = [
     {
       key: "calciumNitrate",
@@ -371,11 +376,27 @@ export function RecipeScreen({
     { key: "potassiumSulfate", name: "Potassium Sulfate", note: "K₂SO₄ - sulfate of potash" },
     { key: "ammoniumNitrate", name: "Ammonium Nitrate", note: "NH₄NO₃" },
     { key: "ammoniumSulfate", name: "Ammonium Sulfate", note: "(NH₄)₂SO₄" },
-    { key: "ironDTPA", name: "Iron DTPA 11%", note: "Chelated iron for hydroponics" },
-    { key: "manganeseSulfate", name: "Manganese Sulfate", note: "MnSO₄·H₂O" },
-    { key: "zincSulfate", name: "Zinc Sulfate", note: "ZnSO₄·7H₂O" },
+    {
+      key: "ironDTPA",
+      name: "Iron DTPA 11%",
+      note: usesChelatedMicros ? "Fe-DTPA chelate - chelated iron for hydroponics" : "Fe-DTPA",
+    },
+    {
+      key: "manganeseSulfate",
+      name: usesChelatedMicros ? "Manganese EDTA" : "Manganese Sulfate",
+      note: usesChelatedMicros ? "Mn-EDTA chelate" : "MnSO₄·H₂O",
+    },
+    {
+      key: "zincSulfate",
+      name: usesChelatedMicros ? "Zinc EDTA" : "Zinc Sulfate",
+      note: usesChelatedMicros ? "Zn-EDTA chelate" : "ZnSO₄·7H₂O",
+    },
     { key: "boricAcid", name: "Boric Acid", note: "H₃BO₃ - powder form" },
-    { key: "copperSulfate", name: "Copper Sulfate", note: "CuSO₄·5H₂O - pentahydrate" },
+    {
+      key: "copperSulfate",
+      name: usesChelatedMicros ? "Copper EDTA" : "Copper Sulfate",
+      note: usesChelatedMicros ? "Cu-EDTA chelate" : "CuSO₄·5H₂O - pentahydrate",
+    },
     { key: "sodiumMolybdate", name: "Sodium Molybdate", note: "Na₂MoO₄·2H₂O" },
   ]
 
