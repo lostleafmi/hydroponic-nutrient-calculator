@@ -190,6 +190,7 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
         if (data.stockTankUnit) settings.stockTankUnit = data.stockTankUnit
         if (data.concentrationRatio) settings.concentrationRatio = String(data.concentrationRatio)
         if (data.doserLayout) settings.doserLayout = data.doserLayout
+        if (data.keepMicrosSeparate != null) settings.keepMicrosSeparate = data.keepMicrosSeparate
         if (data.targetEc != null) settings.targetEcInput = String(data.targetEc)
         setRecipeInitialSettings(settings)
         setRecipeKey((k) => k + 1)

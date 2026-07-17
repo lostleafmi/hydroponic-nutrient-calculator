@@ -107,8 +107,13 @@ export interface ThreeTankRecipe {
   tank1: SaltAmounts
   tank2: SaltAmounts
   tank3: SaltAmounts
-  /** True when Tank 3 actually holds any salt — false for micro-free recipes. */
+  /** True when Tank 3 actually holds any salt — false for micro-free recipes
+   *  AND false whenever micros were merged into Tank 2 (the 2-tank default). */
   hasMicroTank: boolean
+  /** True when the recipe has any micronutrients at all, regardless of which
+   *  tank they ended up in. Use this (rather than `hasMicroTank`) to decide
+   *  whether to render a micronutrients sub-section inside Tank 2. */
+  hasMicronutrients: boolean
   warnings?: SaltGapWarning[]
   isApproximate?: boolean
 }
@@ -926,20 +931,28 @@ export function calculateStockTankRecipe(
 }
 
 /**
- * Build a 3-tank recipe with calcium nitrate isolated.
+ * Build a stock tank recipe with Nitrogen + Calcium isolated for end-of-flower
+ * tapering.
  *
- *   Tank 1 — Calcium Nitrate only (Ca²⁺). Taper this to drop N at end of flower.
- *   Tank 2 — Remaining macro salts: KNO₃, MKP, MgSO₄, K₂SO₄.
- *   Tank 3 — Micros: Fe-DTPA, MnSO₄, ZnSO₄, H₃BO₃, CuSO₄, Na₂MoO₄.
+ *   Tank 1 — Calcium Nitrate only (Ca²⁺ + N). Taper this to drop N at end of flower.
+ *   Tank 2 — Everything else: remaining macro salts (KNO₃, MKP, MgSO₄, K₂SO₄)
+ *            AND, by default, the micronutrients (Fe-DTPA, MnSO₄, ZnSO₄,
+ *            H₃BO₃, CuSO₄, Na₂MoO₄) — giving a clean 2-tank system.
+ *   Tank 3 — Micros only, kept isolated instead of merged into Tank 2 when
+ *            `keepMicronutrientsSeparate` is true (the advanced 3-tank option).
  *
- * Tank 3 is reported separately so callers can hide it when no micros are
- * required (the layout naturally collapses to two tanks in that case).
+ * `hasMicroTank` tells callers whether Tank 3 is actually in use (false by
+ * default, since micros are merged into Tank 2). `hasMicronutrients` tells
+ * callers whether the recipe has any micros at all, regardless of which tank
+ * they live in — use this to decide whether to render a "Micronutrients"
+ * sub-section inside Tank 2 when the 3-tank option isn't enabled.
  */
 export function calculateSeparateCalciumRecipe(
   targets: ElementalTargets,
   stockVolumeLiters: number,
   dilutionRatio: number,
-  includedSalts?: IncludedSaltsSelection
+  includedSalts?: IncludedSaltsSelection,
+  keepMicronutrientsSeparate: boolean = false
 ): ThreeTankRecipe {
   const { tankA, tankB, warnings = [], isApproximate = false } = calculateStockTankRecipe(
     targets,
@@ -964,9 +977,20 @@ export function calculateSeparateCalciumRecipe(
     tank3[key] = key === "ironDTPA" ? tankA[key] : tankB[key]
   }
 
-  const hasMicroTank = (Object.values(tank3) as number[]).some((g) => g > 0)
+  const hasMicronutrients = (Object.values(tank3) as number[]).some((g) => g > 0)
 
-  return { tank1, tank2, tank3, hasMicroTank, warnings, isApproximate }
+  if (!keepMicronutrientsSeparate) {
+    // 2-tank default: fold the micronutrients into Tank 2 alongside the rest
+    // of the non-nitrogen components, and leave Tank 3 empty/unused.
+    for (const key of TANK_3_SALTS) {
+      tank2[key] = tank3[key]
+      tank3[key] = 0
+    }
+  }
+
+  const hasMicroTank = keepMicronutrientsSeparate && hasMicronutrients
+
+  return { tank1, tank2, tank3, hasMicroTank, hasMicronutrients, warnings, isApproximate }
 }
 
 function combineSaltAmounts(a: SaltAmounts, b: SaltAmounts): SaltAmounts {

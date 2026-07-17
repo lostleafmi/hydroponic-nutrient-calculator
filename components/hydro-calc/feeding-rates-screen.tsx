@@ -145,7 +145,7 @@ export function FeedingRatesScreen({
               <StockTankOptionCard
                 value="separate"
                 title="Separate Nitrogen for tapering before harvest"
-                description="Separated into 3 stock tanks so you can taper Nitrogen at the end of flowering for better smoothness and flavor. Best for hand mixing into your reservoir or batch tank."
+                description="Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor. Best for hand mixing into your reservoir or batch tank."
                 icon={<Droplets className="h-5 w-5" />}
                 selected={stockTankOption === "separate"}
                 recommended

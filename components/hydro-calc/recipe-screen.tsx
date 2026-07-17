@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -63,6 +64,7 @@ export interface RecipeInitialSettings {
   concentrationRatio?: string
   doserLayout?: "per-part" | "separate-ca"
   targetEcInput?: string
+  keepMicrosSeparate?: boolean
 }
 
 interface RecipeScreenProps {
@@ -118,6 +120,13 @@ export function RecipeScreen({
     initialSettings.doserLayout ?? "per-part"
   )
 
+  // Advanced option for the Separate Nitrogen layout: by default micronutrients
+  // are folded into Tank 2 for a clean 2-tank system. Power users can flip this
+  // to keep micros isolated in their own Tank 3 instead.
+  const [keepMicrosSeparate, setKeepMicrosSeparate] = useState(
+    initialSettings.keepMicrosSeparate ?? false
+  )
+
   // Reset to per-part when the recipe grows beyond 3 parts (separate Ca requires ≤3)
   useEffect(() => {
     if (stockTankOption === "doser" && !isSeparateNitrogenAvailable(parts.length)) {
@@ -167,8 +176,15 @@ export function RecipeScreen({
   )
 
   const threeTankRecipe = useMemo(
-    () => calculateSeparateCalciumRecipe(targets, stockVolumeLiters, dilutionRatio, includedSalts),
-    [targets, stockVolumeLiters, dilutionRatio, includedSalts]
+    () =>
+      calculateSeparateCalciumRecipe(
+        targets,
+        stockVolumeLiters,
+        dilutionRatio,
+        includedSalts,
+        keepMicrosSeparate
+      ),
+    [targets, stockVolumeLiters, dilutionRatio, includedSalts, keepMicrosSeparate]
   )
 
   const multiPartRecipe = useMemo(
@@ -311,6 +327,11 @@ export function RecipeScreen({
   const displayedEc =
     parsedTargetEc > 0 ? parsedTargetEc : (estimatedEc ?? 0)
 
+  // True when Tank 2 in the Separate Nitrogen layout holds the merged
+  // micronutrients (the 2-tank default) — drives the badge/description and
+  // the extra "Micronutrients" sub-section rendered inside that card.
+  const tank2IncludesMicros = !keepMicrosSeparate && threeTankRecipe.hasMicronutrients
+
   const hasAnyMicro = anchor !== null
   const hasEstimates = estimated.size > 0
 
@@ -410,6 +431,7 @@ export function RecipeScreen({
         elementalTargets: targets,
         estimatedEc,
         doserLayout: stockTankOption === "doser" ? doserLayout : undefined,
+        keepMicrosSeparate: usesSeparateNitrogenLayout ? keepMicrosSeparate : undefined,
         savedAt: new Date().toISOString(),
       }
 
@@ -627,6 +649,30 @@ export function RecipeScreen({
               </p>
             </div>
           )}
+
+          {/* Advanced option — only relevant while the Separate Nitrogen layout is active */}
+          {usesSeparateNitrogenLayout && (
+            <div className="mt-4 border-t border-border pt-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <Label htmlFor="keep-micros-separate" className="block text-sm font-medium">
+                    Advanced: keep micronutrients in their own tank
+                  </Label>
+                  <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                    By default micronutrients are combined with the other non-nitrogen
+                    components into one clean Tank 2. Flip this on to split them out into a
+                    separate Tank 3 instead.
+                  </p>
+                </div>
+                <Switch
+                  id="keep-micros-separate"
+                  checked={keepMicrosSeparate}
+                  onCheckedChange={setKeepMicrosSeparate}
+                  className="mt-0.5 shrink-0"
+                />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -788,7 +834,11 @@ export function RecipeScreen({
 
       {/* Mixing-safety banner — non-doser modes only (doser banner shown above settings) */}
       {hasValidData && stockTankOption !== "doser" && (
-        <MixingSafetyBanner option={stockTankOption} partCount={multiPartRecipe.tanks.length} />
+        <MixingSafetyBanner
+          option={stockTankOption}
+          partCount={multiPartRecipe.tanks.length}
+          separateNitrogenTankCount={threeTankRecipe.hasMicroTank ? 2 : 1}
+        />
       )}
 
       {/* Prominent never-mix warning — shown whenever concentrated tanks exist */}
@@ -841,15 +891,16 @@ export function RecipeScreen({
                 <Beaker className="h-5 w-5 text-primary" />
                 <span>Stock Tank 1 Recipe</span>
                 <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
-                  Calcium Nitrate
+                  Nitrogen + Calcium
                 </span>
                 <span className="ml-auto text-sm font-normal text-muted-foreground">
                   {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
                 </span>
               </CardTitle>
               <CardDescription>
-                Just Calcium Nitrate in this stock tank. Keeping it on its own makes it easy to
-                use less near the end of flower without changing the rest of your recipe.
+                Just Calcium Nitrate in this stock tank — your Nitrogen and Calcium source.
+                Keeping it on its own makes it easy to taper down near the end of flower without
+                changing the rest of your recipe.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -872,22 +923,23 @@ export function RecipeScreen({
             </CardContent>
           </Card>
 
-          {/* Tank 2 — Remaining macros */}
+          {/* Tank 2 — Remaining macros, plus micros by default (2-tank system) */}
           <Card className="border-2 border-accent/50 bg-card">
             <CardHeader className="bg-accent/5">
               <CardTitle className="flex items-center gap-2 text-xl text-foreground">
                 <Beaker className="h-5 w-5 text-accent" />
                 <span>Stock Tank 2 Recipe</span>
                 <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs font-semibold text-accent">
-                  Macros
+                  {tank2IncludesMicros ? "Macros + Micros" : "Macros"}
                 </span>
                 <span className="ml-auto text-sm font-normal text-muted-foreground">
                   {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
                 </span>
               </CardTitle>
               <CardDescription>
-                The rest of your main salts (KNO₃, MKP, MgSO₄, K₂SO₄). Safe to combine in this
-                stock tank because calcium stays in Tank 1.
+                {tank2IncludesMicros
+                  ? "The rest of your main salts (KNO₃, MKP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank. Safe to combine because calcium stays in Tank 1."
+                  : "The rest of your main salts (KNO₃, MKP, MgSO₄, K₂SO₄). Safe to combine in this stock tank because calcium stays in Tank 1."}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -923,19 +975,67 @@ export function RecipeScreen({
                   amount={scaledGrams(threeTankRecipe.tank2.ammoniumSulfate)}
                 />
               </div>
+              {tank2IncludesMicros && (
+                <div className="mt-3 border-t border-dashed border-muted-foreground/30 pt-2">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Micronutrients
+                  </p>
+                  <div className="space-y-2">
+                    <SaltRow
+                      name={RAW_SALTS.ironDTPA.name}
+                      formula={RAW_SALTS.ironDTPA.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.ironDTPA)}
+                      micro
+                    />
+                    <SaltRow
+                      name={RAW_SALTS.manganeseSulfate.name}
+                      formula={RAW_SALTS.manganeseSulfate.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.manganeseSulfate)}
+                      micro
+                    />
+                    <SaltRow
+                      name={RAW_SALTS.zincSulfate.name}
+                      formula={RAW_SALTS.zincSulfate.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.zincSulfate)}
+                      micro
+                    />
+                    <SaltRow
+                      name={RAW_SALTS.boricAcid.name}
+                      formula={RAW_SALTS.boricAcid.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.boricAcid)}
+                      micro
+                    />
+                    <SaltRow
+                      name={RAW_SALTS.copperSulfate.name}
+                      formula={RAW_SALTS.copperSulfate.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.copperSulfate)}
+                      micro
+                    />
+                    <SaltRow
+                      name={RAW_SALTS.sodiumMolybdate.name}
+                      formula={RAW_SALTS.sodiumMolybdate.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.sodiumMolybdate)}
+                      micro
+                    />
+                  </div>
+                </div>
+              )}
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
                 <p className="text-sm text-muted-foreground">
                   <strong className="text-foreground">How to mix:</strong> Fill the stock tank
-                  about halfway with RO water, then add the salts in the order listed above. Wait for
-                  each one to fully dissolve before adding the next. Top up to {stockTankSize}{" "}
-                  {stockTankUnit === "gallons" ? "gallons" : "liters"} and label it
-                  &quot;Tank 2&quot;.
+                  about halfway with RO water, then add the salts in the order listed above
+                  {tank2IncludesMicros
+                    ? ", dissolving the Iron DTPA first among the micronutrients"
+                    : ""}
+                  . Wait for each one to fully dissolve before adding the next. Top up to{" "}
+                  {stockTankSize} {stockTankUnit === "gallons" ? "gallons" : "liters"} and label
+                  it &quot;Tank 2&quot;.
                 </p>
               </div>
             </CardContent>
           </Card>
 
-          {/* Tank 3 — Micros (only if any micros are dosed) */}
+          {/* Tank 3 — Micros, only when the advanced "keep micros separate" option is on */}
           {threeTankRecipe.hasMicroTank && (
             <Card className="border-2 border-muted-foreground/40 bg-card">
               <CardHeader className="bg-muted/40">
@@ -949,7 +1049,10 @@ export function RecipeScreen({
                     {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
                   </span>
                 </CardTitle>
-                <CardDescription>Chelated iron and the micronutrients.</CardDescription>
+                <CardDescription>
+                  Chelated iron and the micronutrients, kept in their own tank since you turned
+                  on the advanced 3-tank option.
+                </CardDescription>
               </CardHeader>
               <CardContent className="pt-4">
                 <div className="space-y-2">
@@ -1380,10 +1483,12 @@ function MixingSafetyBanner({
   option,
   partCount,
   separateCaLayout = false,
+  separateNitrogenTankCount = 1,
 }: {
   option: StockTankOption
   partCount: number
   separateCaLayout?: boolean
+  separateNitrogenTankCount?: number
 }) {
   if (option === "separate") {
     return (
@@ -1392,8 +1497,12 @@ function MixingSafetyBanner({
         <div className="space-y-1 text-sm leading-relaxed text-emerald-100">
           <p className="font-semibold">Safest setup</p>
           <p>
-            Calcium nitrate sits in its own stock tank, so it&apos;s easy to taper at the end of
-            flower. The other inputs go into 2 separate stock tanks that are safe to combine.
+            Nitrogen and Calcium sit together in their own stock tank, so it&apos;s easy to taper
+            at the end of flower. The rest of your recipe
+            {separateNitrogenTankCount === 1
+              ? " goes into 1 more stock tank"
+              : ` goes into ${separateNitrogenTankCount} more stock tanks`}
+            {" "}that {separateNitrogenTankCount === 1 ? "is" : "are"} safe to combine.
           </p>
         </div>
       </div>
