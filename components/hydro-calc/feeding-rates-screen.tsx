@@ -187,26 +187,6 @@ export function FeedingRatesScreen({
             </p>
           )}
 
-          {/* Never-mix banner — shown for every option that produces concentrated stock */}
-          {(stockTankOption === "separate" ||
-            stockTankOption === "doser" ||
-            stockTankOption === "ab") && (
-            <PrecipitationWarning
-              title="Don't pour your stock tanks into each other"
-              body={
-                <p>
-                  Always add each stock tank to your reservoir on its own
-                  {stockTankOption === "doser"
-                    ? " — and give each stock tank its own suction line. Never tee them together before the injector. "
-                    : ". "}
-                  If you mix two stock tanks together at full strength, some of the nutrients
-                  clump up into a cloudy white sludge that won&apos;t dissolve — and your plants
-                  can&apos;t use those nutrients anymore.
-                </p>
-              }
-            />
-          )}
-
         </CardContent>
       </Card>
 
@@ -393,27 +373,6 @@ function StockTankOptionCard({
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </Label>
-    </div>
-  )
-}
-
-function PrecipitationWarning({
-  title,
-  body,
-}: {
-  title: string
-  body: React.ReactNode
-}) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-3 rounded-lg border-2 border-amber-500/50 bg-amber-500/10 p-4"
-    >
-      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
-      <div className="space-y-2 text-sm leading-relaxed text-amber-100">
-        <p className="font-semibold">{title}</p>
-        {body}
-      </div>
     </div>
   )
 }
