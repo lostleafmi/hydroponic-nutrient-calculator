@@ -51,6 +51,16 @@ export interface CalculateRecipeResult {
   threeTankRecipe: ThreeTankRecipe
   multiPartRecipe: MultiPartTankRecipe
   directRecipe: DirectMixRecipe
+  /**
+   * The sanitized volume/ratio actually used to produce the salt amounts
+   * above. Client-side solubility checks must be run against *this* ratio
+   * rather than whatever `dilutionRatio` happens to be in local state at
+   * render time — those can briefly disagree while a debounced recalculation
+   * is in flight, and feeding a mismatched ratio into the (ratio-invariant)
+   * solubility formula makes it report a wildly wrong "safe ratio".
+   */
+  stockVolumeLiters: number
+  dilutionRatio: number
 }
 
 function sanitizePositiveNumber(value: number, fallback: number): number {
@@ -91,5 +101,7 @@ export async function calculateRecipeAction(
     threeTankRecipe,
     multiPartRecipe,
     directRecipe,
+    stockVolumeLiters,
+    dilutionRatio,
   }
 }

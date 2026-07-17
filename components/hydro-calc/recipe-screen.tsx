@@ -257,6 +257,21 @@ export function RecipeScreen({
   // Solubility-aware safety check for the chosen mode. We feed in the *actual*
   // tank groupings used in the UI so the limiting-salt report matches the
   // bottle the user will be filling.
+  //
+  // Important: this must be checked against the volume/ratio that the server
+  // action actually used to produce these salt amounts (`calcResult`), not
+  // the live `stockVolumeLiters`/`dilutionRatio` state. Those can briefly run
+  // ahead of `calcResult` while a debounced recalculation is in flight — e.g.
+  // right after the auto-sync effect below writes a new recommended ratio
+  // into state. Since the safe-ratio formula is only ratio-invariant when the
+  // ratio matches the one the grams were computed with, feeding it a
+  // still-live (already-bumped) ratio against stale grams makes the reported
+  // "safe ratio" balloon on every render — which then feeds right back into
+  // that same auto-sync effect and spirals into "Maximum update depth
+  // exceeded". Anchoring on `calcResult`'s own basis keeps the two in sync.
+  const solubilityBasisVolumeLiters = calcResult?.stockVolumeLiters ?? stockVolumeLiters
+  const solubilityBasisDilutionRatio = calcResult?.dilutionRatio ?? dilutionRatio
+
   const solubilityReport = useMemo(() => {
     if (usesSeparateNitrogenLayout) {
       const tanks = [
@@ -266,7 +281,7 @@ export function RecipeScreen({
       if (threeTankRecipe.hasMicroTank) {
         tanks.push({ name: "Tank 3 (Micros)", salts: threeTankRecipe.tank3 })
       }
-      return checkRecipeSolubility(tanks, stockVolumeLiters, dilutionRatio)
+      return checkRecipeSolubility(tanks, solubilityBasisVolumeLiters, solubilityBasisDilutionRatio)
     }
     if (usesPerPartTanks) {
       return checkRecipeSolubility(
@@ -274,8 +289,8 @@ export function RecipeScreen({
           name: `${tank.name} (${tank.partName})`,
           salts: tank.salts,
         })),
-        stockVolumeLiters,
-        dilutionRatio
+        solubilityBasisVolumeLiters,
+        solubilityBasisDilutionRatio
       )
     }
     return null
@@ -284,8 +299,8 @@ export function RecipeScreen({
     usesPerPartTanks,
     threeTankRecipe,
     multiPartRecipe,
-    stockVolumeLiters,
-    dilutionRatio,
+    solubilityBasisVolumeLiters,
+    solubilityBasisDilutionRatio,
   ])
 
   // For doser mode we prefer a "real-world doser preset" (1:100, 1:128, 1:200)
