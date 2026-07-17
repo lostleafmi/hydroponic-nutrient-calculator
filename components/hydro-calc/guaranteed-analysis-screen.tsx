@@ -436,21 +436,21 @@ function PartAnalysisCard({
               </div>
 
               <NutrientInput
-                label="Chelated Iron"
+                label="Iron"
                 fullLabel="Fe"
                 value={part.iron}
                 onChange={(v) => onUpdate({ iron: v })}
                 tooltip="Iron is crucial for chlorophyll synthesis."
               />
               <NutrientInput
-                label="Chelated Manganese"
+                label="Manganese"
                 fullLabel="Mn"
                 value={part.manganese}
                 onChange={(v) => onUpdate({ manganese: v })}
                 tooltip="Manganese assists in photosynthesis."
               />
               <NutrientInput
-                label="Chelated Zinc"
+                label="Zinc"
                 fullLabel="Zn"
                 value={part.zinc}
                 onChange={(v) => onUpdate({ zinc: v })}
@@ -464,7 +464,7 @@ function PartAnalysisCard({
                 tooltip="Boron aids in cell wall formation."
               />
               <NutrientInput
-                label="Chelated Copper"
+                label="Copper"
                 fullLabel="Cu"
                 value={part.copper}
                 onChange={(v) => onUpdate({ copper: v })}
