@@ -46,6 +46,7 @@ import {
   STAGE_WEEK_COUNT,
   type FeedingStage,
 } from "@/lib/hydro-calc/feeding-scheduler"
+import { buildFormulationTanksData, type FormulationTankMode } from "@/lib/hydro-calc/formulation-export"
 import type { PartAnalysis } from "./guaranteed-analysis-screen"
 import type { NutrientPart, StockTankOption } from "./feeding-rates-screen"
 import {
@@ -529,11 +530,61 @@ export function RecipeScreen({
   const mlPerGallon = stockTankMlPerGallon(dilutionRatio)
   const mlPerLiter = stockTankMlPerLiter(dilutionRatio)
 
+  // Direct-mix amounts are already sized for the whole reservoir (no stock
+  // tank being diluted), so there's no meaningful dilution ratio there.
+  const effectiveDilutionRatio = stockTankOption === "direct" ? 1 : dilutionRatio
+
+  const formulationMode: FormulationTankMode = usesSeparateNitrogenLayout
+    ? "separate-nitrogen"
+    : usesPerPartTanks
+      ? "per-part"
+      : "direct"
+
+  // The full per-tank ingredient + mixing breakdown, in the shape the
+  // standalone Feeding Scheduler's import parser expects. Built from the
+  // exact same recipe results rendered above, so it always matches what the
+  // user sees on this screen.
+  const formulationTanksData = useMemo(
+    () =>
+      buildFormulationTanksData({
+        mode: formulationMode,
+        threeTankRecipe,
+        multiPartRecipe,
+        directRecipe,
+        ecScaleFactor,
+        stockTankSize,
+        stockTankUnit,
+        dilutionRatio: effectiveDilutionRatio,
+        isDoser: stockTankOption === "doser",
+      }),
+    [
+      formulationMode,
+      threeTankRecipe,
+      multiPartRecipe,
+      directRecipe,
+      ecScaleFactor,
+      stockTankSize,
+      stockTankUnit,
+      effectiveDilutionRatio,
+      stockTankOption,
+    ]
+  )
+
+  // Sensible starting point for a formulation's name — there's no dedicated
+  // "formulation name" input yet, so we fall back to a name built from the
+  // nutrient parts currently in the recipe. Used both for Save to Dashboard
+  // and as the default in the "Add to Feeding Scheduler" modal.
+  const defaultSchedulerRecipeName = useMemo(() => {
+    const partNames = parts.map((p) => p.name.trim()).filter(Boolean)
+    return partNames.length > 0 ? `${partNames.join(" + ")} Recipe` : "My Recipe"
+  }, [parts])
+
   const handleSaveToDashboard = async () => {
     if (isSaving) return
     setIsSaving(true)
     try {
       const token = await getToken()
+      const resolvedTargetEc = parsedTargetEc > 0 ? parsedTargetEc : estimatedEc
       const payload = {
         // Strip local blob URLs from photo fields before sending
         partsAnalysis: partsAnalysis.map(({ photoUrl: _photoUrl, photoName: _photoName, ...p }) => p),
@@ -543,13 +594,23 @@ export function RecipeScreen({
         stockTankSize,
         stockTankUnit,
         concentrationRatio: dilutionRatio,
-        targetEc: parsedTargetEc > 0 ? parsedTargetEc : estimatedEc,
+        targetEc: resolvedTargetEc,
         ecScaleFactor,
         elementalTargets: targets,
         estimatedEc,
         doserLayout: stockTankOption === "doser" ? doserLayout : undefined,
         keepMicrosSeparate: usesSeparateNitrogenLayout ? keepMicrosSeparate : undefined,
         savedAt: new Date().toISOString(),
+
+        // --- Rich tank breakdown for the Feeding Scheduler import parser ---
+        id: crypto.randomUUID(),
+        name: defaultSchedulerRecipeName,
+        createdAt: new Date().toISOString(),
+        targetEC: resolvedTargetEc ?? undefined,
+        dilutionRatio: effectiveDilutionRatio,
+        defaultStockTankSize: formulationTanksData.defaultStockTankSize,
+        usageRates: formulationTanksData.usageRates,
+        tanks: formulationTanksData.tanks,
       }
 
       const res = await fetch(DASHBOARD_API_URL, {
@@ -580,14 +641,6 @@ export function RecipeScreen({
       setIsSaving(false)
     }
   }
-
-  // Sensible starting point for the scheduler modal's editable name field —
-  // there's no persisted "formulation name" concept yet, so we fall back to
-  // a name built from the nutrient parts currently in the recipe.
-  const defaultSchedulerRecipeName = useMemo(() => {
-    const partNames = parts.map((p) => p.name.trim()).filter(Boolean)
-    return partNames.length > 0 ? `${partNames.join(" + ")} Recipe` : "My Recipe"
-  }, [parts])
 
   const openSchedulerModal = () => {
     setSchedulerRecipeName(defaultSchedulerRecipeName)
@@ -645,11 +698,20 @@ export function RecipeScreen({
     setIsSavingSchedulerEntry(true)
     try {
       const trimmedNotes = schedulerNotes.trim()
+      const resolvedTargetEc = parsedTargetEc > 0 ? parsedTargetEc : estimatedEc
       const entry = await addFeedingScheduleEntry({
         recipeName: trimmedName,
         stage: schedulerStage,
         weeks: Array.from(schedulerWeeks),
         notes: trimmedNotes || undefined,
+
+        // --- Rich tank breakdown so the scheduler can render real tank
+        // cards instead of falling back to a dummy starter tank ---
+        targetEC: resolvedTargetEc ?? undefined,
+        dilutionRatio: effectiveDilutionRatio,
+        defaultStockTankSize: formulationTanksData.defaultStockTankSize,
+        usageRates: formulationTanksData.usageRates,
+        tanks: formulationTanksData.tanks,
       })
 
       setSchedulerEntryCount((count) => count + 1)

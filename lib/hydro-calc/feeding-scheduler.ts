@@ -24,6 +24,7 @@ import {
   deleteFeedingScheduleEntryAction,
   getFeedingScheduleEntriesAction,
 } from "@/app/actions/feeding-schedule"
+import type { FormulationTank } from "./formulation-export"
 
 export type FeedingStage = "Vegetative" | "Flowering"
 
@@ -34,6 +35,12 @@ export const STAGE_WEEK_COUNT: Record<FeedingStage, number> = {
 
 /**
  * Matches the `FeedingScheduleEntry` type defined on the main site.
+ *
+ * The Feeding Scheduler's import parser reads `tanks`/`usageRates`/
+ * `defaultStockTankSize`/`targetEC`/`dilutionRatio` to render real tank
+ * cards — without them it falls back to a dummy "starter tank". These
+ * fields are optional here only for backward compatibility with entries
+ * saved before this data was captured.
  */
 export interface FeedingScheduleEntry {
   id: string
@@ -45,6 +52,16 @@ export interface FeedingScheduleEntry {
   weeks: number[]
   notes?: string
   createdAt: string
+  /** Estimated reservoir EC (mS/cm) this recipe was tuned to */
+  targetEC?: number
+  /** Stock tank dilution/injector ratio (the "N" in 1:N) */
+  dilutionRatio?: number
+  /** Default stock tank size, in gallons */
+  defaultStockTankSize?: number
+  /** mL of each stock tank to use per gallon of reservoir water, keyed by tank id */
+  usageRates?: Record<string, number>
+  /** Full per-tank ingredient + mixing breakdown */
+  tanks?: FormulationTank[]
 }
 
 const STORAGE_KEY = "hydro-calc:feeding-schedule-entries"
