@@ -1,7 +1,6 @@
 "use client"
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
-import { useAuth } from "@clerk/nextjs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -53,6 +52,7 @@ import {
   calculateRecipeAction,
   type CalculateRecipeResult,
 } from "@/app/actions/calculate-recipe"
+import { saveFormulationToDashboardAction } from "@/app/actions/formulations"
 import {
   DOSER_PRESET_RATIOS,
   RAW_SALTS,
@@ -131,9 +131,6 @@ const MICRO_SALT_KEYS = new Set<SaltKey>([
   "sodiumMolybdate",
 ])
 
-const DASHBOARD_API_URL =
-  process.env.NEXT_PUBLIC_DASHBOARD_API_URL ?? "https://localhost:3005/api/formulations/save"
-
 export function RecipeScreen({
   partsAnalysis,
   parts,
@@ -142,7 +139,6 @@ export function RecipeScreen({
   initialSettings = {},
   onBack,
 }: RecipeScreenProps) {
-  const { getToken } = useAuth()
   const { toast } = useToast()
   const [isSaving, setIsSaving] = useState(false)
 
@@ -583,7 +579,6 @@ export function RecipeScreen({
     if (isSaving) return
     setIsSaving(true)
     try {
-      const token = await getToken()
       const resolvedTargetEc = parsedTargetEc > 0 ? parsedTargetEc : estimatedEc
       const payload = {
         // Strip local blob URLs from photo fields before sending
@@ -613,18 +608,14 @@ export function RecipeScreen({
         tanks: formulationTanksData.tanks,
       }
 
-      const res = await fetch(DASHBOARD_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(payload),
-      })
+      const result = await saveFormulationToDashboardAction(payload)
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "")
-        throw new Error(errText || `Server responded with ${res.status}`)
+      if (!result.ok) {
+        throw new Error(
+          result.reason === "unauthenticated"
+            ? "Please sign in to save formulations to your dashboard."
+            : result.message
+        )
       }
 
       toast({
