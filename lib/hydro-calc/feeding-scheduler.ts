@@ -2,15 +2,17 @@
  * Client-safe data layer for the Feeding Scheduler.
  *
  * `FeedingScheduleEntry` mirrors the type of the same name defined on the
- * main site, so entries written here (via Clerk `publicMetadata`) can be
- * read back by that site without any transformation.
+ * main site, so entries written here can be read back by that site without
+ * any transformation.
  *
  * Persistence strategy:
- *  - Signed-in users: entries live in the user's Clerk `publicMetadata.feedingSchedules`,
+ *  - Signed-in users: entries live in the main site's Supabase-backed store,
  *    read/written through the Server Action in `app/actions/feeding-schedule.ts`
- *    (writing `publicMetadata` requires the Backend API, so it can't happen
- *    directly from the client).
- *  - Signed-out users (or if the Clerk round-trip fails for any reason):
+ *    (which resolves the Clerk session server-side via `auth()` and calls
+ *    the main site's API — entries are no longer written to Clerk
+ *    `publicMetadata`, since the full tank breakdown per entry quickly
+ *    exceeds Clerk's 8KB metadata limit).
+ *  - Signed-out users (or if the main-site round-trip fails for any reason):
  *    entries fall back to localStorage so the feature still works offline /
  *    without an account.
  *
@@ -91,13 +93,13 @@ function writeLocalStore(entries: FeedingScheduleEntry[]) {
   }
 }
 
-/** Fetches every saved entry, preferring Clerk metadata when the user is signed in. */
+/** Fetches every saved entry, preferring the main site's store when the user is signed in. */
 export async function getFeedingScheduleEntries(): Promise<FeedingScheduleEntry[]> {
   try {
     const result = await getFeedingScheduleEntriesAction()
     if (result.ok) return result.entries
   } catch (err) {
-    console.error("Failed to load feeding schedule entries from Clerk:", err)
+    console.error("Failed to load feeding schedule entries from main site:", err)
   }
 
   return readLocalStore()
@@ -113,17 +115,17 @@ export async function addFeedingScheduleEntry(
     createdAt: new Date().toISOString(),
   }
 
-  let savedToClerk = false
+  let savedToMainSite = false
   try {
     const result = await addFeedingScheduleEntryAction(entry)
-    savedToClerk = result.ok
+    savedToMainSite = result.ok
   } catch (err) {
-    console.error("Failed to save feeding schedule entry to Clerk:", err)
+    console.error("Failed to save feeding schedule entry to main site:", err)
   }
 
-  // Not signed in, or the Clerk round-trip failed — keep the entry locally
-  // so it isn't lost.
-  if (!savedToClerk) {
+  // Not signed in, or the main-site round-trip failed — keep the entry
+  // locally so it isn't lost.
+  if (!savedToMainSite) {
     const entries = readLocalStore()
     entries.push(entry)
     writeLocalStore(entries)
@@ -133,15 +135,15 @@ export async function addFeedingScheduleEntry(
 }
 
 export async function deleteFeedingScheduleEntry(id: string): Promise<void> {
-  let deletedFromClerk = false
+  let deletedFromMainSite = false
   try {
     const result = await deleteFeedingScheduleEntryAction(id)
-    deletedFromClerk = result.ok
+    deletedFromMainSite = result.ok
   } catch (err) {
-    console.error("Failed to delete feeding schedule entry from Clerk:", err)
+    console.error("Failed to delete feeding schedule entry from main site:", err)
   }
 
-  if (!deletedFromClerk) {
+  if (!deletedFromMainSite) {
     writeLocalStore(readLocalStore().filter((entry) => entry.id !== id))
   }
 }
