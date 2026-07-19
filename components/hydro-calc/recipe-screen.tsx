@@ -141,6 +141,8 @@ export function RecipeScreen({
 }: RecipeScreenProps) {
   const { toast } = useToast()
   const [isSaving, setIsSaving] = useState(false)
+  const [isSaveDashboardModalOpen, setIsSaveDashboardModalOpen] = useState(false)
+  const [dashboardFormulationName, setDashboardFormulationName] = useState("")
 
   const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState(false)
   const [isSavingSchedulerEntry, setIsSavingSchedulerEntry] = useState(false)
@@ -575,10 +577,22 @@ export function RecipeScreen({
     return partNames.length > 0 ? `${partNames.join(" + ")} Recipe` : "My Recipe"
   }, [parts])
 
+  // Sensible fallback when the user submits the naming modal without typing
+  // anything — includes today's date so multiple untitled saves stay
+  // distinguishable on the dashboard.
+  const buildUntitledFormulationName = () =>
+    `Untitled Formulation - ${new Date().toLocaleDateString()}`
+
+  const openSaveDashboardModal = () => {
+    setDashboardFormulationName(defaultSchedulerRecipeName)
+    setIsSaveDashboardModalOpen(true)
+  }
+
   const handleSaveToDashboard = async () => {
     if (isSaving) return
     setIsSaving(true)
     try {
+      const formulationName = dashboardFormulationName.trim() || buildUntitledFormulationName()
       const resolvedTargetEc = parsedTargetEc > 0 ? parsedTargetEc : estimatedEc
       const payload = {
         // Strip local blob URLs from photo fields before sending
@@ -599,7 +613,7 @@ export function RecipeScreen({
 
         // --- Rich tank breakdown for the Feeding Scheduler import parser ---
         id: crypto.randomUUID(),
-        name: defaultSchedulerRecipeName,
+        name: formulationName,
         createdAt: new Date().toISOString(),
         targetEC: resolvedTargetEc ?? undefined,
         dilutionRatio: effectiveDilutionRatio,
@@ -618,9 +632,10 @@ export function RecipeScreen({
         )
       }
 
+      setIsSaveDashboardModalOpen(false)
       toast({
         title: "Formulation saved to Dashboard",
-        description: "You can view and manage it on your main dashboard.",
+        description: `Saved as "${formulationName}". You can view and manage it on your main dashboard.`,
       })
     } catch (err) {
       toast({
@@ -1557,7 +1572,7 @@ export function RecipeScreen({
 
         {hasValidData && (
           <Button
-            onClick={handleSaveToDashboard}
+            onClick={openSaveDashboardModal}
             disabled={isSaving}
             className="gap-2 bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90 disabled:opacity-70"
           >
@@ -1570,6 +1585,59 @@ export function RecipeScreen({
           </Button>
         )}
       </div>
+
+      {/* Save to Dashboard modal — collects a formulation name before saving */}
+      <Dialog open={isSaveDashboardModalOpen} onOpenChange={(open) => !isSaving && setIsSaveDashboardModalOpen(open)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save to Dashboard</DialogTitle>
+            <DialogDescription>
+              Give this formulation a name so it&apos;s easy to find on your main dashboard.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div>
+            <Label htmlFor="dashboard-formulation-name" className="mb-1.5 block text-sm font-medium">
+              Formulation name
+            </Label>
+            <Input
+              id="dashboard-formulation-name"
+              value={dashboardFormulationName}
+              onChange={(e) => setDashboardFormulationName(e.target.value)}
+              placeholder={buildUntitledFormulationName()}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleSaveToDashboard()
+                }
+              }}
+              className="border-2 border-border"
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Leave blank to save as &quot;{buildUntitledFormulationName()}&quot;.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsSaveDashboardModalOpen(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveToDashboard} disabled={isSaving} className="gap-2">
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <BookmarkPlus className="h-4 w-4" />
+              )}
+              {isSaving ? "Saving…" : "Save to Dashboard"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add to Feeding Scheduler modal */}
       <Dialog open={isSchedulerModalOpen} onOpenChange={setIsSchedulerModalOpen}>
