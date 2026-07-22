@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical, AlertCircle } from "lucide-react"
+import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical, AlertCircle, AlertTriangle } from "lucide-react"
 import {
   SALT_CHECKBOX_OPTIONS,
   type IncludedSaltsSelection,
@@ -160,6 +160,16 @@ export function GuaranteedAnalysisScreen({
               Input your product&apos;s nutrient percentages from the guaranteed analysis on the label.
               Take a picture or a screenshot of the guaranteed analysis on your label and upload it
               for reference while you input the values from the label into the corresponding fields.
+            </p>
+          </div>
+
+          {/* Accuracy disclaimer */}
+          <div className="flex items-start gap-3 rounded-lg border-2 border-destructive/70 bg-destructive/10 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <p className="text-sm font-bold leading-snug text-destructive">
+              IT IS EXTREMELY IMPORTANT THAT YOU DOUBLE CHECK THESE NUMBERS TO ENSURE THEY ARE
+              CORRECT, PUTTING INCORRECT NUMBERS IN THESE FIELDS CAN BE DETRIMENTAL TO YOUR MIX
+              AND YOUR PLANTS HEALTH.
             </p>
           </div>
 
