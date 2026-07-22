@@ -1416,78 +1416,20 @@ export function RecipeScreen({
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4">
+            {/* Rendered from `getOrderedSaltEntries` (the same `SALT_DISPLAY_ORDER`
+                used to build the saved formulation's tank inputs) so the mix
+                order shown here always matches what gets saved to the
+                Dashboard / Feeding Scheduler. */}
             <div className="space-y-2 mb-4">
-              <SaltRow
-                name={RAW_SALTS.calciumNitrate.name}
-                formula={RAW_SALTS.calciumNitrate.formula}
-                amount={scaledGrams(directRecipe.salts.calciumNitrate)}
-              />
-              <SaltRow
-                name={RAW_SALTS.potassiumNitrate.name}
-                formula={RAW_SALTS.potassiumNitrate.formula}
-                amount={scaledGrams(directRecipe.salts.potassiumNitrate)}
-              />
-              <SaltRow
-                name={RAW_SALTS.ammoniumNitrate.name}
-                formula={RAW_SALTS.ammoniumNitrate.formula}
-                amount={scaledGrams(directRecipe.salts.ammoniumNitrate)}
-              />
-              <SaltRow
-                name={RAW_SALTS.monoPotassiumPhosphate.name}
-                formula={RAW_SALTS.monoPotassiumPhosphate.formula}
-                amount={scaledGrams(directRecipe.salts.monoPotassiumPhosphate)}
-              />
-              <SaltRow
-                name={RAW_SALTS.magnesiumSulfate.name}
-                formula={RAW_SALTS.magnesiumSulfate.formula}
-                amount={scaledGrams(directRecipe.salts.magnesiumSulfate)}
-              />
-              <SaltRow
-                name={RAW_SALTS.potassiumSulfate.name}
-                formula={RAW_SALTS.potassiumSulfate.formula}
-                amount={scaledGrams(directRecipe.salts.potassiumSulfate)}
-              />
-              <SaltRow
-                name={RAW_SALTS.ammoniumSulfate.name}
-                formula={RAW_SALTS.ammoniumSulfate.formula}
-                amount={scaledGrams(directRecipe.salts.ammoniumSulfate)}
-              />
-              <SaltRow
-                name={RAW_SALTS.ironDTPA.name}
-                formula={RAW_SALTS.ironDTPA.formula}
-                amount={scaledGrams(directRecipe.salts.ironDTPA)}
-                micro
-              />
-              <SaltRow
-                name={RAW_SALTS.manganeseSulfate.name}
-                formula={RAW_SALTS.manganeseSulfate.formula}
-                amount={scaledGrams(directRecipe.salts.manganeseSulfate)}
-                micro
-              />
-              <SaltRow
-                name={RAW_SALTS.zincSulfate.name}
-                formula={RAW_SALTS.zincSulfate.formula}
-                amount={scaledGrams(directRecipe.salts.zincSulfate)}
-                micro
-              />
-              <SaltRow
-                name={RAW_SALTS.boricAcid.name}
-                formula={RAW_SALTS.boricAcid.formula}
-                amount={scaledGrams(directRecipe.salts.boricAcid)}
-                micro
-              />
-              <SaltRow
-                name={RAW_SALTS.copperSulfate.name}
-                formula={RAW_SALTS.copperSulfate.formula}
-                amount={scaledGrams(directRecipe.salts.copperSulfate)}
-                micro
-              />
-              <SaltRow
-                name={RAW_SALTS.sodiumMolybdate.name}
-                formula={RAW_SALTS.sodiumMolybdate.formula}
-                amount={scaledGrams(directRecipe.salts.sodiumMolybdate)}
-                micro
-              />
+              {getOrderedSaltEntries(directRecipe.salts).map(([key, amount]) => (
+                <SaltRow
+                  key={key}
+                  name={RAW_SALTS[key].name}
+                  formula={RAW_SALTS[key].formula}
+                  amount={scaledGrams(amount)}
+                  micro={MICRO_SALT_KEYS.has(key)}
+                />
+              ))}
             </div>
           </CardContent>
         </Card>
