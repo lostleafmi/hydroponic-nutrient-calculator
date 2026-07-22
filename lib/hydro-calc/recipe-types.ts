@@ -258,16 +258,25 @@ export function isSeparateNitrogenAvailable(partCount: number): boolean {
   return partCount <= SEPARATE_NITROGEN_MAX_PARTS
 }
 
-/** Safe dissolve order when displaying or mixing salts within one stock tank */
+/**
+ * Safe dissolve order when displaying or mixing salts within one stock tank.
+ *
+ * Macros are listed first, then micronutrients as a group (Iron DTPA
+ * dissolved first among them) — this mirrors the "add the salts in the
+ * order listed above, dissolving the Iron DTPA first among the
+ * micronutrients" mixing instructions shown on-screen, so every consumer of
+ * `getOrderedSaltEntries` (on-screen cards *and* the saved formulation
+ * payload) stays in agreement.
+ */
 export const SALT_DISPLAY_ORDER: SaltKey[] = [
   "calciumNitrate",
   "potassiumNitrate",
   "ammoniumNitrate",
-  "ironDTPA",
   "monoPotassiumPhosphate",
   "magnesiumSulfate",
   "potassiumSulfate",
   "ammoniumSulfate",
+  "ironDTPA",
   "manganeseSulfate",
   "zincSulfate",
   "boricAcid",
