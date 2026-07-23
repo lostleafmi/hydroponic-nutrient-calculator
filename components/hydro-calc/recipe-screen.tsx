@@ -1123,6 +1123,41 @@ export function RecipeScreen({
         </div>
       )}
 
+      {/* Target-EC scale mismatch — every gram amount below is `raw × ecScaleFactor`
+          (see `scaledGrams`), which intentionally diverges from the unscaled
+          ppm shown on the "What your plants will get" card above whenever a
+          manual Target EC is set. That's easy to miss since the only other
+          indicator is a small caption next to the Target EC input, which can
+          be scrolled far out of view by the time the tank cards render —
+          surfacing it again right here prevents the salt amounts below from
+          looking like a broken/unscaled recipe. */}
+      {hasValidData && targetEcIsManual && Math.abs(ecScaleFactor - 1) > 0.005 && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-lg border-2 border-amber-500/60 bg-amber-500/10 p-4"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+          <div className="space-y-1.5 text-sm leading-relaxed text-amber-100">
+            <p className="font-semibold">
+              Every amount below is scaled ×{ecScaleFactor.toFixed(2)} to hit your custom Target
+              EC of {parsedTargetEc.toFixed(2)} mS/cm — not the raw amounts for the ppm targets
+              shown above (estimated {estimatedEc?.toFixed(2)} mS/cm).
+            </p>
+            <p>
+              If these gram amounts look too small or too large, this is almost always why.{" "}
+              <button
+                type="button"
+                onClick={resetTargetEc}
+                className="font-medium text-amber-50 underline-offset-2 hover:underline"
+              >
+                Reset Target EC to the estimated value
+              </button>{" "}
+              to see the unscaled recipe.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Mixing-safety banner — non-doser modes only (doser banner shown above settings) */}
       {hasValidData && stockTankOption !== "doser" && (
         <MixingSafetyBanner
