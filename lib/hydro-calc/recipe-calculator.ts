@@ -199,22 +199,73 @@ export function calculateStockTankRecipe(
   // whereas ammonium salts introduce ammoniacal-N and (for (NH₄)₂SO₄) extra
   // sulfate. Only once no enabled salt can supply Nitrogen at all do we
   // report the gap.
+  //
+  // When Calcium Carbonate is *also* explicitly enabled (e.g. "Crop
+  // Salt"-style lines that blend both Calcium sources), the two are split
+  // instead of Carbonate being silently zeroed out: Calcium Nitrate is
+  // capped at whichever is smaller of "enough for the full Nitrogen target"
+  // or "enough for the full Calcium target", and Carbonate tops up whatever
+  // Calcium is still missing. That keeps Carbonate's Nitrogen-free Calcium
+  // contribution real (never overwritten with 0) while still letting
+  // Calcium Nitrate carry as much of the Nitrogen load as it can without
+  // overshooting Calcium.
   let calciumNitrateGrams = 0
+  let calciumCarbonateGrams = 0
+  // Set only in the "both enabled" branch below when Calcium Nitrate had to
+  // be capped short of the full Nitrogen target to avoid overshooting
+  // Calcium — in that case the later "bump Ca(NO₃)₂ for Nitrogen" fallback
+  // must be skipped, or it would undo the cap and blow past the Calcium
+  // target a second time.
+  let calciumNitrateCappedForCalcium = false
+  const nitrateEnabled = isEnabled("calciumNitrate")
+  const carbonateEnabled = isEnabled("calciumCarbonate")
+
   if (targets.calcium > 0) {
-    if (isEnabled("calciumNitrate")) {
+    if (nitrateEnabled && carbonateEnabled) {
+      const nitrateGramsForNitrogen = saltGramsForTargetPpm(
+        targets.nitrogen,
+        RAW_SALTS.calciumNitrate.n,
+        stockVolumeLiters,
+        dilutionRatio
+      )
+      const nitrateGramsForCalcium = saltGramsForTargetPpm(
+        targets.calcium,
+        RAW_SALTS.calciumNitrate.ca,
+        stockVolumeLiters,
+        dilutionRatio
+      )
+      calciumNitrateGrams = Math.min(nitrateGramsForNitrogen, nitrateGramsForCalcium)
+      calciumNitrateCappedForCalcium = nitrateGramsForCalcium < nitrateGramsForNitrogen
+
+      const calciumFromNitrate = ppmFromSaltInStock(
+        calciumNitrateGrams,
+        RAW_SALTS.calciumNitrate.ca,
+        stockVolumeLiters,
+        dilutionRatio
+      )
+      const remainingCalciumPpm = Math.max(0, targets.calcium - calciumFromNitrate)
+      calciumCarbonateGrams = saltGramsForTargetPpm(
+        remainingCalciumPpm,
+        RAW_SALTS.calciumCarbonate.ca,
+        stockVolumeLiters,
+        dilutionRatio
+      )
+    } else if (nitrateEnabled) {
       calciumNitrateGrams = saltGramsForTargetPpm(
         targets.calcium,
         RAW_SALTS.calciumNitrate.ca,
         stockVolumeLiters,
         dilutionRatio
       )
-    } else if (isEnabled("calciumCarbonate")) {
+    } else if (carbonateEnabled) {
       // Nitrogen-free calcium fallback when Calcium Nitrate isn't part of the
       // product being replicated. Contributes no Nitrogen, so the remaining-N
       // logic below still needs another enabled salt to close that gap.
-      assignToTankA(
-        "calciumCarbonate",
-        saltGramsForTargetPpm(targets.calcium, RAW_SALTS.calciumCarbonate.ca, stockVolumeLiters, dilutionRatio)
+      calciumCarbonateGrams = saltGramsForTargetPpm(
+        targets.calcium,
+        RAW_SALTS.calciumCarbonate.ca,
+        stockVolumeLiters,
+        dilutionRatio
       )
     } else {
       warnings.push({ element: "calcium", label: "Calcium" })
@@ -236,13 +287,19 @@ export function calculateStockTankRecipe(
         "potassiumNitrate",
         saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.potassiumNitrate.n, stockVolumeLiters, dilutionRatio)
       )
-    } else if (isEnabled("calciumNitrate")) {
+    } else if (nitrateEnabled && !calciumNitrateCappedForCalcium) {
       // No dedicated nitrate-only salt is enabled, but Calcium Nitrate is —
       // re-size it off the full Nitrogen target instead of the Calcium
       // target. This grams value is always ≥ the Calcium-based amount
       // above (it's solving for a strictly larger requirement on the same
       // salt), so the Calcium target stays fully met, just with some
       // unavoidable Calcium overshoot as the trade-off for hitting Nitrogen.
+      //
+      // Skipped when `calciumNitrateCappedForCalcium` is set: Carbonate is
+      // already covering the rest of the Calcium target in that case, so
+      // bumping Calcium Nitrate here would overshoot Calcium a second time
+      // instead of just leaving the Nitrogen gap to another enabled salt
+      // (or, if none exists, a Nitrogen warning).
       calciumNitrateGrams = saltGramsForTargetPpm(
         targets.nitrogen,
         RAW_SALTS.calciumNitrate.n,
@@ -265,6 +322,7 @@ export function calculateStockTankRecipe(
   }
 
   assignToTankA("calciumNitrate", calciumNitrateGrams)
+  assignToTankA("calciumCarbonate", calciumCarbonateGrams)
 
   // Iron — Fe-DTPA is the only chelate we model
   if (targets.iron > 0) {
