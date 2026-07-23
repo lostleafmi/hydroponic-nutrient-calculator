@@ -103,6 +103,55 @@ export interface SaltGapWarning {
   label: string
 }
 
+/**
+ * Calcium Carbonate (CaCO₃) is essentially insoluble at stock-tank
+ * concentrations — see the note in `calculateStockTankRecipe` — so it's
+ * never assigned into a stock tank's `SaltAmounts`, even when the user
+ * selects it and it's counted toward meeting the Calcium target. Instead
+ * every recipe surfaces it here as a "dump straight into the reservoir /
+ * batch tank" amount, separate from anything meant to be dissolved into a
+ * concentrated stock solution.
+ */
+export interface DirectAddCalciumCarbonate {
+  /** Total grams for one full stock-tank refill's worth of nutrients (same denominator as the accompanying tank amounts) */
+  grams: number
+  /** Grams to add per US gallon of reservoir/batch water — the actionable dosing rate, independent of stock tank size or dilution ratio */
+  gramsPerGallon: number
+  /** Grams to add per liter of reservoir/batch water */
+  gramsPerLiter: number
+}
+
+/** Build the reservoir-relative dosing rate from a raw gram amount, or `undefined` when there's nothing to add. */
+export function buildDirectAddCalciumCarbonate(
+  grams: number,
+  stockVolumeLiters: number,
+  dilutionRatio: number
+): DirectAddCalciumCarbonate | undefined {
+  if (!(grams > 0)) return undefined
+  const reservoirLiters = stockVolumeLiters * dilutionRatio
+  if (!(reservoirLiters > 0)) return undefined
+  const gramsPerLiter = grams / reservoirLiters
+  return {
+    grams,
+    gramsPerLiter,
+    gramsPerGallon: gramsPerLiter * LITERS_PER_GALLON,
+  }
+}
+
+/** Combine two direct-add amounts computed at the same stock volume/ratio (e.g. summing per-part contributions). */
+export function combineDirectAddCalciumCarbonate(
+  a: DirectAddCalciumCarbonate | undefined,
+  b: DirectAddCalciumCarbonate | undefined
+): DirectAddCalciumCarbonate | undefined {
+  if (!a) return b
+  if (!b) return a
+  return {
+    grams: a.grams + b.grams,
+    gramsPerGallon: a.gramsPerGallon + b.gramsPerGallon,
+    gramsPerLiter: a.gramsPerLiter + b.gramsPerLiter,
+  }
+}
+
 export interface TankRecipe {
   tankA: SaltAmounts
   tankB: SaltAmounts
@@ -110,6 +159,8 @@ export interface TankRecipe {
   warnings?: SaltGapWarning[]
   /** True when one or more targets couldn't be perfectly matched with the enabled salts */
   isApproximate?: boolean
+  /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into tankA/tankB */
+  directAddCalciumCarbonate?: DirectAddCalciumCarbonate
 }
 
 export interface ThreeTankRecipe {
@@ -125,6 +176,8 @@ export interface ThreeTankRecipe {
   hasMicronutrients: boolean
   warnings?: SaltGapWarning[]
   isApproximate?: boolean
+  /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into Tank 1 */
+  directAddCalciumCarbonate?: DirectAddCalciumCarbonate
 }
 
 export const RAW_SALTS = {
@@ -330,12 +383,16 @@ export interface MultiPartTankRecipe {
   tanks: PartStockTank[]
   warnings?: SaltGapWarning[]
   isApproximate?: boolean
+  /** Calcium Carbonate needed across all parts' recipes, consolidated and to be added directly to the reservoir/batch tank rather than into any part's tank */
+  directAddCalciumCarbonate?: DirectAddCalciumCarbonate
 }
 
 export interface DirectMixRecipe {
   salts: SaltAmounts
   warnings: SaltGapWarning[]
   isApproximate: boolean
+  /** Calcium Carbonate needed for this recipe, to add directly to the reservoir rather than mixing it in with the rest of the salts */
+  directAddCalciumCarbonate?: DirectAddCalciumCarbonate
 }
 
 /**

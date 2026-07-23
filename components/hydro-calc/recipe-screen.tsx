@@ -295,6 +295,23 @@ export function RecipeScreen({
 
   const isRecipeApproximate = activeRecipeWarnings.length > 0
 
+  // Calcium Carbonate is never placed into a stock tank (see
+  // `calculateStockTankRecipe`) — whichever mode is active drives which
+  // recipe's direct-add amount gets surfaced to the user.
+  const activeDirectAddCalciumCarbonate = useMemo(() => {
+    if (stockTankOption === "direct") return directRecipe.directAddCalciumCarbonate ?? null
+    if (usesSeparateNitrogenLayout) return threeTankRecipe.directAddCalciumCarbonate ?? null
+    if (usesPerPartTanks) return multiPartRecipe.directAddCalciumCarbonate ?? null
+    return null
+  }, [
+    stockTankOption,
+    usesSeparateNitrogenLayout,
+    usesPerPartTanks,
+    directRecipe.directAddCalciumCarbonate,
+    threeTankRecipe.directAddCalciumCarbonate,
+    multiPartRecipe.directAddCalciumCarbonate,
+  ])
+
   // Solubility-aware safety check for the chosen mode. We feed in the *actual*
   // tank groupings used in the UI so the limiting-salt report matches the
   // bottle the user will be filling.
@@ -430,24 +447,43 @@ export function RecipeScreen({
   const hasValidData = hasValidRecipeInput(partsAnalysis, parts)
 
   const neededSalts = useMemo(() => {
+    let entries: Array<[string, number]>
+
     if (stockTankOption === "direct") {
-      return Object.entries(directRecipe.salts).filter(([, amount]) => amount > 0)
-    }
-
-    const combined: Record<string, number> = {}
-    const tanks = usesSeparateNitrogenLayout
-      ? [threeTankRecipe.tank1, threeTankRecipe.tank2, threeTankRecipe.tank3]
-      : usesPerPartTanks
-        ? multiPartRecipe.tanks.map((tank) => tank.salts)
-        : []
-    for (const tank of tanks) {
-      for (const [key, amount] of Object.entries(tank)) {
-        combined[key] = (combined[key] ?? 0) + amount
+      entries = Object.entries(directRecipe.salts).filter(([, amount]) => amount > 0)
+    } else {
+      const combined: Record<string, number> = {}
+      const tanks = usesSeparateNitrogenLayout
+        ? [threeTankRecipe.tank1, threeTankRecipe.tank2, threeTankRecipe.tank3]
+        : usesPerPartTanks
+          ? multiPartRecipe.tanks.map((tank) => tank.salts)
+          : []
+      for (const tank of tanks) {
+        for (const [key, amount] of Object.entries(tank)) {
+          combined[key] = (combined[key] ?? 0) + amount
+        }
       }
+
+      entries = Object.entries(combined).filter(([, amount]) => amount > 0)
     }
 
-    return Object.entries(combined).filter(([, amount]) => amount > 0)
-  }, [threeTankRecipe, multiPartRecipe, directRecipe, stockTankOption, usesSeparateNitrogenLayout, usesPerPartTanks])
+    // Calcium Carbonate never lands in a tank's `salts` (it's a direct
+    // reservoir addition instead — see `activeDirectAddCalciumCarbonate`),
+    // but it's still a real ingredient the grower needs to buy.
+    if (activeDirectAddCalciumCarbonate && activeDirectAddCalciumCarbonate.grams > 0) {
+      entries = [...entries, ["calciumCarbonate", activeDirectAddCalciumCarbonate.grams]]
+    }
+
+    return entries
+  }, [
+    threeTankRecipe,
+    multiPartRecipe,
+    directRecipe,
+    stockTankOption,
+    usesSeparateNitrogenLayout,
+    usesPerPartTanks,
+    activeDirectAddCalciumCarbonate,
+  ])
 
   // Every part's own salt selection, unioned together — used for
   // shopping-list naming below, which isn't part-specific.
@@ -470,6 +506,8 @@ export function RecipeScreen({
       key: "calciumCarbonate",
       name: "Calcium Carbonate",
       note: "CaCO₃ - limestone/chalk, a nitrogen-free calcium source",
+      disclaimer:
+        "Calcium Carbonate has very low solubility and should not be mixed into a stock tank. Add the required amount directly to your batch tank / reservoir (or pre-mix it separately). See the note above the tank recipes for the exact amount.",
     },
     { key: "potassiumNitrate", name: "Potassium Nitrate", note: "KNO₃ - also called saltpeter" },
     { key: "monoPotassiumPhosphate", name: "Mono Potassium Phosphate", note: "MKP, KH₂PO₄" },
@@ -1158,6 +1196,38 @@ export function RecipeScreen({
         </div>
       )}
 
+      {/* Calcium Carbonate is never placed in a stock tank (see
+          `calculateStockTankRecipe`) — when the recipe calls for it, tell the
+          grower exactly how much to stir into the reservoir/batch tank
+          directly instead, since it won't show up anywhere in the tank
+          cards or "mix in a pitcher" list below. */}
+      {hasValidData && activeDirectAddCalciumCarbonate && activeDirectAddCalciumCarbonate.grams > 0 && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-lg border-2 border-amber-500/60 bg-amber-500/10 p-4"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+          <div className="space-y-1.5 text-sm leading-relaxed text-amber-100">
+            <p className="font-semibold">
+              Calcium Carbonate has very low solubility and should not be mixed into a stock tank.
+              Add the required amount directly to your batch tank / reservoir (or pre-mix it
+              separately).
+            </p>
+            <p>
+              Add{" "}
+              <span className="font-mono font-semibold text-amber-50">
+                {scaledGrams(activeDirectAddCalciumCarbonate.gramsPerGallon)}
+              </span>{" "}
+              of Calcium Carbonate per gallon (
+              <span className="font-mono">
+                {scaledGrams(activeDirectAddCalciumCarbonate.gramsPerLiter)}
+              </span>{" "}
+              per liter) of reservoir/batch water — not into any of the stock tanks below.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Mixing-safety banner — non-doser modes only (doser banner shown above settings) */}
       {hasValidData && stockTankOption !== "doser" && (
         <MixingSafetyBanner
@@ -1210,7 +1280,8 @@ export function RecipeScreen({
       {/* Recipe Cards — Separate Nitrogen (chemistry 3-tank) layout */}
       {hasValidData && usesSeparateNitrogenLayout && (
         <>
-          {/* Tank 1 — Calcium source only: Calcium Nitrate, or Calcium Carbonate as a nitrogen-free fallback */}
+          {/* Tank 1 — Calcium Nitrate only. Calcium Carbonate, even when
+              enabled, never lands here — see the direct-add banner above. */}
           <Card className="border-2 border-primary/50 bg-card">
             <CardHeader className="bg-primary/5">
               <CardTitle className="flex items-center gap-2 text-xl text-foreground">
@@ -1235,11 +1306,6 @@ export function RecipeScreen({
                   formula={RAW_SALTS.calciumNitrate.formula}
                   amount={scaledGrams(threeTankRecipe.tank1.calciumNitrate)}
                 />
-                <SaltRow
-                  name={RAW_SALTS.calciumCarbonate.name}
-                  formula={RAW_SALTS.calciumCarbonate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank1.calciumCarbonate)}
-                />
               </div>
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
                 <p className="text-sm text-muted-foreground">
@@ -1250,6 +1316,12 @@ export function RecipeScreen({
                   &quot;Tank 1&quot;.
                 </p>
               </div>
+              {threeTankRecipe.directAddCalciumCarbonate && threeTankRecipe.directAddCalciumCarbonate.grams > 0 && (
+                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                  This recipe also calls for Calcium Carbonate — see the note above these tank
+                  cards for how much to add directly to your reservoir/batch tank.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -1481,6 +1553,13 @@ export function RecipeScreen({
                 />
               ))}
             </div>
+            {directRecipe.directAddCalciumCarbonate && directRecipe.directAddCalciumCarbonate.grams > 0 && (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                This recipe also calls for Calcium Carbonate — don&apos;t dilute it in the pitcher
+                with the rest of these salts. See the note above for how much to stir directly
+                into the reservoir instead.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

@@ -15,6 +15,8 @@ import "server-only"
 import type { PartAnalysis } from "@/components/hydro-calc/guaranteed-analysis-screen"
 import type { NutrientPart } from "@/components/hydro-calc/feeding-rates-screen"
 import {
+  buildDirectAddCalciumCarbonate,
+  combineDirectAddCalciumCarbonate,
   emptyElementalTargets,
   emptySaltAmounts,
   getConcentrateGramsPerLiter,
@@ -29,6 +31,7 @@ import {
   TANK_B_SALTS,
   MICRO_KEYS,
   MICRO_TO_FE_RATIO,
+  type DirectAddCalciumCarbonate,
   type DirectMixRecipe,
   type ElementalTargets,
   type EstimatedTargets,
@@ -146,12 +149,22 @@ function ppmFromSaltInStock(
 
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
- * Tank A — Ca(NO₃)₂ (or CaCO₃ as a nitrogen-free fallback), KNO₃/NH₄NO₃
- *          (remaining N), Fe-DTPA  (see TANK_A_SALTS)
+ * Tank A — Ca(NO₃)₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
  * Tank B — MKP, MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
  * never coexist in a concentrated stock solution where they would precipitate.
+ *
+ * Calcium Carbonate (CaCO₃) is deliberately never put into either tank, even
+ * when it's the (or a) enabled Calcium source: it's essentially insoluble at
+ * stock-tank concentrations (its solubility is ~15 mg/L in plain water, and
+ * concentrating it 50-200x the way a stock tank concentrates everything else
+ * just leaves undissolved grit at the bottom of the tank and an unreliable,
+ * unmeasurable dose). It's still counted toward meeting the Calcium target
+ * below — the Calcium math is unchanged — but the resulting amount comes
+ * back separately as `directAddCalciumCarbonate`, sized as a straight
+ * reservoir/batch-tank addition instead, where the full volume of water
+ * gives it a chance to (mostly) dissolve or at least stay evenly suspended.
  *
  * `includedSalts` restricts which salts the solver is allowed to reach for
  * (see `getEnabledSaltKeys`). When a target's only source salt is disabled,
@@ -312,7 +325,13 @@ export function calculateStockTankRecipe(
   }
 
   assignToTankA("calciumNitrate", calciumNitrateGrams)
-  assignToTankA("calciumCarbonate", calciumCarbonateGrams)
+  // Calcium Carbonate deliberately does NOT go into tankA (see the function
+  // doc comment) — it's surfaced separately below as a reservoir addition.
+  const directAddCalciumCarbonate = buildDirectAddCalciumCarbonate(
+    calciumCarbonateGrams,
+    stockVolumeLiters,
+    dilutionRatio
+  )
 
   // Iron — Fe-DTPA is the only chelate we model
   if (targets.iron > 0) {
@@ -411,7 +430,7 @@ export function calculateStockTankRecipe(
     saltGramsForTargetPpm(targets.molybdenum, RAW_SALTS.sodiumMolybdate.mo, stockVolumeLiters, dilutionRatio)
   )
 
-  return { tankA, tankB, warnings, isApproximate: warnings.length > 0 }
+  return { tankA, tankB, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate }
 }
 
 /**
@@ -424,6 +443,10 @@ export function calculateStockTankRecipe(
  *            H₃BO₃, CuSO₄, Na₂MoO₄) — giving a clean 2-tank system.
  *   Tank 3 — Micros only, kept isolated instead of merged into Tank 2 when
  *            `keepMicronutrientsSeparate` is true (the advanced 3-tank option).
+ *
+ * Calcium Carbonate, if enabled, never lands in Tank 1 (or anywhere else) —
+ * see `calculateStockTankRecipe` — and comes back as `directAddCalciumCarbonate`
+ * instead.
  *
  * `hasMicroTank` tells callers whether Tank 3 is actually in use (false by
  * default, since micros are merged into Tank 2). `hasMicronutrients` tells
@@ -438,12 +461,13 @@ export function calculateSeparateCalciumRecipe(
   includedSalts?: IncludedSaltsSelection,
   keepMicronutrientsSeparate: boolean = false
 ): ThreeTankRecipe {
-  const { tankA, tankB, warnings = [], isApproximate = false } = calculateStockTankRecipe(
-    targets,
-    stockVolumeLiters,
-    dilutionRatio,
-    includedSalts
-  )
+  const {
+    tankA,
+    tankB,
+    warnings = [],
+    isApproximate = false,
+    directAddCalciumCarbonate,
+  } = calculateStockTankRecipe(targets, stockVolumeLiters, dilutionRatio, includedSalts)
 
   const tank1 = emptySaltAmounts()
   const tank2 = emptySaltAmounts()
@@ -474,7 +498,16 @@ export function calculateSeparateCalciumRecipe(
 
   const hasMicroTank = keepMicronutrientsSeparate && hasMicronutrients
 
-  return { tank1, tank2, tank3, hasMicroTank, hasMicronutrients, warnings, isApproximate }
+  return {
+    tank1,
+    tank2,
+    tank3,
+    hasMicroTank,
+    hasMicronutrients,
+    warnings,
+    isApproximate,
+    directAddCalciumCarbonate,
+  }
 }
 
 function combineSaltAmounts(a: SaltAmounts, b: SaltAmounts): SaltAmounts {
@@ -510,6 +543,7 @@ export function calculateMultiPartStockTankRecipe(
   const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
   const tanks: PartStockTank[] = []
   const warningsByElement = new Map<string, SaltGapWarning>()
+  let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
 
   for (const feedingPart of parts) {
@@ -522,14 +556,19 @@ export function calculateMultiPartStockTankRecipe(
     if (!hasAnyElement) continue
 
     const { targets } = applyMicroEstimates(rawTargets)
-    const { tankA, tankB, warnings = [] } = calculateStockTankRecipe(
-      targets,
-      stockVolumeLiters,
-      dilutionRatio,
-      analysis.includedSalts
-    )
+    const {
+      tankA,
+      tankB,
+      warnings = [],
+      directAddCalciumCarbonate: partDirectAdd,
+    } = calculateStockTankRecipe(targets, stockVolumeLiters, dilutionRatio, analysis.includedSalts)
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
+    directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
 
+    // Calcium Carbonate never lands in a part's tank (folded into
+    // `directAddCalciumCarbonate` above instead), so a part whose only
+    // Calcium source is Carbonate legitimately has nothing left to weigh
+    // into a physical tank here — skip creating one for it.
     const salts = combineSaltAmounts(tankA, tankB)
     if (!saltAmountsHasContent(salts)) continue
 
@@ -544,7 +583,7 @@ export function calculateMultiPartStockTankRecipe(
   }
 
   const warnings = Array.from(warningsByElement.values())
-  return { tanks, warnings, isApproximate: warnings.length > 0 }
+  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate }
 }
 
 /**
@@ -574,6 +613,7 @@ export function calculateDoserMultiPartRecipe(
   const macroTanks: PartStockTank[] = []
   const consolidatedMicros = emptySaltAmounts()
   const warningsByElement = new Map<string, SaltGapWarning>()
+  let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
 
   const microKeys = new Set<SaltKey>(TANK_3_SALTS)
@@ -588,13 +628,14 @@ export function calculateDoserMultiPartRecipe(
     if (!hasAnyElement) continue
 
     const { targets } = applyMicroEstimates(rawTargets)
-    const { tankA, tankB, warnings = [] } = calculateStockTankRecipe(
-      targets,
-      stockVolumeLiters,
-      dilutionRatio,
-      analysis.includedSalts
-    )
+    const {
+      tankA,
+      tankB,
+      warnings = [],
+      directAddCalciumCarbonate: partDirectAdd,
+    } = calculateStockTankRecipe(targets, stockVolumeLiters, dilutionRatio, analysis.includedSalts)
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
+    directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
     const allSalts = combineSaltAmounts(tankA, tankB)
 
     const macroSalts = emptySaltAmounts()
@@ -633,7 +674,7 @@ export function calculateDoserMultiPartRecipe(
   }
 
   const warnings = Array.from(warningsByElement.values())
-  return { tanks, warnings, isApproximate: warnings.length > 0 }
+  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate }
 }
 
 /** Working-strength recipe for direct mixing into a reservoir of `reservoirLiters` litres */
@@ -656,6 +697,7 @@ export function calculateDirectMixRecipe(
     salts: combined,
     warnings: stockRecipe.warnings ?? [],
     isApproximate: stockRecipe.isApproximate ?? false,
+    directAddCalciumCarbonate: stockRecipe.directAddCalciumCarbonate,
   }
 }
 
@@ -766,6 +808,10 @@ export function estimateEcFromElementalTargets(
   for (const key of Object.keys(salts) as SaltKey[]) {
     salts[key] = stockRecipe.tankA[key] + stockRecipe.tankB[key]
   }
+  // Calcium Carbonate is never in tankA/tankB (see calculateStockTankRecipe),
+  // but its dissolved Calcium still ends up in the reservoir either way — add
+  // it back in here so the EC estimate isn't missing that contribution.
+  salts.calciumCarbonate = stockRecipe.directAddCalciumCarbonate?.grams ?? 0
 
   const baseEc = ecFromSaltAmounts(salts)
   if (!Number.isFinite(baseEc) || baseEc <= 0) return null
