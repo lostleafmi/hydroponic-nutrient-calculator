@@ -85,6 +85,7 @@ export interface SaltAmounts {
   calciumCarbonate: number
   potassiumNitrate: number
   monoPotassiumPhosphate: number
+  monoAmmoniumPhosphate: number
   magnesiumSulfate: number
   potassiumSulfate: number
   ammoniumNitrate: number
@@ -185,6 +186,7 @@ export const RAW_SALTS = {
   calciumCarbonate: { name: "Calcium Carbonate", formula: "CaCO₃", ca: 0.401 },
   potassiumNitrate: { name: "Potassium Nitrate", formula: "KNO₃", k: 0.387, n: 0.139 },
   monoPotassiumPhosphate: { name: "Mono Potassium Phosphate (MKP)", formula: "KH₂PO₄", k: 0.287, p: 0.228 },
+  monoAmmoniumPhosphate: { name: "Monoammonium Phosphate (MAP)", formula: "NH₄H₂PO₄", n: 0.122, p: 0.269 },
   magnesiumSulfate: { name: "Magnesium Sulfate (Epsom Salt)", formula: "MgSO₄·7H₂O", mg: 0.099, s: 0.130 },
   potassiumSulfate: { name: "Potassium Sulfate", formula: "K₂SO₄", k: 0.449, s: 0.184 },
   ammoniumNitrate: { name: "Ammonium Nitrate", formula: "NH₄NO₃", n: 0.35 },
@@ -214,6 +216,7 @@ export interface IncludedSaltsSelection {
   potassiumNitrate: boolean
   potassiumSulfate: boolean
   monoPotassiumPhosphate: boolean
+  monoAmmoniumPhosphate: boolean
   magnesiumSulfate: boolean
   ammoniumNitrateOrSulfate: boolean
   chelatedMicronutrients: boolean
@@ -226,6 +229,7 @@ export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
   potassiumNitrate: false,
   potassiumSulfate: false,
   monoPotassiumPhosphate: false,
+  monoAmmoniumPhosphate: false,
   magnesiumSulfate: false,
   ammoniumNitrateOrSulfate: false,
   chelatedMicronutrients: false,
@@ -238,6 +242,7 @@ export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
   potassiumNitrate: true,
   potassiumSulfate: true,
   monoPotassiumPhosphate: true,
+  monoAmmoniumPhosphate: true,
   magnesiumSulfate: true,
   ammoniumNitrateOrSulfate: true,
   chelatedMicronutrients: true,
@@ -262,6 +267,12 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
     label: "Monopotassium Phosphate",
     sublabel: "",
     saltKeys: ["monoPotassiumPhosphate"],
+  },
+  {
+    id: "monoAmmoniumPhosphate",
+    label: "Monoammonium Phosphate (MAP)",
+    sublabel: "",
+    saltKeys: ["monoAmmoniumPhosphate"],
   },
   {
     id: "magnesiumSulfate",
@@ -358,6 +369,7 @@ export const SALT_DISPLAY_ORDER: SaltKey[] = [
   "potassiumNitrate",
   "ammoniumNitrate",
   "monoPotassiumPhosphate",
+  "monoAmmoniumPhosphate",
   "magnesiumSulfate",
   "potassiumSulfate",
   "ammoniumSulfate",
@@ -416,6 +428,7 @@ export const TANK_A_SALTS = [
 
 export const TANK_B_SALTS = [
   "monoPotassiumPhosphate",
+  "monoAmmoniumPhosphate",
   "magnesiumSulfate",
   "potassiumSulfate",
   "ammoniumSulfate",
@@ -434,7 +447,7 @@ export const TANK_B_SALTS = [
  * Tank 1 — Calcium source only: Calcium Nitrate, or Calcium Carbonate when
  *          used instead as a nitrogen-free calcium source (taper Tank 1 for
  *          end-of-flower N reduction when Calcium Nitrate is the source)
- * Tank 2 — Remaining macros: KNO₃, MKP, MgSO₄, K₂SO₄
+ * Tank 2 — Remaining macros: KNO₃, MKP/MAP, MgSO₄, K₂SO₄
  * Tank 3 — Micros (Fe-DTPA + micro sulfates + boric acid + sodium molybdate)
  *
  * Tank 3 is only used when the recipe actually contains micronutrients. Without
@@ -446,6 +459,7 @@ export const TANK_2_SALTS = [
   "potassiumNitrate",
   "ammoniumNitrate",
   "monoPotassiumPhosphate",
+  "monoAmmoniumPhosphate",
   "magnesiumSulfate",
   "potassiumSulfate",
   "ammoniumSulfate",
@@ -507,6 +521,7 @@ export const SOLUBILITY_LIMITS_G_PER_L: Record<SaltKey, number> = {
   calciumCarbonate: 0.013,
   potassiumNitrate: 316,
   monoPotassiumPhosphate: 226,
+  monoAmmoniumPhosphate: 368,
   magnesiumSulfate: 710,
   potassiumSulfate: 111,
   ammoniumNitrate: 1920,
@@ -699,6 +714,7 @@ export function emptySaltAmounts(): SaltAmounts {
     calciumCarbonate: 0,
     potassiumNitrate: 0,
     monoPotassiumPhosphate: 0,
+    monoAmmoniumPhosphate: 0,
     magnesiumSulfate: 0,
     potassiumSulfate: 0,
     ammoniumNitrate: 0,

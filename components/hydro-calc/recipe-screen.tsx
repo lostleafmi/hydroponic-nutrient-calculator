@@ -511,6 +511,7 @@ export function RecipeScreen({
     },
     { key: "potassiumNitrate", name: "Potassium Nitrate", note: "KNO₃ - also called saltpeter" },
     { key: "monoPotassiumPhosphate", name: "Mono Potassium Phosphate", note: "MKP, KH₂PO₄" },
+    { key: "monoAmmoniumPhosphate", name: "Monoammonium Phosphate", note: "MAP, NH₄H₂PO₄" },
     { key: "magnesiumSulfate", name: "Magnesium Sulfate", note: "Epsom salt, MgSO₄·7H₂O" },
     { key: "potassiumSulfate", name: "Potassium Sulfate", note: "K₂SO₄ - sulfate of potash" },
     { key: "ammoniumNitrate", name: "Ammonium Nitrate", note: "NH₄NO₃" },
@@ -1342,8 +1343,8 @@ export function RecipeScreen({
               </CardTitle>
               <CardDescription>
                 {tank2IncludesMicros
-                  ? "The rest of your main salts (KNO₃, MKP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank. Safe to combine because calcium stays in Tank 1."
-                  : "The rest of your main salts (KNO₃, MKP, MgSO₄, K₂SO₄). Safe to combine in this stock tank because calcium stays in Tank 1."}
+                  ? "The rest of your main salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank. Safe to combine because calcium stays in Tank 1."
+                  : "The rest of your main salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄). Safe to combine in this stock tank because calcium stays in Tank 1."}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -1362,6 +1363,11 @@ export function RecipeScreen({
                   name={RAW_SALTS.monoPotassiumPhosphate.name}
                   formula={RAW_SALTS.monoPotassiumPhosphate.formula}
                   amount={scaledGrams(threeTankRecipe.tank2.monoPotassiumPhosphate)}
+                />
+                <SaltRow
+                  name={RAW_SALTS.monoAmmoniumPhosphate.name}
+                  formula={RAW_SALTS.monoAmmoniumPhosphate.formula}
+                  amount={scaledGrams(threeTankRecipe.tank2.monoAmmoniumPhosphate)}
                 />
                 <SaltRow
                   name={RAW_SALTS.magnesiumSulfate.name}

@@ -150,7 +150,7 @@ function ppmFromSaltInStock(
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
  * Tank A — Ca(NO₃)₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
- * Tank B — MKP, MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
+ * Tank B — MKP/MAP (Phosphorus), MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
  * never coexist in a concentrated stock solution where they would precipitate.
@@ -195,6 +195,42 @@ export function calculateStockTankRecipe(
   const assignToTankB = (key: (typeof TANK_B_SALTS)[number], grams: number) => {
     tankB[key] = grams
   }
+
+  // Phosphorus — MKP is preferred (unchanged legacy behavior); MAP
+  // (NH₄H₂PO₄) is the fallback P source when MKP isn't part of the product
+  // being replicated. Unlike MKP, sizing MAP off the Phosphorus target also
+  // supplies a fixed amount of ammoniacal Nitrogen as a side effect, so that
+  // contribution is computed up front and folded into the Nitrogen target
+  // below — otherwise the Calcium/Nitrogen math further down would chase
+  // the *full* Nitrogen target with another salt on top of what MAP already
+  // provides, overshooting Nitrogen.
+  let monoAmmoniumPhosphateGrams = 0
+  if (targets.phosphorus > 0) {
+    if (isEnabled("monoPotassiumPhosphate")) {
+      assignToTankB(
+        "monoPotassiumPhosphate",
+        saltGramsForTargetPpm(targets.phosphorus, RAW_SALTS.monoPotassiumPhosphate.p, stockVolumeLiters, dilutionRatio)
+      )
+    } else if (isEnabled("monoAmmoniumPhosphate")) {
+      monoAmmoniumPhosphateGrams = saltGramsForTargetPpm(
+        targets.phosphorus,
+        RAW_SALTS.monoAmmoniumPhosphate.p,
+        stockVolumeLiters,
+        dilutionRatio
+      )
+      assignToTankB("monoAmmoniumPhosphate", monoAmmoniumPhosphateGrams)
+    } else {
+      warnings.push({ element: "phosphorus", label: "Phosphorus" })
+    }
+  }
+
+  const nitrogenFromMap = ppmFromSaltInStock(
+    monoAmmoniumPhosphateGrams,
+    RAW_SALTS.monoAmmoniumPhosphate.n,
+    stockVolumeLiters,
+    dilutionRatio
+  )
+  const nitrogenTargetAfterMap = Math.max(0, targets.nitrogen - nitrogenFromMap)
 
   // Calcium & Nitrogen are solved together because Ca(NO₃)₂ is the primary
   // source of *both*. Sizing it off the Calcium target alone (the old
@@ -286,8 +322,9 @@ export function calculateStockTankRecipe(
     dilutionRatio
   )
 
-  // Priority for the remaining N: KNO₃ → more Ca(NO₃)₂ → NH₄NO₃ → (NH₄)₂SO₄
-  const remainingNitrogenPpm = Math.max(0, targets.nitrogen - nitrogenFromCalciumNitrate)
+  // Priority for the remaining N (after MAP's fixed contribution, if any):
+  // KNO₃ → more Ca(NO₃)₂ → NH₄NO₃ → (NH₄)₂SO₄
+  const remainingNitrogenPpm = Math.max(0, nitrogenTargetAfterMap - nitrogenFromCalciumNitrate)
   if (remainingNitrogenPpm > 0) {
     if (isEnabled("potassiumNitrate")) {
       assignToTankA(
@@ -296,15 +333,16 @@ export function calculateStockTankRecipe(
       )
     } else if (nitrateEnabled) {
       // No dedicated nitrate-only salt is enabled, but Calcium Nitrate is —
-      // re-size it off the full Nitrogen target instead of its Calcium-only
-      // share. This grams value is always ≥ the Calcium-based amount above
-      // (it's solving for a requirement that's at least as large on the
-      // same salt), so the Calcium target stays fully met — with, when
-      // Carbonate is also enabled, some unavoidable Calcium overshoot on
-      // top of Carbonate's fixed half-share as the trade-off for hitting
-      // Nitrogen. Carbonate's own allocation is untouched either way.
+      // re-size it off the full (MAP-adjusted) Nitrogen target instead of
+      // its Calcium-only share. This grams value is always ≥ the
+      // Calcium-based amount above (it's solving for a requirement that's
+      // at least as large on the same salt), so the Calcium target stays
+      // fully met — with, when Carbonate is also enabled, some unavoidable
+      // Calcium overshoot on top of Carbonate's fixed half-share as the
+      // trade-off for hitting Nitrogen. Carbonate's own allocation is
+      // untouched either way.
       calciumNitrateGrams = saltGramsForTargetPpm(
-        targets.nitrogen,
+        nitrogenTargetAfterMap,
         RAW_SALTS.calciumNitrate.n,
         stockVolumeLiters,
         dilutionRatio
@@ -342,18 +380,6 @@ export function calculateStockTankRecipe(
       )
     } else {
       warnings.push({ element: "iron", label: "Iron" })
-    }
-  }
-
-  // Phosphorus — MKP is the only P source we model
-  if (targets.phosphorus > 0) {
-    if (isEnabled("monoPotassiumPhosphate")) {
-      assignToTankB(
-        "monoPotassiumPhosphate",
-        saltGramsForTargetPpm(targets.phosphorus, RAW_SALTS.monoPotassiumPhosphate.p, stockVolumeLiters, dilutionRatio)
-      )
-    } else {
-      warnings.push({ element: "phosphorus", label: "Phosphorus" })
     }
   }
 
@@ -438,7 +464,7 @@ export function calculateStockTankRecipe(
  * tapering.
  *
  *   Tank 1 — Calcium Nitrate only (Ca²⁺ + N). Taper this to drop N at end of flower.
- *   Tank 2 — Everything else: remaining macro salts (KNO₃, MKP, MgSO₄, K₂SO₄)
+ *   Tank 2 — Everything else: remaining macro salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄)
  *            AND, by default, the micronutrients (Fe-DTPA, MnSO₄, ZnSO₄,
  *            H₃BO₃, CuSO₄, Na₂MoO₄) — giving a clean 2-tank system.
  *   Tank 3 — Micros only, kept isolated instead of merged into Tank 2 when
@@ -745,13 +771,16 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
   const sFromNh4so4 = salts.ammoniumSulfate * RAW_SALTS.ammoniumSulfate.s * 1000
   const kFromMkp = salts.monoPotassiumPhosphate * RAW_SALTS.monoPotassiumPhosphate.k * 1000
   const pFromMkp = salts.monoPotassiumPhosphate * RAW_SALTS.monoPotassiumPhosphate.p * 1000
+  const nFromMap = salts.monoAmmoniumPhosphate * RAW_SALTS.monoAmmoniumPhosphate.n * 1000
+  const pFromMap = salts.monoAmmoniumPhosphate * RAW_SALTS.monoAmmoniumPhosphate.p * 1000
   const mgPpm = salts.magnesiumSulfate * RAW_SALTS.magnesiumSulfate.mg * 1000
   const sFromMgSO4 = salts.magnesiumSulfate * RAW_SALTS.magnesiumSulfate.s * 1000
   const kFromK2SO4 = salts.potassiumSulfate * RAW_SALTS.potassiumSulfate.k * 1000
   const sFromK2SO4 = salts.potassiumSulfate * RAW_SALTS.potassiumSulfate.s * 1000
 
   const kPpm = kFromKno3 + kFromMkp + kFromK2SO4
-  const nPpm = nFromCaNo3 + nFromKno3 + nFromNh4no3 + nFromNh4so4
+  const nPpm = nFromCaNo3 + nFromKno3 + nFromNh4no3 + nFromNh4so4 + nFromMap
+  const pPpm = pFromMkp + pFromMap
   const sPpm = sFromMgSO4 + sFromK2SO4 + sFromNh4so4
 
   return (
@@ -759,7 +788,7 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
     ecContribution(ppmToMolPerLiter(caPpm, ION_ATOMIC_WEIGHT.Ca), ION_CONDUCTIVITY.Ca) +
     ecContribution(ppmToMolPerLiter(mgPpm, ION_ATOMIC_WEIGHT.Mg), ION_CONDUCTIVITY.Mg) +
     ecContribution(ppmToMolPerLiter(nPpm, ION_ATOMIC_WEIGHT.N), ION_CONDUCTIVITY.NO3) +
-    ecContribution(ppmToMolPerLiter(pFromMkp, ION_ATOMIC_WEIGHT.P), ION_CONDUCTIVITY.H2PO4) +
+    ecContribution(ppmToMolPerLiter(pPpm, ION_ATOMIC_WEIGHT.P), ION_CONDUCTIVITY.H2PO4) +
     ecContribution(ppmToMolPerLiter(sPpm, ION_ATOMIC_WEIGHT.S), ION_CONDUCTIVITY.SO4)
   )
 }
