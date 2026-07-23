@@ -737,6 +737,33 @@ const ION_CONDUCTIVITY = {
   SO4: 79.8,
 } as const
 
+/**
+ * SO₄²⁻'s λ° above is an infinite-dilution value. In real nutrient solutions
+ * sulfate pairs up with Ca²⁺/Mg²⁺/K⁺ (forming lower-mobility CaSO₄(aq),
+ * MgSO₄(aq), KSO₄⁻ associates) far more readily than nitrate or
+ * dihydrogen-phosphate do, so its *apparent* contribution to measured EC at
+ * fertigation concentrations runs meaningfully below the naive λ°·molarity
+ * figure. This mostly went unnoticed because most modeled recipes lean on
+ * Ca(NO₃)₂ + KNO₃ + MKP, where MKP quietly supplies some of the Potassium
+ * target "for free" and sulfate stays a minor, mostly-Epsom-salt contributor.
+ *
+ * Monoammonium Phosphate (MAP) doesn't carry any Potassium the way MKP
+ * does, so whenever MAP is the enabled Phosphorus source the solver has to
+ * make up that lost Potassium with more Potassium Sulfate — correctly
+ * reflecting real formulation chemistry, but it does mean MAP-based recipes
+ * carry more total sulfate than an equivalent MKP-based recipe hitting the
+ * same N-P-K-Ca-Mg targets. Damping just the sulfate term (rather than
+ * Ca²⁺/Mg²⁺, or MAP's own N/P factors — which are computed identically to
+ * every other salt, see `ecFromSaltAmounts`) pulls the estimate down
+ * specifically for sulfate-heavy formulations without moving the
+ * nitrate/monovalent-dominated recipes the base 1.1×/+0.08 correction below
+ * was originally calibrated against.
+ *
+ * Starting value only — nail it down further with a few more manufacturer
+ * EC comparisons (ideally MAP-based ones) rather than tuning it blind.
+ */
+const SULFATE_ION_PAIRING_FACTOR = 0.75
+
 const ION_ATOMIC_WEIGHT = {
   K: 39.098,
   Ca: 40.078,
@@ -789,7 +816,7 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
     ecContribution(ppmToMolPerLiter(mgPpm, ION_ATOMIC_WEIGHT.Mg), ION_CONDUCTIVITY.Mg) +
     ecContribution(ppmToMolPerLiter(nPpm, ION_ATOMIC_WEIGHT.N), ION_CONDUCTIVITY.NO3) +
     ecContribution(ppmToMolPerLiter(pPpm, ION_ATOMIC_WEIGHT.P), ION_CONDUCTIVITY.H2PO4) +
-    ecContribution(ppmToMolPerLiter(sPpm, ION_ATOMIC_WEIGHT.S), ION_CONDUCTIVITY.SO4)
+    ecContribution(ppmToMolPerLiter(sPpm, ION_ATOMIC_WEIGHT.S), ION_CONDUCTIVITY.SO4) * SULFATE_ION_PAIRING_FACTOR
   )
 }
 
