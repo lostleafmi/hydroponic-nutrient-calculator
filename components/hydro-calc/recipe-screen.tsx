@@ -668,6 +668,7 @@ export function RecipeScreen({
         defaultStockTankSize: formulationTanksData.defaultStockTankSize,
         usageRates: formulationTanksData.usageRates,
         tanks: formulationTanksData.tanks,
+        directAddCalciumCarbonate: formulationTanksData.directAddCalciumCarbonate,
       }
 
       const result = await saveFormulationToDashboardAction(payload)
@@ -766,6 +767,7 @@ export function RecipeScreen({
         defaultStockTankSize: formulationTanksData.defaultStockTankSize,
         usageRates: formulationTanksData.usageRates,
         tanks: formulationTanksData.tanks,
+        directAddCalciumCarbonate: formulationTanksData.directAddCalciumCarbonate,
       })
 
       setSchedulerEntryCount((count) => count + 1)

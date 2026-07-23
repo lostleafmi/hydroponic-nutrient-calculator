@@ -26,7 +26,7 @@ import {
   deleteFeedingScheduleEntryAction,
   getFeedingScheduleEntriesAction,
 } from "@/app/actions/feeding-schedule"
-import type { FormulationTank } from "./formulation-export"
+import type { FormulationDirectAddCalciumCarbonate, FormulationTank } from "./formulation-export"
 
 export type FeedingStage = "Vegetative" | "Flowering"
 
@@ -64,6 +64,13 @@ export interface FeedingScheduleEntry {
   usageRates?: Record<string, number>
   /** Full per-tank ingredient + mixing breakdown */
   tanks?: FormulationTank[]
+  /**
+   * Calcium Carbonate never lands in a stock tank (see `calculateStockTankRecipe`
+   * on the calculator side) — when the recipe uses it, this is the dosing rate
+   * to add directly to the reservoir/batch tank, which the Usage Rates tab's
+   * "Dry Inputs" section reads. Omitted entirely when the recipe doesn't use it.
+   */
+  directAddCalciumCarbonate?: FormulationDirectAddCalciumCarbonate
 }
 
 const STORAGE_KEY = "hydro-calc:feeding-schedule-entries"

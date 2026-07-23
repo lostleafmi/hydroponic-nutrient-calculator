@@ -19,6 +19,7 @@ import {
   RAW_SALTS,
   getOrderedSaltEntries,
   stockTankMlPerGallon,
+  type DirectAddCalciumCarbonate,
   type DirectMixRecipe,
   type MultiPartTankRecipe,
   type SaltAmounts,
@@ -38,10 +39,22 @@ export interface FormulationTank {
   mixInstructions: string
 }
 
+/** Matches the shape the Feeding Scheduler's "Dry Inputs" import parser expects. */
+export interface FormulationDirectAddCalciumCarbonate {
+  gramsPerGallon: number
+}
+
 export interface FormulationTanksData {
   usageRates: Record<string, number>
   defaultStockTankSize: number
   tanks: FormulationTank[]
+  /**
+   * Present only when the recipe actually uses Calcium Carbonate (see
+   * `calculateStockTankRecipe` — it's never in any tank's `salts`, so this is
+   * the only place its amount is exported). Omitted entirely otherwise so
+   * the Feeding Scheduler's importer treats it as absent rather than "0 g".
+   */
+  directAddCalciumCarbonate?: FormulationDirectAddCalciumCarbonate
 }
 
 /** Which recipe-calculation result to read the tank breakdown from */
@@ -58,6 +71,16 @@ function buildInputs(salts: SaltAmounts, ecScaleFactor: number): FormulationTank
     formula: RAW_SALTS[key].formula,
     amount_g: round2(amount * ecScaleFactor),
   }))
+}
+
+function buildDirectAddCalciumCarbonateExport(
+  directAdd: DirectAddCalciumCarbonate | undefined,
+  ecScaleFactor: number
+): FormulationDirectAddCalciumCarbonate | undefined {
+  if (!directAdd || !(directAdd.gramsPerGallon > 0)) return undefined
+  const gramsPerGallon = round2(directAdd.gramsPerGallon * ecScaleFactor)
+  if (!(gramsPerGallon > 0)) return undefined
+  return { gramsPerGallon }
 }
 
 export function buildFormulationTanksData({
@@ -102,14 +125,22 @@ export function buildFormulationTanksData({
                 "Dissolve each salt directly in the reservoir one at a time (a paddle mixer and drill are recommended), waiting for each one to fully dissolve before adding the next. Running a recirculating pump while mixing helps everything blend evenly.",
             },
           ]
+    const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
+      directRecipe.directAddCalciumCarbonate,
+      ecScaleFactor
+    )
     // Direct-mix amounts are already sized for the whole reservoir — there's
     // no concentrated stock tank being diluted, so no per-gallon usage rate applies.
-    return { usageRates: {}, defaultStockTankSize, tanks }
+    return { usageRates: {}, defaultStockTankSize, tanks, directAddCalciumCarbonate }
   }
 
   if (mode === "separate-nitrogen") {
     const tanks: FormulationTank[] = []
     const usageRates: Record<string, number> = {}
+    const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
+      threeTankRecipe.directAddCalciumCarbonate,
+      ecScaleFactor
+    )
 
     const tank1Inputs = buildInputs(threeTankRecipe.tank1, ecScaleFactor)
     if (tank1Inputs.length > 0) {
@@ -152,11 +183,15 @@ export function buildFormulationTanksData({
       }
     }
 
-    return { usageRates, defaultStockTankSize, tanks }
+    return { usageRates, defaultStockTankSize, tanks, directAddCalciumCarbonate }
   }
 
   // mode === "per-part" — one stock tank per nutrient part (doser + A+B modes)
   const usageRates: Record<string, number> = {}
+  const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
+    multiPartRecipe.directAddCalciumCarbonate,
+    ecScaleFactor
+  )
   const tanks: FormulationTank[] = multiPartRecipe.tanks
     .map((tank) => {
       const id = `tank${tank.index}`
@@ -177,5 +212,5 @@ export function buildFormulationTanksData({
     })
     .filter((tank): tank is FormulationTank => tank !== null)
 
-  return { usageRates, defaultStockTankSize, tanks }
+  return { usageRates, defaultStockTankSize, tanks, directAddCalciumCarbonate }
 }
