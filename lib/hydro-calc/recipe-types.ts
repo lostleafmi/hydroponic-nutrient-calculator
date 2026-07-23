@@ -201,12 +201,7 @@ export interface SaltCheckboxOption {
 
 export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
-  {
-    id: "calciumCarbonate",
-    label: "Calcium Carbonate",
-    sublabel: "Nitrogen-free calcium source (limestone/chalk)",
-    saltKeys: ["calciumCarbonate"],
-  },
+  { id: "calciumCarbonate", label: "Calcium Carbonate", sublabel: "", saltKeys: ["calciumCarbonate"] },
   { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
   { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
   {
