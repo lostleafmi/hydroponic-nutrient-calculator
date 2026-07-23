@@ -465,6 +465,11 @@ export function RecipeScreen({
       disclaimer:
         "Make sure you are buying pure Calcium Nitrate (Ca(NO₃)₂). Avoid products that contain added ammoniacal nitrogen or blended fertilizers.",
     },
+    {
+      key: "calciumCarbonate",
+      name: "Calcium Carbonate",
+      note: "CaCO₃ - limestone/chalk, a nitrogen-free calcium source",
+    },
     { key: "potassiumNitrate", name: "Potassium Nitrate", note: "KNO₃ - also called saltpeter" },
     { key: "monoPotassiumPhosphate", name: "Mono Potassium Phosphate", note: "MKP, KH₂PO₄" },
     { key: "magnesiumSulfate", name: "Magnesium Sulfate", note: "Epsom salt, MgSO₄·7H₂O" },
@@ -1164,7 +1169,7 @@ export function RecipeScreen({
       {/* Recipe Cards — Separate Nitrogen (chemistry 3-tank) layout */}
       {hasValidData && usesSeparateNitrogenLayout && (
         <>
-          {/* Tank 1 — Calcium Nitrate only */}
+          {/* Tank 1 — Calcium source only: Calcium Nitrate, or Calcium Carbonate as a nitrogen-free fallback */}
           <Card className="border-2 border-primary/50 bg-card">
             <CardHeader className="bg-primary/5">
               <CardTitle className="flex items-center gap-2 text-xl text-foreground">
@@ -1178,9 +1183,8 @@ export function RecipeScreen({
                 </span>
               </CardTitle>
               <CardDescription>
-                Just Calcium Nitrate in this stock tank — your Nitrogen and Calcium source.
-                Keeping it on its own makes it easy to taper down near the end of flower without
-                changing the rest of your recipe.
+                Just your Calcium source in this stock tank. Keeping it on its own makes it easy
+                to taper down near the end of flower without changing the rest of your recipe.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -1190,11 +1194,16 @@ export function RecipeScreen({
                   formula={RAW_SALTS.calciumNitrate.formula}
                   amount={scaledGrams(threeTankRecipe.tank1.calciumNitrate)}
                 />
+                <SaltRow
+                  name={RAW_SALTS.calciumCarbonate.name}
+                  formula={RAW_SALTS.calciumCarbonate.formula}
+                  amount={scaledGrams(threeTankRecipe.tank1.calciumCarbonate)}
+                />
               </div>
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
                 <p className="text-sm text-muted-foreground">
                   <strong className="text-foreground">How to mix:</strong> Fill the stock tank
-                  about halfway with RO water, add the calcium nitrate and stir until it&apos;s fully
+                  about halfway with RO water, add the calcium source and stir until it&apos;s fully
                   dissolved then top it up to {stockTankSize}{" "}
                   {stockTankUnit === "gallons" ? "gallons" : "liters"} and label it
                   &quot;Tank 1&quot;.

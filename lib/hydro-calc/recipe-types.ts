@@ -82,6 +82,7 @@ export interface EstimatedTargets {
 
 export interface SaltAmounts {
   calciumNitrate: number
+  calciumCarbonate: number
   potassiumNitrate: number
   monoPotassiumPhosphate: number
   magnesiumSulfate: number
@@ -128,6 +129,7 @@ export interface ThreeTankRecipe {
 
 export const RAW_SALTS = {
   calciumNitrate: { name: "Calcium Nitrate", formula: "Ca(NO₃)₂·4H₂O", ca: 0.169, n: 0.118 },
+  calciumCarbonate: { name: "Calcium Carbonate", formula: "CaCO₃", ca: 0.401 },
   potassiumNitrate: { name: "Potassium Nitrate", formula: "KNO₃", k: 0.387, n: 0.139 },
   monoPotassiumPhosphate: { name: "Mono Potassium Phosphate (MKP)", formula: "KH₂PO₄", k: 0.287, p: 0.228 },
   magnesiumSulfate: { name: "Magnesium Sulfate (Epsom Salt)", formula: "MgSO₄·7H₂O", mg: 0.099, s: 0.130 },
@@ -155,6 +157,7 @@ export type SaltKey = keyof typeof RAW_SALTS
  */
 export interface IncludedSaltsSelection {
   calciumNitrate: boolean
+  calciumCarbonate: boolean
   potassiumNitrate: boolean
   potassiumSulfate: boolean
   monoPotassiumPhosphate: boolean
@@ -166,6 +169,7 @@ export interface IncludedSaltsSelection {
 /** Default for new sessions — all unchecked so the user consciously selects what is in their product. */
 export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
   calciumNitrate: false,
+  calciumCarbonate: false,
   potassiumNitrate: false,
   potassiumSulfate: false,
   monoPotassiumPhosphate: false,
@@ -177,6 +181,7 @@ export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
 /** Used when loading old saved formulations that pre-date per-salt selection. */
 export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
   calciumNitrate: true,
+  calciumCarbonate: true,
   potassiumNitrate: true,
   potassiumSulfate: true,
   monoPotassiumPhosphate: true,
@@ -196,6 +201,12 @@ export interface SaltCheckboxOption {
 
 export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
+  {
+    id: "calciumCarbonate",
+    label: "Calcium Carbonate",
+    sublabel: "Nitrogen-free calcium source (limestone/chalk)",
+    saltKeys: ["calciumCarbonate"],
+  },
   { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
   { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
   {
@@ -270,6 +281,7 @@ export function isSeparateNitrogenAvailable(partCount: number): boolean {
  */
 export const SALT_DISPLAY_ORDER: SaltKey[] = [
   "calciumNitrate",
+  "calciumCarbonate",
   "potassiumNitrate",
   "ammoniumNitrate",
   "monoPotassiumPhosphate",
@@ -319,6 +331,7 @@ export interface DirectMixRecipe {
  */
 export const TANK_A_SALTS = [
   "calciumNitrate",
+  "calciumCarbonate",
   "potassiumNitrate",
   "ammoniumNitrate",
   "ironDTPA",
@@ -341,14 +354,16 @@ export const TANK_B_SALTS = [
  * the calcium ion completely isolated so it can be tapered down at the end of
  * flower without rebalancing the rest of the recipe.
  *
- * Tank 1 — Calcium Nitrate only (taper this for end-of-flower N reduction)
+ * Tank 1 — Calcium source only: Calcium Nitrate, or Calcium Carbonate when
+ *          used instead as a nitrogen-free calcium source (taper Tank 1 for
+ *          end-of-flower N reduction when Calcium Nitrate is the source)
  * Tank 2 — Remaining macros: KNO₃, MKP, MgSO₄, K₂SO₄
  * Tank 3 — Micros (Fe-DTPA + micro sulfates + boric acid + sodium molybdate)
  *
  * Tank 3 is only used when the recipe actually contains micronutrients. Without
  * micros the calculator naturally collapses to a 2-tank layout (1 + 2).
  */
-export const TANK_1_SALTS = ["calciumNitrate"] as const satisfies readonly SaltKey[]
+export const TANK_1_SALTS = ["calciumNitrate", "calciumCarbonate"] as const satisfies readonly SaltKey[]
 
 export const TANK_2_SALTS = [
   "potassiumNitrate",
@@ -408,6 +423,11 @@ assertTanksAreDisjoint()
  */
 export const SOLUBILITY_LIMITS_G_PER_L: Record<SaltKey, number> = {
   calciumNitrate: 1290,
+  // Calcium Carbonate is nearly insoluble in plain water (~0.013 g/L at 20 °C).
+  // Kept accurate rather than optimistic so the solubility checker still warns
+  // when a recipe leans on it for meaningful Ca — it dissolves far better once
+  // reservoir pH is buffered acidic, but stock-tank strength is the risk case.
+  calciumCarbonate: 0.013,
   potassiumNitrate: 316,
   monoPotassiumPhosphate: 226,
   magnesiumSulfate: 710,
@@ -599,6 +619,7 @@ export function pickDoserPresetForRatio(
 export function emptySaltAmounts(): SaltAmounts {
   return {
     calciumNitrate: 0,
+    calciumCarbonate: 0,
     potassiumNitrate: 0,
     monoPotassiumPhosphate: 0,
     magnesiumSulfate: 0,

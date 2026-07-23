@@ -146,7 +146,8 @@ function ppmFromSaltInStock(
 
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
- * Tank A — Ca(NO₃)₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
+ * Tank A — Ca(NO₃)₂ (or CaCO₃ as a nitrogen-free fallback), KNO₃/NH₄NO₃
+ *          (remaining N), Fe-DTPA  (see TANK_A_SALTS)
  * Tank B — MKP, MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
@@ -206,6 +207,14 @@ export function calculateStockTankRecipe(
         RAW_SALTS.calciumNitrate.ca,
         stockVolumeLiters,
         dilutionRatio
+      )
+    } else if (isEnabled("calciumCarbonate")) {
+      // Nitrogen-free calcium fallback when Calcium Nitrate isn't part of the
+      // product being replicated. Contributes no Nitrogen, so the remaining-N
+      // logic below still needs another enabled salt to close that gap.
+      assignToTankA(
+        "calciumCarbonate",
+        saltGramsForTargetPpm(targets.calcium, RAW_SALTS.calciumCarbonate.ca, stockVolumeLiters, dilutionRatio)
       )
     } else {
       warnings.push({ element: "calcium", label: "Calcium" })
@@ -623,7 +632,12 @@ function ecContribution(molarity: number, lambda: number): number {
 
 /** EC (mS/cm) from dissolved ions at working-solution strength */
 function ecFromSaltAmounts(salts: SaltAmounts): number {
-  const caPpm = salts.calciumNitrate * RAW_SALTS.calciumNitrate.ca * 1000
+  // Carbonate's own conductivity contribution is omitted (like the
+  // micronutrient sulfates) — Calcium Carbonate's near-zero solubility keeps
+  // any real-world dose small enough that the omission is negligible.
+  const caPpm =
+    salts.calciumNitrate * RAW_SALTS.calciumNitrate.ca * 1000 +
+    salts.calciumCarbonate * RAW_SALTS.calciumCarbonate.ca * 1000
   const nFromCaNo3 = salts.calciumNitrate * RAW_SALTS.calciumNitrate.n * 1000
   const kFromKno3 = salts.potassiumNitrate * RAW_SALTS.potassiumNitrate.k * 1000
   const nFromKno3 = salts.potassiumNitrate * RAW_SALTS.potassiumNitrate.n * 1000
