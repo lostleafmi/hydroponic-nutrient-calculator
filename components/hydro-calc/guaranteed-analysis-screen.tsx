@@ -235,19 +235,26 @@ export function GuaranteedAnalysisScreen({
 }
 
 function SaltCheckboxRow({
-  id,
+  inputId,
   label,
   sublabel,
   checked,
   onCheckedChange,
 }: {
-  id: string
+  /**
+   * Fully-qualified, DOM-unique id for this checkbox — must be unique across
+   * the WHOLE page, not just within one part. Every part renders the same
+   * set of salt options, so a caller-supplied id scoped only by salt key
+   * (e.g. "salt-calciumNitrate") collides across parts: the browser then
+   * routes label clicks/focus to the FIRST element with that id, which is
+   * why checking a salt in Part B was toggling Part A's checkbox instead.
+   */
+  inputId: string
   label: string
   sublabel: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void
 }) {
-  const inputId = `salt-${id}`
   return (
     <div
       className={`flex items-start gap-3 rounded-lg border-2 p-3 transition-colors ${
@@ -564,7 +571,7 @@ function PartAnalysisCard({
             {SALT_CHECKBOX_OPTIONS.map((option) => (
               <SaltCheckboxRow
                 key={option.id}
-                id={option.id}
+                inputId={`salt-${part.id}-${option.id}`}
                 label={option.label}
                 sublabel={option.sublabel}
                 checked={part.includedSalts[option.id]}
