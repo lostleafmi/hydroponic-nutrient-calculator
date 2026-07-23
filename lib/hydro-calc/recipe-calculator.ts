@@ -196,42 +196,6 @@ export function calculateStockTankRecipe(
     tankB[key] = grams
   }
 
-  // Phosphorus — MKP is preferred (unchanged legacy behavior); MAP
-  // (NH₄H₂PO₄) is the fallback P source when MKP isn't part of the product
-  // being replicated. Unlike MKP, sizing MAP off the Phosphorus target also
-  // supplies a fixed amount of ammoniacal Nitrogen as a side effect, so that
-  // contribution is computed up front and folded into the Nitrogen target
-  // below — otherwise the Calcium/Nitrogen math further down would chase
-  // the *full* Nitrogen target with another salt on top of what MAP already
-  // provides, overshooting Nitrogen.
-  let monoAmmoniumPhosphateGrams = 0
-  if (targets.phosphorus > 0) {
-    if (isEnabled("monoPotassiumPhosphate")) {
-      assignToTankB(
-        "monoPotassiumPhosphate",
-        saltGramsForTargetPpm(targets.phosphorus, RAW_SALTS.monoPotassiumPhosphate.p, stockVolumeLiters, dilutionRatio)
-      )
-    } else if (isEnabled("monoAmmoniumPhosphate")) {
-      monoAmmoniumPhosphateGrams = saltGramsForTargetPpm(
-        targets.phosphorus,
-        RAW_SALTS.monoAmmoniumPhosphate.p,
-        stockVolumeLiters,
-        dilutionRatio
-      )
-      assignToTankB("monoAmmoniumPhosphate", monoAmmoniumPhosphateGrams)
-    } else {
-      warnings.push({ element: "phosphorus", label: "Phosphorus" })
-    }
-  }
-
-  const nitrogenFromMap = ppmFromSaltInStock(
-    monoAmmoniumPhosphateGrams,
-    RAW_SALTS.monoAmmoniumPhosphate.n,
-    stockVolumeLiters,
-    dilutionRatio
-  )
-  const nitrogenTargetAfterMap = Math.max(0, targets.nitrogen - nitrogenFromMap)
-
   // Calcium & Nitrogen are solved together because Ca(NO₃)₂ is the primary
   // source of *both*. Sizing it off the Calcium target alone (the old
   // behavior) routinely under-supplies Nitrogen for "Core + Bloom" style
@@ -321,6 +285,107 @@ export function calculateStockTankRecipe(
     stockVolumeLiters,
     dilutionRatio
   )
+
+  // Phosphorus — MKP is preferred by default; MAP (NH₄H₂PO₄) is the
+  // fallback P source when MKP isn't part of the product being replicated.
+  //
+  // When *both* are enabled, picking one exclusively is a trap: MKP always
+  // brings Potassium along as a fixed side effect of hitting the
+  // Phosphorus target, and — unlike a Potassium deficit, which the
+  // remaining-Potassium step below can always top up with K₂SO₄ — nothing
+  // downstream can ever *remove* Potassium once it's been added. So if
+  // KNO₃ is being relied on to close a large remaining Nitrogen gap (the
+  // common case when Ca(NO₃)₂ alone doesn't cover it), the Potassium that
+  // KNO₃ drags along on top of MKP's own Potassium can badly overshoot the
+  // target — and since EC scales with total dissolved ions, that overshoot
+  // shows up directly as an inflated EC estimate.
+  //
+  // MAP supplies the same Phosphorus with zero Potassium (contributing
+  // ammoniacal Nitrogen instead), so blending MKP and MAP — rather than
+  // treating them as exclusive alternatives — lets the solver dial the
+  // *combined* Potassium contribution (MKP's own + whatever KNO₃ ends up
+  // sized for once MAP's Nitrogen is subtracted out) down to exactly match
+  // the Potassium target whenever that target sits between "all MAP" and
+  // "all MKP". Solved as a single linear equation in `mkpShare` (see
+  // below); only engages when both salts are enabled and KNO₃ is the one
+  // absorbing the remaining Nitrogen — otherwise this collapses back to the
+  // original MKP-preferred / MAP-fallback behavior.
+  let mkpShareOfPhosphorus = 1
+  if (
+    targets.phosphorus > 0 &&
+    isEnabled("monoPotassiumPhosphate") &&
+    isEnabled("monoAmmoniumPhosphate") &&
+    isEnabled("potassiumNitrate")
+  ) {
+    const kPerPFromMkp = RAW_SALTS.monoPotassiumPhosphate.k / RAW_SALTS.monoPotassiumPhosphate.p
+    const nPerPFromMap = RAW_SALTS.monoAmmoniumPhosphate.n / RAW_SALTS.monoAmmoniumPhosphate.p
+    const kPerNFromKno3 = RAW_SALTS.potassiumNitrate.k / RAW_SALTS.potassiumNitrate.n
+
+    // Total Potassium delivered as a function of `mkpShare` (fraction of
+    // the Phosphorus target sourced from MKP, 0–1): MKP's own Potassium
+    // scales up with `mkpShare`, while KNO₃'s Potassium scales up as
+    // `mkpShare` rises too (since less Phosphorus-derived Nitrogen from MAP
+    // means more Nitrogen — and therefore more Potassium — has to come from
+    // KNO₃). Both terms move the same direction, so this is monotonic and a
+    // single linear solve finds the exact match when one exists.
+    const totalKAtShare = (mkpShare: number) => {
+      const nFromMap = (1 - mkpShare) * targets.phosphorus * nPerPFromMap
+      const remainingNitrogenForKno3 = Math.max(0, targets.nitrogen - nitrogenFromCalciumNitrate - nFromMap)
+      return mkpShare * targets.phosphorus * kPerPFromMkp + remainingNitrogenForKno3 * kPerNFromKno3
+    }
+
+    const kAtAllMap = totalKAtShare(0)
+    const kAtAllMkp = totalKAtShare(1)
+
+    if (kAtAllMkp === kAtAllMap) {
+      // Degenerate (e.g. no Nitrogen left for KNO₃ either way) — Potassium
+      // doesn't depend on the split, so keep the legacy MKP-first default.
+      mkpShareOfPhosphorus = 1
+    } else {
+      const rawShare = (targets.potassium - kAtAllMap) / (kAtAllMkp - kAtAllMap)
+      mkpShareOfPhosphorus = Math.min(1, Math.max(0, rawShare))
+    }
+  } else if (targets.phosphorus > 0 && !isEnabled("monoPotassiumPhosphate") && isEnabled("monoAmmoniumPhosphate")) {
+    mkpShareOfPhosphorus = 0
+  }
+
+  let monoAmmoniumPhosphateGrams = 0
+  if (targets.phosphorus > 0) {
+    if (isEnabled("monoPotassiumPhosphate") || isEnabled("monoAmmoniumPhosphate")) {
+      const mkpPhosphorusPpm = targets.phosphorus * mkpShareOfPhosphorus
+      const mapPhosphorusPpm = targets.phosphorus * (1 - mkpShareOfPhosphorus)
+
+      if (mkpPhosphorusPpm > 0) {
+        assignToTankB(
+          "monoPotassiumPhosphate",
+          saltGramsForTargetPpm(mkpPhosphorusPpm, RAW_SALTS.monoPotassiumPhosphate.p, stockVolumeLiters, dilutionRatio)
+        )
+      }
+      if (mapPhosphorusPpm > 0) {
+        monoAmmoniumPhosphateGrams = saltGramsForTargetPpm(
+          mapPhosphorusPpm,
+          RAW_SALTS.monoAmmoniumPhosphate.p,
+          stockVolumeLiters,
+          dilutionRatio
+        )
+        assignToTankB("monoAmmoniumPhosphate", monoAmmoniumPhosphateGrams)
+      }
+    } else {
+      warnings.push({ element: "phosphorus", label: "Phosphorus" })
+    }
+  }
+
+  // MAP's Nitrogen contribution (if any) is folded into the Nitrogen target
+  // before the remaining-Nitrogen math below runs — otherwise it would chase
+  // the *full* Nitrogen target with another salt on top of what MAP already
+  // provides, overshooting Nitrogen.
+  const nitrogenFromMap = ppmFromSaltInStock(
+    monoAmmoniumPhosphateGrams,
+    RAW_SALTS.monoAmmoniumPhosphate.n,
+    stockVolumeLiters,
+    dilutionRatio
+  )
+  const nitrogenTargetAfterMap = Math.max(0, targets.nitrogen - nitrogenFromMap)
 
   // Priority for the remaining N (after MAP's fixed contribution, if any):
   // KNO₃ → more Ca(NO₃)₂ → NH₄NO₃ → (NH₄)₂SO₄
