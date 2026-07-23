@@ -22,21 +22,20 @@ import {
   calculateSeparateCalciumRecipe,
   estimateEcFromElementalTargets,
 } from "@/lib/hydro-calc/recipe-calculator"
-import type {
-  DirectMixRecipe,
-  ElementalTargets,
-  IncludedSaltsSelection,
-  MicroKey,
-  MultiPartTankRecipe,
-  StockTankOption,
-  ThreeTankRecipe,
+import {
+  unionIncludedSalts,
+  type DirectMixRecipe,
+  type ElementalTargets,
+  type MicroKey,
+  type MultiPartTankRecipe,
+  type StockTankOption,
+  type ThreeTankRecipe,
 } from "@/lib/hydro-calc/recipe-types"
 
 export interface CalculateRecipeInput {
   partsAnalysis: PartAnalysis[]
   parts: NutrientPart[]
   stockTankOption: StockTankOption
-  includedSalts: IncludedSaltsSelection
   stockVolumeLiters: number
   dilutionRatio: number
   keepMicrosSeparate: boolean
@@ -70,28 +69,36 @@ function sanitizePositiveNumber(value: number, fallback: number): number {
 export async function calculateRecipeAction(
   input: CalculateRecipeInput
 ): Promise<CalculateRecipeResult> {
-  const { partsAnalysis, parts, stockTankOption, includedSalts, keepMicrosSeparate } = input
+  const { partsAnalysis, parts, stockTankOption, keepMicrosSeparate } = input
   const stockVolumeLiters = sanitizePositiveNumber(input.stockVolumeLiters, 5)
   const dilutionRatio = sanitizePositiveNumber(input.dilutionRatio, 100)
 
   const rawTargets = calculateElementalTargets(partsAnalysis, parts)
   const { targets, estimated, anchor } = applyMicroEstimates(rawTargets)
-  const estimatedEc = estimateEcFromElementalTargets(targets, includedSalts)
+
+  // The Separate-Nitrogen and Direct-Mix layouts intentionally recombine
+  // nutrients across parts by chemistry rather than by bottle, so they draw
+  // from the union of every part's salt selection. Per-part tank layouts
+  // (A+B / doser "one tank per part") instead read each part's own
+  // selection directly inside calculate*MultiPart*Recipe below.
+  const combinedIncludedSalts = unionIncludedSalts(partsAnalysis)
+
+  const estimatedEc = estimateEcFromElementalTargets(targets, combinedIncludedSalts)
 
   const threeTankRecipe = calculateSeparateCalciumRecipe(
     targets,
     stockVolumeLiters,
     dilutionRatio,
-    includedSalts,
+    combinedIncludedSalts,
     keepMicrosSeparate
   )
 
   const multiPartRecipe =
     stockTankOption === "doser"
-      ? calculateDoserMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts)
-      : calculateMultiPartStockTankRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio, includedSalts)
+      ? calculateDoserMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)
+      : calculateMultiPartStockTankRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)
 
-  const directRecipe = calculateDirectMixRecipe(targets, stockVolumeLiters, includedSalts)
+  const directRecipe = calculateDirectMixRecipe(targets, stockVolumeLiters, combinedIncludedSalts)
 
   return {
     targets,

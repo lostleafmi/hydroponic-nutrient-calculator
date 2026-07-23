@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical, AlertCircle, AlertTriangle } from "lucide-react"
 import {
+  DEFAULT_INCLUDED_SALTS,
   SALT_CHECKBOX_OPTIONS,
   type IncludedSaltsSelection,
 } from "@/lib/hydro-calc/recipe-types"
@@ -31,6 +32,8 @@ export interface PartAnalysis {
   molybdenum: string
   photoUrl?: string
   photoName?: string
+  /** Which raw salts/inputs the user says are present in THIS part specifically. */
+  includedSalts: IncludedSaltsSelection
 }
 
 // Combined analysis from all parts (for backwards compatibility)
@@ -52,8 +55,6 @@ export interface NutrientAnalysis {
 interface GuaranteedAnalysisScreenProps {
   partsAnalysis: PartAnalysis[]
   onPartsAnalysisChange: (parts: PartAnalysis[]) => void
-  includedSalts: IncludedSaltsSelection
-  onIncludedSaltsChange: (salts: IncludedSaltsSelection) => void
   onNext: () => void
 }
 
@@ -72,16 +73,15 @@ export const createEmptyPartAnalysis = (name: string, id?: string): PartAnalysis
   boron: "",
   copper: "",
   molybdenum: "",
+  includedSalts: { ...DEFAULT_INCLUDED_SALTS },
 })
 
 export function GuaranteedAnalysisScreen({ 
   partsAnalysis, 
   onPartsAnalysisChange, 
-  includedSalts,
-  onIncludedSaltsChange,
   onNext 
 }: GuaranteedAnalysisScreenProps) {
-  const [saltError, setSaltError] = useState<string | null>(null)
+  const [saltErrorPartIds, setSaltErrorPartIds] = useState<Set<string>>(new Set())
 
   const addPart = () => {
     const partLetter = String.fromCharCode(65 + partsAnalysis.length)
@@ -117,21 +117,31 @@ export function GuaranteedAnalysisScreen({
     updatePart(partId, { photoUrl: undefined, photoName: undefined })
   }
 
-  const toggleSalt = (id: keyof IncludedSaltsSelection, checked: boolean) => {
-    const updated = { ...includedSalts, [id]: checked }
-    onIncludedSaltsChange(updated)
-    if (saltError && SALT_CHECKBOX_OPTIONS.some((opt) => updated[opt.id])) {
-      setSaltError(null)
+  const toggleSalt = (partId: string, saltId: keyof IncludedSaltsSelection, checked: boolean) => {
+    const part = partsAnalysis.find((p) => p.id === partId)
+    if (!part) return
+    const updatedSalts = { ...part.includedSalts, [saltId]: checked }
+    updatePart(partId, { includedSalts: updatedSalts })
+
+    if (checked) {
+      setSaltErrorPartIds((prev) => {
+        if (!prev.has(partId)) return prev
+        const next = new Set(prev)
+        next.delete(partId)
+        return next
+      })
     }
   }
 
   const handleNext = () => {
-    const anyChecked = SALT_CHECKBOX_OPTIONS.some((opt) => includedSalts[opt.id])
-    if (!anyChecked) {
-      setSaltError("Please select at least one salt/input that is present in your product.")
+    const partsMissingSalts = partsAnalysis.filter(
+      (part) => !SALT_CHECKBOX_OPTIONS.some((opt) => part.includedSalts[opt.id])
+    )
+    if (partsMissingSalts.length > 0) {
+      setSaltErrorPartIds(new Set(partsMissingSalts.map((p) => p.id)))
       return
     }
-    setSaltError(null)
+    setSaltErrorPartIds(new Set())
     onNext()
   }
 
@@ -180,10 +190,12 @@ export function GuaranteedAnalysisScreen({
               part={part}
               index={index}
               canRemove={partsAnalysis.length > 1}
+              hasSaltError={saltErrorPartIds.has(part.id)}
               onUpdate={(updates) => updatePart(part.id, updates)}
               onRemove={() => removePart(part.id)}
               onFileUpload={(file) => handleFileUpload(part.id, file)}
               onRemovePhoto={() => removePhoto(part.id)}
+              onToggleSalt={(saltId, checked) => toggleSalt(part.id, saltId, checked)}
             />
           ))}
 
@@ -203,54 +215,14 @@ export function GuaranteedAnalysisScreen({
         </CardContent>
       </Card>
 
-      {/* Salts & Inputs Included */}
-      <Card className="border-2 border-border bg-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl text-foreground">
-            <FlaskConical className="h-5 w-5 text-primary" />
-            <span>Salts & Inputs Included</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <HelpCircle className="h-4 w-4 cursor-help text-muted-foreground" />
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs">
-                Only check the salts that are actually listed on your bottle&apos;s guaranteed analysis
-                or &quot;derived from&quot; section. This tells the solver which raw salts to use when
-                replicating your product.
-              </TooltipContent>
-            </Tooltip>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="rounded-lg border border-border bg-secondary/30 p-4">
-            <h4 className="mb-1 font-semibold text-foreground">
-              Check only the salts listed on the &quot;Derived from&quot; section of your label
-            </h4>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              Look at the &quot;Derived from&quot; section of the guaranteed analysis on your nutrient label and check off the ingredients that are listed.
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            {SALT_CHECKBOX_OPTIONS.map((option) => (
-              <SaltCheckboxRow
-                key={option.id}
-                id={option.id}
-                label={option.label}
-                sublabel={option.sublabel}
-                checked={includedSalts[option.id]}
-                onCheckedChange={(checked) => toggleSalt(option.id, checked)}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="flex flex-col items-end gap-2">
-        {saltError && (
+        {saltErrorPartIds.size > 0 && (
           <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{saltError}</span>
+            <span>
+              Please select at least one salt/input for every part that is present in your
+              product.
+            </span>
           </div>
         )}
         <Button onClick={handleNext} className="gap-2">
@@ -300,18 +272,22 @@ function PartAnalysisCard({
   part,
   index,
   canRemove,
+  hasSaltError,
   onUpdate,
   onRemove,
   onFileUpload,
   onRemovePhoto,
+  onToggleSalt,
 }: {
   part: PartAnalysis
   index: number
   canRemove: boolean
+  hasSaltError: boolean
   onUpdate: (updates: Partial<PartAnalysis>) => void
   onRemove: () => void
   onFileUpload: (file: File) => void
   onRemovePhoto: () => void
+  onToggleSalt: (saltId: keyof IncludedSaltsSelection, checked: boolean) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -553,6 +529,56 @@ function PartAnalysisCard({
               </>
             )}
           </div>
+        </div>
+
+        {/* Salts & Inputs Included in this part */}
+        <div
+          className={`rounded-lg border-2 p-4 transition-colors ${
+            hasSaltError ? "border-destructive/60 bg-destructive/5" : "border-border bg-background"
+          }`}
+        >
+          <div className="mb-3 flex items-center gap-2">
+            <FlaskConical className="h-4 w-4 text-primary" />
+            <h4 className="font-semibold text-foreground text-sm">
+              Salts &amp; Inputs Included in {part.name || `Part ${index + 1}`}
+            </h4>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="h-4 w-4 cursor-help text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                Only check the salts that are actually listed on THIS part&apos;s guaranteed
+                analysis or &quot;derived from&quot; section. This tells the solver which raw
+                salts it&apos;s allowed to use when replicating this specific part — so it never
+                mixes salts that your nutrient line keeps in different bottles.
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
+          <p className="mb-3 text-sm leading-relaxed text-muted-foreground">
+            Look at the &quot;Derived from&quot; section of this part&apos;s label and check off
+            only the ingredients listed there.
+          </p>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            {SALT_CHECKBOX_OPTIONS.map((option) => (
+              <SaltCheckboxRow
+                key={option.id}
+                id={option.id}
+                label={option.label}
+                sublabel={option.sublabel}
+                checked={part.includedSalts[option.id]}
+                onCheckedChange={(checked) => onToggleSalt(option.id, checked)}
+              />
+            ))}
+          </div>
+
+          {hasSaltError && (
+            <p className="mt-3 flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              Select at least one salt/input that is present in this part.
+            </p>
+          )}
         </div>
       </div>
     </div>

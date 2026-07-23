@@ -72,8 +72,8 @@ import {
   roundDownToNiceRatio,
   stockTankMlPerGallon,
   stockTankMlPerLiter,
+  unionIncludedSalts,
   type DirectMixRecipe,
-  type IncludedSaltsSelection,
   type MicroKey,
   type MultiPartTankRecipe,
   type MultiTankSolubilityReport,
@@ -117,7 +117,6 @@ interface RecipeScreenProps {
   partsAnalysis: PartAnalysis[]
   parts: NutrientPart[]
   stockTankOption: StockTankOption
-  includedSalts: IncludedSaltsSelection
   initialSettings?: RecipeInitialSettings
   onBack: () => void
 }
@@ -135,7 +134,6 @@ export function RecipeScreen({
   partsAnalysis,
   parts,
   stockTankOption,
-  includedSalts,
   initialSettings = {},
   onBack,
 }: RecipeScreenProps) {
@@ -248,7 +246,6 @@ export function RecipeScreen({
         partsAnalysis,
         parts,
         stockTankOption,
-        includedSalts,
         stockVolumeLiters,
         dilutionRatio,
         keepMicrosSeparate,
@@ -267,7 +264,7 @@ export function RecipeScreen({
     }, delay)
 
     return () => clearTimeout(timer)
-  }, [partsAnalysis, parts, stockTankOption, includedSalts, stockVolumeLiters, dilutionRatio, keepMicrosSeparate])
+  }, [partsAnalysis, parts, stockTankOption, stockVolumeLiters, dilutionRatio, keepMicrosSeparate])
 
   const targets = calcResult?.targets ?? EMPTY_TARGETS
   const anchor = calcResult?.anchor ?? null
@@ -452,10 +449,14 @@ export function RecipeScreen({
     return Object.entries(combined).filter(([, amount]) => amount > 0)
   }, [threeTankRecipe, multiPartRecipe, directRecipe, stockTankOption, usesSeparateNitrogenLayout, usesPerPartTanks])
 
-  // When the user selected "Chelated Micronutrients" on Step 1, show the chelated
+  // Every part's own salt selection, unioned together — used for
+  // shopping-list naming below, which isn't part-specific.
+  const combinedIncludedSalts = useMemo(() => unionIncludedSalts(partsAnalysis), [partsAnalysis])
+
+  // When the user selected "Chelated Micronutrients" on any part, show the chelated
   // (EDTA/DTPA) product names in the shopping list rather than the raw sulfate
   // salts the solver uses internally for elemental-fraction math.
-  const usesChelatedMicros = includedSalts.chelatedMicronutrients
+  const usesChelatedMicros = combinedIncludedSalts.chelatedMicronutrients
 
   const shoppingItems: Array<{ key: SaltKey; name: string; note: string; disclaimer?: string }> = [
     {
@@ -600,11 +601,15 @@ export function RecipeScreen({
       const formulationName = dashboardFormulationName.trim() || buildUntitledFormulationName()
       const resolvedTargetEc = parsedTargetEc > 0 ? parsedTargetEc : estimatedEc
       const payload = {
-        // Strip local blob URLs from photo fields before sending
+        // Strip local blob URLs from photo fields before sending. Each part
+        // already carries its own `includedSalts` selection; the top-level
+        // `includedSalts` below is kept only for backward compatibility with
+        // consumers that still expect the old global shape (it's the union
+        // of every part's selection).
         partsAnalysis: partsAnalysis.map(({ photoUrl: _photoUrl, photoName: _photoName, ...p }) => p),
         parts,
         stockTankOption,
-        includedSalts,
+        includedSalts: combinedIncludedSalts,
         stockTankSize,
         stockTankUnit,
         concentrationRatio: dilutionRatio,
@@ -1109,9 +1114,10 @@ export function RecipeScreen({
             <p>
               <strong className="text-amber-50">{activeRecipeWarnings.map((w) => w.label).join(", ")}</strong>{" "}
               couldn&apos;t be fully matched because the salt that would supply{" "}
-              {activeRecipeWarnings.length === 1 ? "it" : "them"} is unchecked on Step 1. Check
-              more salts in the &quot;Salts &amp; Inputs Included&quot; section, or leave it as-is
-              if you know you don&apos;t have that input on hand.
+              {activeRecipeWarnings.length === 1 ? "it" : "them"} is unchecked on the relevant
+              part back on Step 1. Check more salts in that part&apos;s &quot;Salts &amp; Inputs
+              Included&quot; section, or leave it as-is if you know you don&apos;t have that input
+              on hand.
             </p>
           </div>
         </div>

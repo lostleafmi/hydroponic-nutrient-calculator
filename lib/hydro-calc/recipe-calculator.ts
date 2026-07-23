@@ -503,13 +503,19 @@ function saltAmountsHasContent(salts: SaltAmounts): boolean {
  * One stock tank per nutrient part the user entered. Each part's guaranteed
  * analysis and feed rate drive the salts in that tank — mirroring how
  * commercial multi-part lines are bottled.
+ *
+ * Each part's own `includedSalts` selection (not a shared/global one) gates
+ * which raw salts the solver may reach for while sizing that part's tank.
+ * This keeps the tanks faithful to the original product: a part that only
+ * lists Calcium Nitrate on its label can never end up with Potassium
+ * Nitrate or MKP in its tank, even if those salts are checked on a
+ * different part.
  */
 export function calculateMultiPartStockTankRecipe(
   partsAnalysis: PartAnalysis[],
   parts: NutrientPart[],
   stockVolumeLiters: number,
-  dilutionRatio: number,
-  includedSalts?: IncludedSaltsSelection
+  dilutionRatio: number
 ): MultiPartTankRecipe {
   const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
   const tanks: PartStockTank[] = []
@@ -530,7 +536,7 @@ export function calculateMultiPartStockTankRecipe(
       targets,
       stockVolumeLiters,
       dilutionRatio,
-      includedSalts
+      analysis.includedSalts
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
 
@@ -563,13 +569,16 @@ export function calculateMultiPartStockTankRecipe(
  * unmeasurably small amounts (e.g. 0.001 g of Sodium Molybdate per tank).
  * Consolidating them into one tank keeps the amounts large enough to weigh
  * accurately, while every part still gets its own suction line for macros.
+ *
+ * As with `calculateMultiPartStockTankRecipe`, each part's macro salts are
+ * sized using that part's own `includedSalts` selection so a part never
+ * borrows a salt that only belongs to a different part's bottle.
  */
 export function calculateDoserMultiPartRecipe(
   partsAnalysis: PartAnalysis[],
   parts: NutrientPart[],
   stockVolumeLiters: number,
-  dilutionRatio: number,
-  includedSalts?: IncludedSaltsSelection
+  dilutionRatio: number
 ): MultiPartTankRecipe {
   const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
   const macroTanks: PartStockTank[] = []
@@ -593,7 +602,7 @@ export function calculateDoserMultiPartRecipe(
       targets,
       stockVolumeLiters,
       dilutionRatio,
-      includedSalts
+      analysis.includedSalts
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
     const allSalts = combineSaltAmounts(tankA, tankB)

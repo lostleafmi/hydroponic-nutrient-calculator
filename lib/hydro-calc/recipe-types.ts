@@ -257,6 +257,31 @@ export function getEnabledSaltKeys(selection?: IncludedSaltsSelection): Set<Salt
   return enabled
 }
 
+/**
+ * Combine every part's "Salts & Inputs" selection into a single selection
+ * where a checkbox is true if ANY part checked it.
+ *
+ * Used only by recipe layouts that intentionally recombine nutrients across
+ * parts by chemistry rather than by original bottle (the "Separate Nitrogen"
+ * 3-tank layout, the Direct Mix layout, and the EC estimate) — those modes
+ * aren't trying to mirror which part a salt came from, so any salt the user
+ * indicated is present *anywhere* in their product is fair game. Per-part
+ * tank layouts (A+B / doser "one tank per part") must NOT use this — they
+ * read each part's own `includedSalts` directly so salts stay confined to
+ * the part the user said they belong to.
+ */
+export function unionIncludedSalts(parts: PartAnalysis[]): IncludedSaltsSelection {
+  const union: IncludedSaltsSelection = { ...DEFAULT_INCLUDED_SALTS }
+  for (const part of parts) {
+    const selection = part.includedSalts
+    if (!selection) continue
+    for (const opt of SALT_CHECKBOX_OPTIONS) {
+      if (selection[opt.id]) union[opt.id] = true
+    }
+  }
+  return union
+}
+
 /** Max parts for which the Separate Nitrogen tapering layout is offered */
 export const SEPARATE_NITROGEN_MAX_PARTS = 3
 

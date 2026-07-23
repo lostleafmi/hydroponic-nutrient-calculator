@@ -11,8 +11,8 @@ import {
 import { FeedingRatesScreen, type NutrientPart, type StockTankOption } from "@/components/hydro-calc/feeding-rates-screen"
 import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-calc/recipe-screen"
 import {
-  DEFAULT_INCLUDED_SALTS,
   ALL_SALTS_SELECTED,
+  DEFAULT_INCLUDED_SALTS,
   isSeparateNitrogenAvailable,
   type IncludedSaltsSelection,
 } from "@/lib/hydro-calc/recipe-types"
@@ -78,6 +78,44 @@ function syncFeedingPartsFromAnalysis(
   })
 }
 
+/**
+ * Salts & Inputs selection used to live as one global object on the saved
+ * formulation. Saves from before per-part selection existed either have no
+ * `includedSalts` at all (pre-feature) or have it as that single legacy
+ * global object — never per-part. New saves carry `includedSalts` on each
+ * `partsAnalysis` entry directly, so this only kicks in for old data.
+ */
+function migrateLegacyIncludedSalts(raw: unknown): IncludedSaltsSelection | null {
+  if (!raw || typeof raw !== "object") return null
+
+  // Strip deprecated fields (other, otherText) that may exist in old saves.
+  // Migrate ironChelate → chelatedMicronutrients so pre-refactor saves carry
+  // their iron selection forward as a full micro package.
+  const { other: _other, otherText: _otherText, ironChelate, ...validSalts } = raw as Record<string, unknown>
+  const migrated: Partial<IncludedSaltsSelection> = validSalts as Partial<IncludedSaltsSelection>
+  if (ironChelate === true && !("chelatedMicronutrients" in validSalts)) {
+    migrated.chelatedMicronutrients = true
+  }
+  return { ...DEFAULT_INCLUDED_SALTS, ...migrated }
+}
+
+/** Fill in `includedSalts` on any loaded part that predates per-part selection. */
+function withMigratedPartSalts(
+  partsAnalysis: PartAnalysis[],
+  legacyGlobalSalts: unknown
+): PartAnalysis[] {
+  // Older saves never had per-part selection — fall back to whatever the
+  // save had globally, or "all salts" if that's missing too, so migrated
+  // formulations keep working without hitting the "select at least one
+  // salt" validation.
+  const fallback = migrateLegacyIncludedSalts(legacyGlobalSalts) ?? ALL_SALTS_SELECTED
+
+  return partsAnalysis.map((part) => ({
+    ...part,
+    includedSalts: part.includedSalts ?? fallback,
+  }))
+}
+
 function syncAnalysisPartsFromFeeding(
   feedingParts: NutrientPart[],
   analysisParts: PartAnalysis[]
@@ -117,7 +155,6 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
   const [partsAnalysis, setPartsAnalysis] = useState<PartAnalysis[]>(initialState.partsAnalysis)
   const [parts, setParts] = useState<NutrientPart[]>(initialState.parts)
   const [stockTankOption, setStockTankOption] = useState<StockTankOption>("separate")
-  const [includedSalts, setIncludedSalts] = useState<IncludedSaltsSelection>(DEFAULT_INCLUDED_SALTS)
 
   // Tracks which recipeInitialSettings generation is in use — incrementing forces
   // RecipeScreen to remount so its useState picks up the new initial values.
@@ -154,34 +191,13 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
 
         // --- Populate wizard state ---
         if (Array.isArray(data.partsAnalysis) && data.partsAnalysis.length > 0) {
-          setPartsAnalysis(data.partsAnalysis)
+          setPartsAnalysis(withMigratedPartSalts(data.partsAnalysis, data.includedSalts))
         }
         if (Array.isArray(data.parts) && data.parts.length > 0) {
           setParts(data.parts)
         }
         if (data.stockTankOption) {
           setStockTankOption(data.stockTankOption as StockTankOption)
-        }
-        // Older saved formulations won't have this field — default to all-enabled so they
-        // continue working without hitting the new "select at least one salt" validation.
-        if (data.includedSalts && typeof data.includedSalts === "object") {
-          // Strip deprecated fields (other, otherText) that may exist in old saves.
-          // Migrate ironChelate → chelatedMicronutrients so pre-refactor saves carry
-          // their iron selection forward as a full micro package.
-          const {
-            other: _other,
-            otherText: _otherText,
-            ironChelate,
-            ...validSalts
-          } = data.includedSalts as Record<string, unknown>
-          const migrated: Partial<IncludedSaltsSelection> = validSalts as Partial<IncludedSaltsSelection>
-          if (ironChelate === true && !("chelatedMicronutrients" in validSalts)) {
-            migrated.chelatedMicronutrients = true
-          }
-          setIncludedSalts({ ...DEFAULT_INCLUDED_SALTS, ...migrated })
-        } else {
-          // Pre-salt-selection formulation — treat as all salts included
-          setIncludedSalts(ALL_SALTS_SELECTED)
         }
 
         // --- Pre-fill recipe screen settings ---
@@ -334,8 +350,6 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
           <GuaranteedAnalysisScreen
             partsAnalysis={partsAnalysis}
             onPartsAnalysisChange={handlePartsAnalysisChange}
-            includedSalts={includedSalts}
-            onIncludedSaltsChange={setIncludedSalts}
             onNext={() => goToScreen("feeding")}
           />
         )}
@@ -355,7 +369,6 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
             partsAnalysis={partsAnalysis}
             parts={parts}
             stockTankOption={stockTankOption}
-            includedSalts={includedSalts}
             initialSettings={recipeInitialSettings}
             onBack={() => goToScreen("feeding")}
           />
