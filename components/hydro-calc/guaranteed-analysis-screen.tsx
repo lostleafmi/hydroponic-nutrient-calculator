@@ -246,6 +246,7 @@ export function GuaranteedAnalysisScreen({
 function SaltCheckboxRow({
   inputId,
   label,
+  elementsLabel,
   sublabel,
   checked,
   onCheckedChange,
@@ -261,12 +262,19 @@ function SaltCheckboxRow({
    */
   inputId: string
   label: string
+  /** Short elemental shorthand shown as its own centered line under `label` (e.g. "Fe, Mn, Zn, B, Cu, Mo"). */
+  elementsLabel?: string
   sublabel: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   /** Extra content (e.g. an optional amount field) shown below the label, only while checked. */
   children?: React.ReactNode
 }) {
+  // Options with an `elementsLabel` pack three lines of text into one card
+  // (name, element shorthand, full ingredient list) — center all three so
+  // they read as one tidy block instead of a ragged left-aligned paragraph.
+  const centered = Boolean(elementsLabel)
+
   return (
     <div
       className={`rounded-lg border-2 p-3 transition-colors ${
@@ -285,8 +293,18 @@ function SaltCheckboxRow({
             grid row as a card with a sublabel — instead of leaving it pinned
             to the top with empty space below. `text-pretty` avoids ragged,
             single-word wrapped lines on the longer salt names/sublabels. */}
-        <Label htmlFor={inputId} className="flex flex-1 cursor-pointer flex-col justify-center gap-1">
+        <Label
+          htmlFor={inputId}
+          className={`flex flex-1 cursor-pointer flex-col justify-center gap-1 ${
+            centered ? "items-center text-center" : ""
+          }`}
+        >
           <span className="text-pretty font-medium leading-snug text-foreground">{label}</span>
+          {elementsLabel && (
+            <span className="text-pretty font-mono text-xs font-semibold leading-snug text-foreground/80">
+              {elementsLabel}
+            </span>
+          )}
           {sublabel && <span className="text-pretty text-xs leading-snug text-muted-foreground">{sublabel}</span>}
         </Label>
       </div>
@@ -611,6 +629,7 @@ function PartAnalysisCard({
                 key={option.id}
                 inputId={`salt-${part.id}-${option.id}`}
                 label={option.label}
+                elementsLabel={option.elementsLabel}
                 sublabel={option.sublabel}
                 checked={part.includedSalts[option.id]}
                 onCheckedChange={(checked) => onToggleSalt(option.id, checked)}

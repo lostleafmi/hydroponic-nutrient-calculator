@@ -284,6 +284,13 @@ export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
 export interface SaltCheckboxOption {
   id: keyof IncludedSaltsSelection
   label: string
+  /**
+   * Short elemental shorthand shown as its own centered line directly under
+   * `label` (e.g. "Fe, Mn, Zn, B, Cu, Mo"). Only used by options whose label
+   * alone doesn't convey which elements are covered — most options leave
+   * this unset.
+   */
+  elementsLabel?: string
   sublabel: string
   /** Underlying solver salt keys this checkbox gates */
   saltKeys: SaltKey[]
@@ -321,7 +328,8 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   },
   {
     id: "chelatedMicronutrients",
-    label: "Chelated Micronutrients (Fe, Mn, Zn, B, Cu, Mo)",
+    label: "Chelated Micronutrients",
+    elementsLabel: "Fe, Mn, Zn, B, Cu, Mo",
     sublabel:
       "Iron EDTA/DTPA, Manganese EDTA, Copper EDTA, Zinc EDTA, Boric Acid, Sodium Borate, Sodium Molybdate",
     saltKeys: ["ironDTPA", "manganeseSulfate", "zincSulfate", "boricAcid", "copperSulfate", "sodiumMolybdate"],
