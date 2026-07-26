@@ -222,7 +222,7 @@ function ppmFromSaltInStock(
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
  * Tank A — Ca(NO₃)₂, CaCl₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
- * Tank B — MKP/MAP (Phosphorus), MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
+ * Tank B — MKP/MAP (Phosphorus), MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), chelated micronutrients (Mn/Zn/Cu-EDTA, boric acid, sodium molybdate)  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
  * never coexist in a concentrated stock solution where they would precipitate.
@@ -241,8 +241,10 @@ function ppmFromSaltInStock(
  * `includedSalts` restricts which salts the solver is allowed to reach for
  * (see `getEnabledSaltKeys`). When a target's only source salt is disabled,
  * that target is left unmet and reported in `warnings` — the caller should
- * surface a "closest possible recipe" notice. Micronutrient sulfates are
- * always available regardless of the selection.
+ * surface a "closest possible recipe" notice. The chelated micronutrients
+ * (Fe-DTPA, Mn/Zn/Cu-EDTA, boric acid, sodium molybdate) are always
+ * available regardless of the selection — sulfate micronutrient salts
+ * (MnSO₄, ZnSO₄, CuSO₄) are not modeled and never emitted.
  */
 export function calculateStockTankRecipe(
   targets: ElementalTargets,
@@ -727,15 +729,18 @@ export function calculateStockTankRecipe(
   // sulfur target — that would overshoot other elements. Hydroponic plants
   // tolerate a wide S range, so any deficit is acceptable and not warned on.
 
-  // Micronutrients — always available; no realistic alternative source exists
+  // Micronutrients — always available; chelated forms (EDTA) are used by
+  // default rather than sulfate salts, since the "Chelated Micronutrients"
+  // selection these are gated behind (see `SALT_CHECKBOX_OPTIONS`) is meant
+  // to represent real chelate-based product lines. See `RAW_SALTS`.
   assignToTankB(
-    "manganeseSulfate",
-    saltGramsForTargetPpm(targets.manganese, RAW_SALTS.manganeseSulfate.mn, stockVolumeLiters, dilutionRatio)
+    "manganeseEDTA",
+    saltGramsForTargetPpm(targets.manganese, RAW_SALTS.manganeseEDTA.mn, stockVolumeLiters, dilutionRatio)
   )
 
   assignToTankB(
-    "zincSulfate",
-    saltGramsForTargetPpm(targets.zinc, RAW_SALTS.zincSulfate.zn, stockVolumeLiters, dilutionRatio)
+    "zincEDTA",
+    saltGramsForTargetPpm(targets.zinc, RAW_SALTS.zincEDTA.zn, stockVolumeLiters, dilutionRatio)
   )
 
   assignToTankB(
@@ -744,8 +749,8 @@ export function calculateStockTankRecipe(
   )
 
   assignToTankB(
-    "copperSulfate",
-    saltGramsForTargetPpm(targets.copper, RAW_SALTS.copperSulfate.cu, stockVolumeLiters, dilutionRatio)
+    "copperEDTA",
+    saltGramsForTargetPpm(targets.copper, RAW_SALTS.copperEDTA.cu, stockVolumeLiters, dilutionRatio)
   )
 
   assignToTankB(

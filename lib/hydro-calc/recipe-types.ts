@@ -92,10 +92,10 @@ export interface SaltAmounts {
   ammoniumNitrate: number
   ammoniumSulfate: number
   ironDTPA: number
-  manganeseSulfate: number
-  zincSulfate: number
+  manganeseEDTA: number
+  zincEDTA: number
   boricAcid: number
-  copperSulfate: number
+  copperEDTA: number
   sodiumMolybdate: number
 }
 
@@ -253,10 +253,14 @@ export const RAW_SALTS = {
   ammoniumNitrate: { name: "Ammonium Nitrate", formula: "NH₄NO₃", n: 0.35 },
   ammoniumSulfate: { name: "Ammonium Sulfate", formula: "(NH₄)₂SO₄", n: 0.212, s: 0.243 },
   ironDTPA: { name: "Iron DTPA 11%", formula: "Fe-DTPA", fe: 0.11 },
-  manganeseSulfate: { name: "Manganese Sulfate", formula: "MnSO₄·H₂O", mn: 0.325 },
-  zincSulfate: { name: "Zinc Sulfate", formula: "ZnSO₄·7H₂O", zn: 0.227 },
+  // Chelated micronutrients are the default salt forms (see
+  // `SALT_CHECKBOX_OPTIONS.chelatedMicronutrients`) — sulfate forms
+  // (MnSO₄, ZnSO₄, CuSO₄) are deliberately not modeled here. Percentages
+  // reflect standard commercial chelated-micronutrient product labels.
+  manganeseEDTA: { name: "Manganese EDTA 13%", formula: "Mn-EDTA", mn: 0.13 },
+  zincEDTA: { name: "Zinc EDTA 14%", formula: "Zn-EDTA", zn: 0.14 },
   boricAcid: { name: "Boric Acid", formula: "H₃BO₃", b: 0.175 },
-  copperSulfate: { name: "Copper Sulfate", formula: "CuSO₄·5H₂O", cu: 0.255 },
+  copperEDTA: { name: "Copper EDTA 13%", formula: "Cu-EDTA", cu: 0.13 },
   sodiumMolybdate: { name: "Sodium Molybdate", formula: "Na₂MoO₄·2H₂O", mo: 0.396 },
 } as const
 
@@ -268,8 +272,13 @@ export type SaltKey = keyof typeof RAW_SALTS
  * the solver (see `getEnabledSaltKeys`).
  *
  * `chelatedMicronutrients` replaces the old `ironChelate` field and now gates
- * the full micronutrient package: Fe-DTPA, MnSO₄, ZnSO₄, H₃BO₃, CuSO₄,
- * Na₂MoO₄. Most commercial nutrient lines ship all six together.
+ * the full micronutrient package: Fe-DTPA, Mn-EDTA, Zn-EDTA, H₃BO₃, Cu-EDTA,
+ * Na₂MoO₄. Most commercial nutrient lines ship all six together. All six are
+ * chelated (or, for Boron/Molybdenum, already non-sulfate) forms by design —
+ * see `RAW_SALTS` — since sulfate micronutrient salts (MnSO₄, ZnSO₄, CuSO₄)
+ * aren't a true match for the chelated inputs this option is meant to
+ * represent. Revisit if an explicit sulfate-micronutrient option is ever
+ * added.
  */
 export interface IncludedSaltsSelection {
   calciumNitrate: boolean
@@ -364,7 +373,7 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
     elementsLabel: "Fe, Mn, Zn, B, Cu, Mo",
     sublabel:
       "Iron EDTA/DTPA, Manganese EDTA, Copper EDTA, Zinc EDTA, Boric Acid, Sodium Borate, Sodium Molybdate",
-    saltKeys: ["ironDTPA", "manganeseSulfate", "zincSulfate", "boricAcid", "copperSulfate", "sodiumMolybdate"],
+    saltKeys: ["ironDTPA", "manganeseEDTA", "zincEDTA", "boricAcid", "copperEDTA", "sodiumMolybdate"],
   },
 ]
 
@@ -463,10 +472,10 @@ export const SALT_DISPLAY_ORDER: SaltKey[] = [
   "potassiumSulfate",
   "ammoniumSulfate",
   "ironDTPA",
-  "manganeseSulfate",
-  "zincSulfate",
+  "manganeseEDTA",
+  "zincEDTA",
   "boricAcid",
-  "copperSulfate",
+  "copperEDTA",
   "sodiumMolybdate",
 ]
 
@@ -506,7 +515,10 @@ export interface DirectMixRecipe {
  *
  * Tank A — calcium-side (Ca²⁺ source, incl. Calcium Chloride + compatible
  *          nitrates / chelated iron)
- * Tank B — phosphate / sulfate-side (PO₄³⁻ + SO₄²⁻ salts, including micro sulfates)
+ * Tank B — phosphate / sulfate-side (PO₄³⁻ + SO₄²⁻ salts, plus the chelated
+ *          micronutrients — chelates are compatible with both tanks
+ *          chemically, but grouped here alongside the other non-Calcium
+ *          salts)
  */
 export const TANK_A_SALTS = [
   "calciumNitrate",
@@ -523,10 +535,10 @@ export const TANK_B_SALTS = [
   "magnesiumSulfate",
   "potassiumSulfate",
   "ammoniumSulfate",
-  "manganeseSulfate",
-  "zincSulfate",
+  "manganeseEDTA",
+  "zincEDTA",
   "boricAcid",
-  "copperSulfate",
+  "copperEDTA",
   "sodiumMolybdate",
 ] as const satisfies readonly SaltKey[]
 
@@ -540,7 +552,7 @@ export const TANK_B_SALTS = [
  *          nitrogen-free calcium source (taper Tank 1 for end-of-flower N
  *          reduction when Calcium Nitrate is the source)
  * Tank 2 — Remaining macros: KNO₃, MKP/MAP, MgSO₄, K₂SO₄
- * Tank 3 — Micros (Fe-DTPA + micro sulfates + boric acid + sodium molybdate)
+ * Tank 3 — Micros (Fe-DTPA, Mn/Zn/Cu EDTA chelates, boric acid, sodium molybdate)
  *
  * Tank 3 is only used when the recipe actually contains micronutrients. Without
  * micros the calculator naturally collapses to a 2-tank layout (1 + 2).
@@ -563,10 +575,10 @@ export const TANK_2_SALTS = [
 
 export const TANK_3_SALTS = [
   "ironDTPA",
-  "manganeseSulfate",
-  "zincSulfate",
+  "manganeseEDTA",
+  "zincEDTA",
   "boricAcid",
-  "copperSulfate",
+  "copperEDTA",
   "sodiumMolybdate",
 ] as const satisfies readonly SaltKey[]
 
@@ -625,10 +637,13 @@ export const SOLUBILITY_LIMITS_G_PER_L: Record<SaltKey, number> = {
   ammoniumNitrate: 1920,
   ammoniumSulfate: 754,
   ironDTPA: 500,
-  manganeseSulfate: 700,
-  zincSulfate: 960,
+  // Chelated micronutrient solubility figures (disodium EDTA salts, 20 °C):
+  // Mn-EDTA ~400 g/L, Zn-EDTA ~900 g/L, Cu-EDTA ~1000 g/L — all comfortably
+  // more soluble than the sulfate forms they replace.
+  manganeseEDTA: 400,
+  zincEDTA: 900,
   boricAcid: 47,
-  copperSulfate: 317,
+  copperEDTA: 1000,
   sodiumMolybdate: 840,
 }
 
@@ -819,10 +834,10 @@ export function emptySaltAmounts(): SaltAmounts {
     ammoniumNitrate: 0,
     ammoniumSulfate: 0,
     ironDTPA: 0,
-    manganeseSulfate: 0,
-    zincSulfate: 0,
+    manganeseEDTA: 0,
+    zincEDTA: 0,
     boricAcid: 0,
-    copperSulfate: 0,
+    copperEDTA: 0,
     sodiumMolybdate: 0,
   }
 }

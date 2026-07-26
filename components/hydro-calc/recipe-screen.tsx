@@ -130,10 +130,10 @@ interface RecipeScreenProps {
 
 const MICRO_SALT_KEYS = new Set<SaltKey>([
   "ironDTPA",
-  "manganeseSulfate",
-  "zincSulfate",
+  "manganeseEDTA",
+  "zincEDTA",
   "boricAcid",
-  "copperSulfate",
+  "copperEDTA",
   "sodiumMolybdate",
 ])
 
@@ -520,11 +520,6 @@ export function RecipeScreen({
   // shopping-list naming below, which isn't part-specific.
   const combinedIncludedSalts = useMemo(() => unionIncludedSalts(partsAnalysis), [partsAnalysis])
 
-  // When the user selected "Chelated Micronutrients" on any part, show the chelated
-  // (EDTA/DTPA) product names in the shopping list rather than the raw sulfate
-  // salts the solver uses internally for elemental-fraction math.
-  const usesChelatedMicros = combinedIncludedSalts.chelatedMicronutrients
-
   const shoppingItems: Array<{ key: SaltKey; name: string; note: string; disclaimer?: string }> = [
     {
       key: "calciumNitrate",
@@ -555,23 +550,23 @@ export function RecipeScreen({
     {
       key: "ironDTPA",
       name: "Iron DTPA 11%",
-      note: usesChelatedMicros ? "Fe-DTPA chelate - chelated iron for hydroponics" : "Fe-DTPA",
+      note: "Fe-DTPA chelate - chelated iron for hydroponics",
     },
     {
-      key: "manganeseSulfate",
-      name: usesChelatedMicros ? "Manganese EDTA" : "Manganese Sulfate",
-      note: usesChelatedMicros ? "Mn-EDTA chelate" : "MnSO₄·H₂O",
+      key: "manganeseEDTA",
+      name: "Manganese EDTA 13%",
+      note: "Mn-EDTA chelate",
     },
     {
-      key: "zincSulfate",
-      name: usesChelatedMicros ? "Zinc EDTA" : "Zinc Sulfate",
-      note: usesChelatedMicros ? "Zn-EDTA chelate" : "ZnSO₄·7H₂O",
+      key: "zincEDTA",
+      name: "Zinc EDTA 14%",
+      note: "Zn-EDTA chelate",
     },
     { key: "boricAcid", name: "Boric Acid", note: "H₃BO₃ - powder form" },
     {
-      key: "copperSulfate",
-      name: usesChelatedMicros ? "Copper EDTA" : "Copper Sulfate",
-      note: usesChelatedMicros ? "Cu-EDTA chelate" : "CuSO₄·5H₂O - pentahydrate",
+      key: "copperEDTA",
+      name: "Copper EDTA 13%",
+      note: "Cu-EDTA chelate",
     },
     { key: "sodiumMolybdate", name: "Sodium Molybdate", note: "Na₂MoO₄·2H₂O" },
   ]
@@ -1472,15 +1467,15 @@ export function RecipeScreen({
                       micro
                     />
                     <SaltRow
-                      name={RAW_SALTS.manganeseSulfate.name}
-                      formula={RAW_SALTS.manganeseSulfate.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.manganeseSulfate)}
+                      name={RAW_SALTS.manganeseEDTA.name}
+                      formula={RAW_SALTS.manganeseEDTA.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.manganeseEDTA)}
                       micro
                     />
                     <SaltRow
-                      name={RAW_SALTS.zincSulfate.name}
-                      formula={RAW_SALTS.zincSulfate.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.zincSulfate)}
+                      name={RAW_SALTS.zincEDTA.name}
+                      formula={RAW_SALTS.zincEDTA.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.zincEDTA)}
                       micro
                     />
                     <SaltRow
@@ -1490,9 +1485,9 @@ export function RecipeScreen({
                       micro
                     />
                     <SaltRow
-                      name={RAW_SALTS.copperSulfate.name}
-                      formula={RAW_SALTS.copperSulfate.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.copperSulfate)}
+                      name={RAW_SALTS.copperEDTA.name}
+                      formula={RAW_SALTS.copperEDTA.formula}
+                      amount={scaledGrams(threeTankRecipe.tank2.copperEDTA)}
                       micro
                     />
                     <SaltRow
@@ -1547,15 +1542,15 @@ export function RecipeScreen({
                     micro
                   />
                   <SaltRow
-                    name={RAW_SALTS.manganeseSulfate.name}
-                    formula={RAW_SALTS.manganeseSulfate.formula}
-                    amount={scaledGrams(threeTankRecipe.tank3.manganeseSulfate)}
+                    name={RAW_SALTS.manganeseEDTA.name}
+                    formula={RAW_SALTS.manganeseEDTA.formula}
+                    amount={scaledGrams(threeTankRecipe.tank3.manganeseEDTA)}
                     micro
                   />
                   <SaltRow
-                    name={RAW_SALTS.zincSulfate.name}
-                    formula={RAW_SALTS.zincSulfate.formula}
-                    amount={scaledGrams(threeTankRecipe.tank3.zincSulfate)}
+                    name={RAW_SALTS.zincEDTA.name}
+                    formula={RAW_SALTS.zincEDTA.formula}
+                    amount={scaledGrams(threeTankRecipe.tank3.zincEDTA)}
                     micro
                   />
                   <SaltRow
@@ -1565,9 +1560,9 @@ export function RecipeScreen({
                     micro
                   />
                   <SaltRow
-                    name={RAW_SALTS.copperSulfate.name}
-                    formula={RAW_SALTS.copperSulfate.formula}
-                    amount={scaledGrams(threeTankRecipe.tank3.copperSulfate)}
+                    name={RAW_SALTS.copperEDTA.name}
+                    formula={RAW_SALTS.copperEDTA.formula}
+                    amount={scaledGrams(threeTankRecipe.tank3.copperEDTA)}
                     micro
                   />
                   <SaltRow
