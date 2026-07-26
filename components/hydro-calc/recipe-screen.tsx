@@ -333,7 +333,7 @@ export function RecipeScreen({
   const solubilityReport = useMemo(() => {
     if (usesSeparateNitrogenLayout) {
       const tanks = [
-        { name: "Tank 1 (Calcium Nitrate)", salts: threeTankRecipe.tank1 },
+        { name: "Tank 1 (Calcium)", salts: threeTankRecipe.tank1 },
         { name: "Tank 2 (Macros)", salts: threeTankRecipe.tank2 },
       ]
       if (threeTankRecipe.hasMicroTank) {
@@ -508,6 +508,11 @@ export function RecipeScreen({
       note: "CaCO₃ - limestone/chalk, a nitrogen-free calcium source",
       disclaimer:
         "Calcium Carbonate has very low solubility and should not be mixed into a stock tank. Add the required amount directly to your batch tank / reservoir (or pre-mix it separately). See the note above the tank recipes for the exact amount.",
+    },
+    {
+      key: "calciumChloride",
+      name: "Calcium Chloride",
+      note: "CaCl₂·2H₂O - dihydrate form, a nitrogen-free calcium source",
     },
     { key: "potassiumNitrate", name: "Potassium Nitrate", note: "KNO₃ - also called saltpeter" },
     { key: "monoPotassiumPhosphate", name: "Mono Potassium Phosphate", note: "MKP, KH₂PO₄" },
@@ -1283,8 +1288,9 @@ export function RecipeScreen({
       {/* Recipe Cards — Separate Nitrogen (chemistry 3-tank) layout */}
       {hasValidData && usesSeparateNitrogenLayout && (
         <>
-          {/* Tank 1 — Calcium Nitrate only. Calcium Carbonate, even when
-              enabled, never lands here — see the direct-add banner above. */}
+          {/* Tank 1 — Calcium Nitrate and/or Calcium Chloride (both soluble).
+              Calcium Carbonate, even when enabled, never lands here — see
+              the direct-add banner above. */}
           <Card className="border-2 border-primary/50 bg-card">
             <CardHeader className="bg-primary/5">
               <CardTitle className="flex items-center gap-2 text-xl text-foreground">
@@ -1308,6 +1314,11 @@ export function RecipeScreen({
                   name={RAW_SALTS.calciumNitrate.name}
                   formula={RAW_SALTS.calciumNitrate.formula}
                   amount={scaledGrams(threeTankRecipe.tank1.calciumNitrate)}
+                />
+                <SaltRow
+                  name={RAW_SALTS.calciumChloride.name}
+                  formula={RAW_SALTS.calciumChloride.formula}
+                  amount={scaledGrams(threeTankRecipe.tank1.calciumChloride)}
                 />
               </div>
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">

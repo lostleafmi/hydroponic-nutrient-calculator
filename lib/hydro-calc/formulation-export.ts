@@ -148,7 +148,7 @@ export function buildFormulationTanksData({
         id: "tank1",
         label: "Nitrogen + Calcium",
         inputs: tank1Inputs,
-        mixInstructions: `Fill the stock tank about halfway with RO water, add the calcium nitrate and stir until it's fully dissolved, then top up to ${sizeNum} ${unitLabel} and label it "Tank 1".`,
+        mixInstructions: `Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved, then top up to ${sizeNum} ${unitLabel} and label it "Tank 1".`,
       })
       usageRates.tank1 = mlPerGallon
     }

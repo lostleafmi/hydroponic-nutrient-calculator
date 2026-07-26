@@ -149,7 +149,7 @@ function ppmFromSaltInStock(
 
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
- * Tank A — Ca(NO₃)₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
+ * Tank A — Ca(NO₃)₂, CaCl₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
  * Tank B — MKP/MAP (Phosphorus), MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), micronutrient sulfates  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
@@ -213,9 +213,10 @@ export function calculateStockTankRecipe(
   // sulfate. Only once no enabled salt can supply Nitrogen at all do we
   // report the gap.
   //
-  // When Calcium Carbonate is *also* explicitly enabled (e.g. "Crop
-  // Salt"-style lines that blend both Calcium sources), the two must split
-  // the Calcium target rather than one silently zeroing the other out.
+  // When Calcium Carbonate is *also* explicitly enabled alongside Calcium
+  // Nitrate (e.g. "Crop Salt"-style lines that blend both Calcium sources),
+  // the two must split the Calcium target rather than one silently zeroing
+  // the other out.
   //
   // A prior version capped Calcium Nitrate at whichever was smaller of
   // "enough for the full Nitrogen target" or "enough for the full Calcium
@@ -228,54 +229,82 @@ export function calculateStockTankRecipe(
   // binding constraint. Carbonate ended up being a fallback that was
   // "ignored" whenever Nitrate was present, exactly the bug this fixes.
   //
-  // Fix: give each explicitly-enabled Calcium source a fixed, guaranteed
-  // half of the Calcium target up front — independent of the Nitrogen
-  // target — so Carbonate always receives a real, non-zero allocation
-  // whenever the user checks it. Calcium Nitrate's half may still be
-  // bumped upward afterward to help close a Nitrogen gap (the same
-  // Calcium-overshoot trade-off already accepted below when Nitrate is the
-  // only enabled Calcium source); Carbonate's half is never reduced by
-  // that, since it is the whole point of the user's explicit selection.
+  // Fix: give each explicitly-enabled *primary* Calcium source (Nitrate
+  // and/or Carbonate) a fixed, guaranteed equal share of the Calcium target
+  // up front — independent of the Nitrogen target — so Carbonate always
+  // receives a real, non-zero allocation whenever the user checks it.
+  // Calcium Nitrate's share may still be bumped upward afterward to help
+  // close a Nitrogen gap (the same Calcium-overshoot trade-off already
+  // accepted below when Nitrate is the only enabled Calcium source);
+  // Carbonate's share is never reduced by that, since it is the whole point
+  // of the user's explicit selection.
+  //
+  // Calcium Chloride gets different treatment: real nutrient lines that use
+  // it almost never split their calcium budget evenly with it — the common
+  // pattern is "buy a plain, single-source Calcium product (typically
+  // generic Calcium Nitrate, e.g. 15.5-0-0 / 19% Ca) and stir in a small
+  // top-up amount of Calcium Chloride" rather than dosing the two as equal
+  // partners. So whenever Chloride is enabled *alongside* a primary source,
+  // it only claims a small fixed slice of the Calcium target
+  // (`CALCIUM_CHLORIDE_MINOR_SHARE`), leaving the rest for Nitrate/
+  // Carbonate to split as above — this lets a generic "Calcium Nitrate + a
+  // little Calcium Chloride" product be modeled as a single Part A, without
+  // inventing a fake combined Ca/N percentage on Step 1. When Chloride is
+  // the *only* enabled Calcium source, it instead claims the full target,
+  // same as Nitrate- or Carbonate-alone above.
+  //
+  // Calcium Chloride is a soluble stock-tank salt (unlike Carbonate, which
+  // is direct-add only — see `buildDirectAddCalciumCarbonate` below), so it
+  // is sized the same way as Calcium Nitrate and lands in Tank A.
+  const CALCIUM_CHLORIDE_MINOR_SHARE = 0.1
+
   let calciumNitrateGrams = 0
   let calciumCarbonateGrams = 0
+  let calciumChlorideGrams = 0
   const nitrateEnabled = isEnabled("calciumNitrate")
   const carbonateEnabled = isEnabled("calciumCarbonate")
+  const chlorideEnabled = isEnabled("calciumChloride")
+  const hasPrimaryCalciumSource = nitrateEnabled || carbonateEnabled
 
   if (targets.calcium > 0) {
-    if (nitrateEnabled && carbonateEnabled) {
-      const halfCalciumPpm = targets.calcium / 2
-
-      calciumNitrateGrams = saltGramsForTargetPpm(
-        halfCalciumPpm,
-        RAW_SALTS.calciumNitrate.ca,
-        stockVolumeLiters,
-        dilutionRatio
-      )
-      calciumCarbonateGrams = saltGramsForTargetPpm(
-        halfCalciumPpm,
-        RAW_SALTS.calciumCarbonate.ca,
-        stockVolumeLiters,
-        dilutionRatio
-      )
-    } else if (nitrateEnabled) {
-      calciumNitrateGrams = saltGramsForTargetPpm(
-        targets.calcium,
-        RAW_SALTS.calciumNitrate.ca,
-        stockVolumeLiters,
-        dilutionRatio
-      )
-    } else if (carbonateEnabled) {
-      // Nitrogen-free calcium fallback when Calcium Nitrate isn't part of the
-      // product being replicated. Contributes no Nitrogen, so the remaining-N
-      // logic below still needs another enabled salt to close that gap.
-      calciumCarbonateGrams = saltGramsForTargetPpm(
-        targets.calcium,
-        RAW_SALTS.calciumCarbonate.ca,
-        stockVolumeLiters,
-        dilutionRatio
-      )
-    } else {
+    if (!nitrateEnabled && !carbonateEnabled && !chlorideEnabled) {
       warnings.push({ element: "calcium", label: "Calcium" })
+    } else {
+      const chlorideShare = !chlorideEnabled
+        ? 0
+        : hasPrimaryCalciumSource
+          ? CALCIUM_CHLORIDE_MINOR_SHARE
+          : 1
+      const primarySourceCount = (nitrateEnabled ? 1 : 0) + (carbonateEnabled ? 1 : 0)
+      const primaryShareEach = primarySourceCount > 0 ? (1 - chlorideShare) / primarySourceCount : 0
+
+      if (nitrateEnabled) {
+        calciumNitrateGrams = saltGramsForTargetPpm(
+          targets.calcium * primaryShareEach,
+          RAW_SALTS.calciumNitrate.ca,
+          stockVolumeLiters,
+          dilutionRatio
+        )
+      }
+      if (carbonateEnabled) {
+        calciumCarbonateGrams = saltGramsForTargetPpm(
+          targets.calcium * primaryShareEach,
+          RAW_SALTS.calciumCarbonate.ca,
+          stockVolumeLiters,
+          dilutionRatio
+        )
+      }
+      if (chlorideEnabled) {
+        // Nitrogen-free calcium source — the remaining-N logic below still
+        // needs another enabled salt to close any Nitrogen gap when
+        // Chloride is the only Calcium source.
+        calciumChlorideGrams = saltGramsForTargetPpm(
+          targets.calcium * chlorideShare,
+          RAW_SALTS.calciumChloride.ca,
+          stockVolumeLiters,
+          dilutionRatio
+        )
+      }
     }
   }
 
@@ -402,10 +431,13 @@ export function calculateStockTankRecipe(
       // its Calcium-only share. This grams value is always ≥ the
       // Calcium-based amount above (it's solving for a requirement that's
       // at least as large on the same salt), so the Calcium target stays
-      // fully met — with, when Carbonate is also enabled, some unavoidable
-      // Calcium overshoot on top of Carbonate's fixed half-share as the
-      // trade-off for hitting Nitrogen. Carbonate's own allocation is
-      // untouched either way.
+      // fully met — with, when Carbonate and/or Chloride are also enabled,
+      // some unavoidable Calcium overshoot on top of their own fixed shares
+      // as the trade-off for hitting Nitrogen. This is exactly the
+      // "generic Calcium Nitrate + a little Calcium Chloride" case: Nitrate
+      // ends up sized for Nitrogen (its primary job here), Chloride keeps
+      // its small top-up share untouched. Carbonate's and Chloride's own
+      // allocations are untouched either way.
       calciumNitrateGrams = saltGramsForTargetPpm(
         nitrogenTargetAfterMap,
         RAW_SALTS.calciumNitrate.n,
@@ -428,6 +460,10 @@ export function calculateStockTankRecipe(
   }
 
   assignToTankA("calciumNitrate", calciumNitrateGrams)
+  // Calcium Chloride is soluble at stock-tank strength, so — unlike Calcium
+  // Carbonate — it's assigned straight into Tank A alongside Calcium Nitrate
+  // rather than surfaced as a direct reservoir addition.
+  assignToTankA("calciumChloride", calciumChlorideGrams)
   // Calcium Carbonate deliberately does NOT go into tankA (see the function
   // doc comment) — it's surfaced separately below as a reservoir addition.
   const directAddCalciumCarbonate = buildDirectAddCalciumCarbonate(
@@ -800,6 +836,7 @@ const ION_CONDUCTIVITY = {
   NO3: 71.44,
   H2PO4: 36.0,
   SO4: 79.8,
+  Cl: 76.31,
 } as const
 
 /**
@@ -836,6 +873,7 @@ const ION_ATOMIC_WEIGHT = {
   N: 14.007,
   P: 30.974,
   S: 32.06,
+  Cl: 35.453,
 } as const
 
 function ppmToMolPerLiter(ppm: number, atomicWeight: number): number {
@@ -854,7 +892,9 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
   // any real-world dose small enough that the omission is negligible.
   const caPpm =
     salts.calciumNitrate * RAW_SALTS.calciumNitrate.ca * 1000 +
-    salts.calciumCarbonate * RAW_SALTS.calciumCarbonate.ca * 1000
+    salts.calciumCarbonate * RAW_SALTS.calciumCarbonate.ca * 1000 +
+    salts.calciumChloride * RAW_SALTS.calciumChloride.ca * 1000
+  const clFromCaCl2 = salts.calciumChloride * RAW_SALTS.calciumChloride.cl * 1000
   const nFromCaNo3 = salts.calciumNitrate * RAW_SALTS.calciumNitrate.n * 1000
   const kFromKno3 = salts.potassiumNitrate * RAW_SALTS.potassiumNitrate.k * 1000
   const nFromKno3 = salts.potassiumNitrate * RAW_SALTS.potassiumNitrate.n * 1000
@@ -881,7 +921,8 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
     ecContribution(ppmToMolPerLiter(mgPpm, ION_ATOMIC_WEIGHT.Mg), ION_CONDUCTIVITY.Mg) +
     ecContribution(ppmToMolPerLiter(nPpm, ION_ATOMIC_WEIGHT.N), ION_CONDUCTIVITY.NO3) +
     ecContribution(ppmToMolPerLiter(pPpm, ION_ATOMIC_WEIGHT.P), ION_CONDUCTIVITY.H2PO4) +
-    ecContribution(ppmToMolPerLiter(sPpm, ION_ATOMIC_WEIGHT.S), ION_CONDUCTIVITY.SO4) * SULFATE_ION_PAIRING_FACTOR
+    ecContribution(ppmToMolPerLiter(sPpm, ION_ATOMIC_WEIGHT.S), ION_CONDUCTIVITY.SO4) * SULFATE_ION_PAIRING_FACTOR +
+    ecContribution(ppmToMolPerLiter(clFromCaCl2, ION_ATOMIC_WEIGHT.Cl), ION_CONDUCTIVITY.Cl)
   )
 }
 
