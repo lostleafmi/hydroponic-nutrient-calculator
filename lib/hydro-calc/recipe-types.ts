@@ -413,20 +413,8 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
   { id: "calciumCarbonate", label: "Calcium Carbonate", sublabel: "", saltKeys: ["calciumCarbonate"] },
   { id: "calciumChloride", label: "Calcium Chloride", sublabel: "", saltKeys: ["calciumChloride"] },
-  {
-    id: "calciumAcetate",
-    label: "Calcium Acetate",
-    sublabel:
-      "Label-only — too impractical to source, so the recipe matches its Calcium with Calcium Nitrate instead.",
-    saltKeys: [],
-  },
-  {
-    id: "calciumGluconate",
-    label: "Calcium Gluconate",
-    sublabel:
-      "Label-only — too impractical to source, so the recipe matches its Calcium with Calcium Nitrate instead.",
-    saltKeys: [],
-  },
+  { id: "calciumAcetate", label: "Calcium Acetate", sublabel: "", saltKeys: [] },
+  { id: "calciumGluconate", label: "Calcium Gluconate", sublabel: "", saltKeys: [] },
   { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
   { id: "urea", label: "Urea", sublabel: "", saltKeys: ["urea"] },
   { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
