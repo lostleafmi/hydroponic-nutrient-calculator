@@ -295,6 +295,7 @@ function SaltCheckboxRow({
   checked,
   onCheckedChange,
   children,
+  fullWidth,
 }: {
   /**
    * Fully-qualified, DOM-unique id for this checkbox — must be unique across
@@ -313,6 +314,8 @@ function SaltCheckboxRow({
   onCheckedChange: (checked: boolean) => void
   /** Extra content (e.g. an optional amount field) shown below the label, only while checked. */
   children?: React.ReactNode
+  /** Spans both columns of the parent grid, putting this option on its own full-width row. */
+  fullWidth?: boolean
 }) {
   // Options with an `elementsLabel` pack three lines of text into one card
   // (name, element shorthand, full ingredient list) — center all three so
@@ -324,13 +327,13 @@ function SaltCheckboxRow({
       // `flex flex-col justify-center` centers the checkbox+label row (and
       // the optional children below it) in the middle of the card. Grid
       // items stretch to fill their row's height by default, so a card
-      // sitting next to a taller sibling (e.g. the multi-line Chelated
-      // Micronutrients card) ends up taller than its own content —
-      // without this, that content just sits at the top with dead space
-      // below it, since a plain block div doesn't center its children.
+      // sitting next to a taller sibling ends up taller than its own
+      // content — without this, that content just sits at the top with
+      // dead space below it, since a plain block div doesn't center its
+      // children.
       className={`flex flex-col justify-center rounded-lg border-2 p-3 transition-colors ${
-        checked ? "border-primary/40 bg-primary/5" : "border-border bg-secondary/20"
-      }`}
+        fullWidth ? "sm:col-span-2" : ""
+      } ${checked ? "border-primary/40 bg-primary/5" : "border-border bg-secondary/20"}`}
     >
       <div className="flex items-center gap-3">
         <Checkbox
@@ -685,6 +688,7 @@ function PartAnalysisCard({
                 sublabel={option.sublabel}
                 checked={part.includedSalts[option.id]}
                 onCheckedChange={(checked) => onToggleSalt(option.id, checked)}
+                fullWidth={option.id === "chelatedMicronutrients"}
               >
                 {option.id === "calciumChloride" && (
                   <div className="flex items-center gap-2">
