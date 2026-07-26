@@ -42,7 +42,6 @@ export interface CalculateRecipeInput {
   stockTankOption: StockTankOption
   stockVolumeLiters: number
   dilutionRatio: number
-  keepMicrosSeparate: boolean
 }
 
 export interface CalculateRecipeResult {
@@ -91,7 +90,7 @@ function sanitizePositiveNumber(value: number, fallback: number): number {
 export async function calculateRecipeAction(
   input: CalculateRecipeInput
 ): Promise<CalculateRecipeResult> {
-  const { partsAnalysis, parts, stockTankOption, keepMicrosSeparate } = input
+  const { partsAnalysis, parts, stockTankOption } = input
   const stockVolumeLiters = sanitizePositiveNumber(input.stockVolumeLiters, 5)
   const dilutionRatio = sanitizePositiveNumber(input.dilutionRatio, 100)
 
@@ -138,7 +137,6 @@ export async function calculateRecipeAction(
     stockVolumeLiters,
     dilutionRatio,
     combinedIncludedSalts,
-    keepMicrosSeparate,
     combinedCalciumChlorideGramsPerGallon,
     combinedCalciumNitrateGramsPerGallon
   )

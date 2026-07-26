@@ -767,27 +767,23 @@ export function calculateStockTankRecipe(
  *
  *   Tank 1 — Calcium Nitrate only (Ca²⁺ + N). Taper this to drop N at end of flower.
  *   Tank 2 — Everything else: remaining macro salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄)
- *            AND, by default, the micronutrients (Fe-DTPA, MnSO₄, ZnSO₄,
- *            H₃BO₃, CuSO₄, Na₂MoO₄) — giving a clean 2-tank system.
- *   Tank 3 — Micros only, kept isolated instead of merged into Tank 2 when
- *            `keepMicronutrientsSeparate` is true (the advanced 3-tank option).
+ *            AND the micronutrients (Fe-DTPA, Mn/Zn/Cu-EDTA chelates, boric
+ *            acid, sodium molybdate) — always merged together for a clean
+ *            2-tank system.
  *
  * Calcium Carbonate, if enabled, never lands in Tank 1 (or anywhere else) —
  * see `calculateStockTankRecipe` — and comes back as `directAddCalciumCarbonate`
  * instead.
  *
- * `hasMicroTank` tells callers whether Tank 3 is actually in use (false by
- * default, since micros are merged into Tank 2). `hasMicronutrients` tells
- * callers whether the recipe has any micros at all, regardless of which tank
- * they live in — use this to decide whether to render a "Micronutrients"
- * sub-section inside Tank 2 when the 3-tank option isn't enabled.
+ * `hasMicronutrients` tells callers whether the recipe has any micros at all
+ * — use this to decide whether to render a "Micronutrients" sub-section
+ * inside Tank 2.
  */
 export function calculateSeparateCalciumRecipe(
   targets: ElementalTargets,
   stockVolumeLiters: number,
   dilutionRatio: number,
   includedSalts?: IncludedSaltsSelection,
-  keepMicronutrientsSeparate: boolean = false,
   calciumChlorideGramsPerGallon: number = 0,
   calciumNitrateGramsPerGallon: number = 0
 ): ThreeTankRecipe {
@@ -808,7 +804,6 @@ export function calculateSeparateCalciumRecipe(
 
   const tank1 = emptySaltAmounts()
   const tank2 = emptySaltAmounts()
-  const tank3 = emptySaltAmounts()
 
   const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>(["potassiumNitrate", "ammoniumNitrate"])
 
@@ -818,28 +813,17 @@ export function calculateSeparateCalciumRecipe(
   for (const key of TANK_2_SALTS) {
     tank2[key] = TANK_A_KEYS_IN_TANK_2.has(key) ? tankA[key] : tankB[key]
   }
+  // Micronutrients always fold into Tank 2 alongside the rest of the
+  // non-nitrogen components — there is no separate micros tank in this layout.
   for (const key of TANK_3_SALTS) {
-    tank3[key] = key === "ironDTPA" ? tankA[key] : tankB[key]
+    tank2[key] = key === "ironDTPA" ? tankA[key] : tankB[key]
   }
 
-  const hasMicronutrients = (Object.values(tank3) as number[]).some((g) => g > 0)
-
-  if (!keepMicronutrientsSeparate) {
-    // 2-tank default: fold the micronutrients into Tank 2 alongside the rest
-    // of the non-nitrogen components, and leave Tank 3 empty/unused.
-    for (const key of TANK_3_SALTS) {
-      tank2[key] = tank3[key]
-      tank3[key] = 0
-    }
-  }
-
-  const hasMicroTank = keepMicronutrientsSeparate && hasMicronutrients
+  const hasMicronutrients = TANK_3_SALTS.some((key) => tank2[key] > 0)
 
   return {
     tank1,
     tank2,
-    tank3,
-    hasMicroTank,
     hasMicronutrients,
     warnings,
     isApproximate,

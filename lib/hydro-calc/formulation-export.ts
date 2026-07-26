@@ -153,10 +153,10 @@ export function buildFormulationTanksData({
       usageRates.tank1 = mlPerGallon
     }
 
-    // Tank 2 already contains the merged micro amounts whenever they weren't
-    // split into their own Tank 3 (see `calculateSeparateNitrogenRecipe`),
-    // so `hasMicronutrients && !hasMicroTank` mirrors the on-screen badge.
-    const tank2IncludesMicros = threeTankRecipe.hasMicronutrients && !threeTankRecipe.hasMicroTank
+    // Tank 2 always contains the merged micro amounts (see
+    // `calculateSeparateCalciumRecipe`), so `hasMicronutrients` alone
+    // mirrors the on-screen badge.
+    const tank2IncludesMicros = threeTankRecipe.hasMicronutrients
     const tank2Inputs = buildInputs(threeTankRecipe.tank2, ecScaleFactor)
     if (tank2Inputs.length > 0) {
       tanks.push({
@@ -168,19 +168,6 @@ export function buildFormulationTanksData({
         }. Wait for each one to fully dissolve before adding the next. Top up to ${sizeNum} ${unitLabel} and label it "Tank 2".`,
       })
       usageRates.tank2 = mlPerGallon
-    }
-
-    if (threeTankRecipe.hasMicroTank) {
-      const tank3Inputs = buildInputs(threeTankRecipe.tank3, ecScaleFactor)
-      if (tank3Inputs.length > 0) {
-        tanks.push({
-          id: "tank3",
-          label: "Micros",
-          inputs: tank3Inputs,
-          mixInstructions: `Use room temperature RO water (~70°F) if possible, this will help with mixing. Fill the tank halfway and dissolve the Iron DTPA first, then add the rest of the micros. Boric Acid is slow to dissolve so give it a minute if it's being stubborn. Top up to ${sizeNum} ${unitLabel} and label it "Tank 3".`,
-        })
-        usageRates.tank3 = mlPerGallon
-      }
     }
 
     return { usageRates, defaultStockTankSize, tanks, directAddCalciumCarbonate }

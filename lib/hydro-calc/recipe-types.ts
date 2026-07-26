@@ -223,13 +223,9 @@ export interface TankRecipe {
 
 export interface ThreeTankRecipe {
   tank1: SaltAmounts
+  /** Remaining macros plus the micronutrients — always merged together (see `TANK_2_SALTS`/`TANK_3_SALTS`). */
   tank2: SaltAmounts
-  tank3: SaltAmounts
-  /** True when Tank 3 actually holds any salt — false for micro-free recipes
-   *  AND false whenever micros were merged into Tank 2 (the 2-tank default). */
-  hasMicroTank: boolean
-  /** True when the recipe has any micronutrients at all, regardless of which
-   *  tank they ended up in. Use this (rather than `hasMicroTank`) to decide
+  /** True when the recipe has any micronutrients at all. Use this to decide
    *  whether to render a micronutrients sub-section inside Tank 2. */
   hasMicronutrients: boolean
   warnings?: SaltGapWarning[]
@@ -543,7 +539,7 @@ export const TANK_B_SALTS = [
 ] as const satisfies readonly SaltKey[]
 
 /**
- * Three-tank layout for the "Separate Calcium Nitrate" mode. The split keeps
+ * Two-tank layout for the "Separate Calcium Nitrate" mode. The split keeps
  * the calcium ion completely isolated so it can be tapered down at the end of
  * flower without rebalancing the rest of the recipe.
  *
@@ -551,11 +547,10 @@ export const TANK_B_SALTS = [
  *          Calcium Carbonate when used instead (or alongside) as a
  *          nitrogen-free calcium source (taper Tank 1 for end-of-flower N
  *          reduction when Calcium Nitrate is the source)
- * Tank 2 — Remaining macros: KNO₃, MKP/MAP, MgSO₄, K₂SO₄
- * Tank 3 — Micros (Fe-DTPA, Mn/Zn/Cu EDTA chelates, boric acid, sodium molybdate)
- *
- * Tank 3 is only used when the recipe actually contains micronutrients. Without
- * micros the calculator naturally collapses to a 2-tank layout (1 + 2).
+ * Tank 2 — Everything else: remaining macros (KNO₃, MKP/MAP, MgSO₄, K₂SO₄)
+ *          plus the micronutrients (Fe-DTPA, Mn/Zn/Cu EDTA chelates, boric
+ *          acid, sodium molybdate) — always merged together into one clean
+ *          Tank 2 rather than split into a separate micros tank.
  */
 export const TANK_1_SALTS = [
   "calciumNitrate",
@@ -573,6 +568,13 @@ export const TANK_2_SALTS = [
   "ammoniumSulfate",
 ] as const satisfies readonly SaltKey[]
 
+/**
+ * The micronutrient salts, grouped for two purposes: (1) merging them into
+ * Tank 2 in `calculateSeparateCalciumRecipe` below, and (2) identifying
+ * which salts to consolidate into a single "Micros" tank in
+ * `calculateDoserMultiPartRecipe` (a separate, per-part-doser feature —
+ * see `recipe-calculator.ts`).
+ */
 export const TANK_3_SALTS = [
   "ironDTPA",
   "manganeseEDTA",
