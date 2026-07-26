@@ -76,6 +76,7 @@ import {
   roundDownToNiceRatio,
   stockTankMlPerGallon,
   stockTankMlPerLiter,
+  SPECIALTY_CALCIUM_SALT_IDS,
   sumCalciumChlorideGramsPerGallon,
   sumCalciumNitrateGramsPerGallon,
   sumUreaNitrogenPpm,
@@ -513,6 +514,11 @@ export function RecipeScreen({
   // Every part's own salt selection, unioned together — used for
   // shopping-list naming below, which isn't part-specific.
   const combinedIncludedSalts = useMemo(() => unionIncludedSalts(partsAnalysis), [partsAnalysis])
+
+  // True when any part lists a specialty label-only Calcium source (Calcium
+  // Acetate / Calcium Gluconate) — drives the "matched with Calcium Nitrate"
+  // note on the Calcium target card below. See `getEnabledSaltKeys`.
+  const hasSpecialtyCalciumSource = SPECIALTY_CALCIUM_SALT_IDS.some((id) => combinedIncludedSalts[id])
 
   const shoppingItems: Array<{ key: SaltKey; name: string; note: string; disclaimer?: string }> = [
     {
@@ -1141,6 +1147,16 @@ export function RecipeScreen({
                   {" "}using standard hydroponic micro ratios
                   {" "}(Fe : Mn : Zn : B : Cu : Mo ≈ 1 : 1/3.5 : 1/7 : 1/9 : 1/18 : 1/1200).
                   To override an estimate, enter the actual percentage on Step 1.
+                </p>
+              )}
+
+              {hasValidData && hasSpecialtyCalciumSource && (
+                <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                  Your label lists Calcium Acetate and/or Calcium Gluconate as a Calcium source.
+                  The Calcium (Ca) target above already includes it — since neither is practical
+                  to source for a DIY mix, the recipe below matches that same elemental Calcium
+                  using Calcium Nitrate (or Calcium Chloride, if that&apos;s already part of your
+                  recipe) instead.
                 </p>
               )}
 

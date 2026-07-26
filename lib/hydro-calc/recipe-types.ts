@@ -336,6 +336,19 @@ export interface IncludedSaltsSelection {
   calciumNitrate: boolean
   calciumCarbonate: boolean
   calciumChloride: boolean
+  /**
+   * Specialty label-only Calcium sources (see `SPECIALTY_CALCIUM_SALT_IDS`).
+   * These show up on a "Derived from" section but aren't practical to
+   * source as standalone hydroponic salts — checking one never adds a
+   * `SaltKey` of its own (never assigned into a stock tank or the Shopping
+   * List, see `SALT_CHECKBOX_OPTIONS`). Their elemental Calcium is already
+   * captured by the part's overall %Calcium field, and `getEnabledSaltKeys`
+   * substitutes Calcium Nitrate (or leaves Calcium Chloride/Carbonate alone
+   * if already checked) so the solver still has a real salt to hit that
+   * Calcium target with.
+   */
+  calciumAcetate: boolean
+  calciumGluconate: boolean
   potassiumNitrate: boolean
   urea: boolean
   potassiumSulfate: boolean
@@ -351,6 +364,8 @@ export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
   calciumNitrate: false,
   calciumCarbonate: false,
   calciumChloride: false,
+  calciumAcetate: false,
+  calciumGluconate: false,
   potassiumNitrate: false,
   urea: false,
   potassiumSulfate: false,
@@ -366,6 +381,8 @@ export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
   calciumNitrate: true,
   calciumCarbonate: true,
   calciumChloride: true,
+  calciumAcetate: true,
+  calciumGluconate: true,
   potassiumNitrate: true,
   urea: true,
   potassiumSulfate: true,
@@ -396,6 +413,20 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
   { id: "calciumCarbonate", label: "Calcium Carbonate", sublabel: "", saltKeys: ["calciumCarbonate"] },
   { id: "calciumChloride", label: "Calcium Chloride", sublabel: "", saltKeys: ["calciumChloride"] },
+  {
+    id: "calciumAcetate",
+    label: "Calcium Acetate",
+    sublabel:
+      "Label-only — too impractical to source, so the recipe matches its Calcium with Calcium Nitrate instead.",
+    saltKeys: [],
+  },
+  {
+    id: "calciumGluconate",
+    label: "Calcium Gluconate",
+    sublabel:
+      "Label-only — too impractical to source, so the recipe matches its Calcium with Calcium Nitrate instead.",
+    saltKeys: [],
+  },
   { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
   { id: "urea", label: "Urea", sublabel: "", saltKeys: ["urea"] },
   { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
@@ -434,6 +465,18 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
 ]
 
 /**
+ * Specialty label-only Calcium sources — see the `IncludedSaltsSelection`
+ * doc comment. Neither ever maps to a `SaltKey` (`SALT_CHECKBOX_OPTIONS`
+ * gives both an empty `saltKeys`), so they never appear on the Shopping
+ * List or in any stock tank; `getEnabledSaltKeys` uses this list to decide
+ * when to substitute a practical Calcium salt on a part's behalf.
+ */
+export const SPECIALTY_CALCIUM_SALT_IDS: Array<keyof IncludedSaltsSelection> = [
+  "calciumAcetate",
+  "calciumGluconate",
+]
+
+/**
  * Resolve which raw salts the solver is allowed to use from the checkbox
  * selection. When `selection` is omitted, or when every gateable checkbox is
  * unchecked, we fall back to "any common salt" (the pre-feature behavior) so
@@ -457,6 +500,24 @@ export function getEnabledSaltKeys(selection?: IncludedSaltsSelection): Set<Salt
       for (const key of opt.saltKeys) enabled.add(key)
     }
   }
+
+  // Calcium Acetate / Calcium Gluconate never contribute a SaltKey of their
+  // own (they're hard to source — see the doc comment above), so a part
+  // that lists ONLY one of them as its Calcium source would otherwise leave
+  // the solver with no way to hit that part's Calcium target at all. Fall
+  // back to Calcium Nitrate in that case so the recipe still matches the
+  // label's elemental Calcium using an obtainable salt. If Calcium
+  // Nitrate, Carbonate, or Chloride is already checked on the part, leave
+  // it alone — that source is "already part of the solution" and takes
+  // priority (Calcium Chloride included, per the same minor-share treatment
+  // it already gets elsewhere).
+  const hasSpecialtyCalciumSource = SPECIALTY_CALCIUM_SALT_IDS.some((id) => selection[id])
+  const hasPracticalCalciumSource =
+    enabled.has("calciumNitrate") || enabled.has("calciumCarbonate") || enabled.has("calciumChloride")
+  if (hasSpecialtyCalciumSource && !hasPracticalCalciumSource) {
+    enabled.add("calciumNitrate")
+  }
+
   return enabled
 }
 
