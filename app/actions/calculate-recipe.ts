@@ -23,6 +23,7 @@ import {
   estimateEcFromElementalTargets,
 } from "@/lib/hydro-calc/recipe-calculator"
 import {
+  sumCalciumChlorideGramsPerGallon,
   unionIncludedSalts,
   type DirectMixRecipe,
   type ElementalTargets,
@@ -82,15 +83,21 @@ export async function calculateRecipeAction(
   // (A+B / doser "one tank per part") instead read each part's own
   // selection directly inside calculate*MultiPart*Recipe below.
   const combinedIncludedSalts = unionIncludedSalts(partsAnalysis)
+  const combinedCalciumChlorideGramsPerGallon = sumCalciumChlorideGramsPerGallon(partsAnalysis)
 
-  const estimatedEc = estimateEcFromElementalTargets(targets, combinedIncludedSalts)
+  const estimatedEc = estimateEcFromElementalTargets(
+    targets,
+    combinedIncludedSalts,
+    combinedCalciumChlorideGramsPerGallon
+  )
 
   const threeTankRecipe = calculateSeparateCalciumRecipe(
     targets,
     stockVolumeLiters,
     dilutionRatio,
     combinedIncludedSalts,
-    keepMicrosSeparate
+    keepMicrosSeparate,
+    combinedCalciumChlorideGramsPerGallon
   )
 
   const multiPartRecipe =
@@ -98,7 +105,12 @@ export async function calculateRecipeAction(
       ? calculateDoserMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)
       : calculateMultiPartStockTankRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)
 
-  const directRecipe = calculateDirectMixRecipe(targets, stockVolumeLiters, combinedIncludedSalts)
+  const directRecipe = calculateDirectMixRecipe(
+    targets,
+    stockVolumeLiters,
+    combinedIncludedSalts,
+    combinedCalciumChlorideGramsPerGallon
+  )
 
   return {
     targets,

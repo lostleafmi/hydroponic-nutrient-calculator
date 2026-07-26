@@ -35,6 +35,14 @@ export interface PartAnalysis {
   photoName?: string
   /** Which raw salts/inputs the user says are present in THIS part specifically. */
   includedSalts: IncludedSaltsSelection
+  /**
+   * Optional user-specified Calcium Chloride dose for this part, in grams of
+   * CaCl₂·2H₂O per US gallon of working (reservoir) feed. Only meaningful
+   * when `includedSalts.calciumChloride` is checked. When left blank, the
+   * solver falls back to its own sensible default share of the Calcium
+   * target instead of leaving Calcium Chloride at zero.
+   */
+  calciumChlorideGramsPerGallon?: string
 }
 
 // Combined analysis from all parts (for backwards compatibility)
@@ -241,6 +249,7 @@ function SaltCheckboxRow({
   sublabel,
   checked,
   onCheckedChange,
+  children,
 }: {
   /**
    * Fully-qualified, DOM-unique id for this checkbox — must be unique across
@@ -255,28 +264,33 @@ function SaltCheckboxRow({
   sublabel: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void
+  /** Extra content (e.g. an optional amount field) shown below the label, only while checked. */
+  children?: React.ReactNode
 }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-lg border-2 p-3 transition-colors ${
+      className={`rounded-lg border-2 p-3 transition-colors ${
         checked ? "border-primary/40 bg-primary/5" : "border-border bg-secondary/20"
       }`}
     >
-      <Checkbox
-        id={inputId}
-        checked={checked}
-        onCheckedChange={(next) => onCheckedChange(next === true)}
-        className="shrink-0"
-      />
-      {/* `justify-center` centers the label block vertically whenever this
-          card ends up taller than its own text — e.g. sitting in the same
-          grid row as a card with a sublabel — instead of leaving it pinned
-          to the top with empty space below. `text-pretty` avoids ragged,
-          single-word wrapped lines on the longer salt names/sublabels. */}
-      <Label htmlFor={inputId} className="flex flex-1 cursor-pointer flex-col justify-center gap-1">
-        <span className="text-pretty font-medium leading-snug text-foreground">{label}</span>
-        {sublabel && <span className="text-pretty text-xs leading-snug text-muted-foreground">{sublabel}</span>}
-      </Label>
+      <div className="flex items-center gap-3">
+        <Checkbox
+          id={inputId}
+          checked={checked}
+          onCheckedChange={(next) => onCheckedChange(next === true)}
+          className="shrink-0"
+        />
+        {/* `justify-center` centers the label block vertically whenever this
+            card ends up taller than its own text — e.g. sitting in the same
+            grid row as a card with a sublabel — instead of leaving it pinned
+            to the top with empty space below. `text-pretty` avoids ragged,
+            single-word wrapped lines on the longer salt names/sublabels. */}
+        <Label htmlFor={inputId} className="flex flex-1 cursor-pointer flex-col justify-center gap-1">
+          <span className="text-pretty font-medium leading-snug text-foreground">{label}</span>
+          {sublabel && <span className="text-pretty text-xs leading-snug text-muted-foreground">{sublabel}</span>}
+        </Label>
+      </div>
+      {checked && children && <div className="mt-2 pl-8">{children}</div>}
     </div>
   )
 }
@@ -600,7 +614,29 @@ function PartAnalysisCard({
                 sublabel={option.sublabel}
                 checked={part.includedSalts[option.id]}
                 onCheckedChange={(checked) => onToggleSalt(option.id, checked)}
-              />
+              >
+                {option.id === "calciumChloride" && (
+                  <div className="flex items-center gap-2">
+                    <Label
+                      htmlFor={`salt-${part.id}-${option.id}-amount`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      Amount (optional)
+                    </Label>
+                    <Input
+                      id={`salt-${part.id}-${option.id}-amount`}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={part.calciumChlorideGramsPerGallon ?? ""}
+                      onChange={(e) => onUpdate({ calciumChlorideGramsPerGallon: e.target.value })}
+                      placeholder="0.0"
+                      className="h-7 w-20 border-2 border-border bg-background text-right font-mono text-xs"
+                    />
+                    <span className="text-xs text-muted-foreground">g/gal</span>
+                  </div>
+                )}
+              </SaltCheckboxRow>
             ))}
           </div>
 

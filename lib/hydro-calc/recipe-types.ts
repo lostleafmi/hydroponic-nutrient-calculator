@@ -154,6 +154,30 @@ export function combineDirectAddCalciumCarbonate(
   }
 }
 
+/**
+ * Convert a user-specified Calcium Chloride dose — grams of dry CaCl₂·2H₂O
+ * per US gallon of working (reservoir) feed — into the grams needed for one
+ * full stock-tank refill at the given volume/ratio. This is the inverse of
+ * `buildDirectAddCalciumCarbonate`'s `gramsPerGallon` calc: since
+ * `reservoirLiters = stockVolumeLiters * dilutionRatio`,
+ *   grams = gramsPerGallon * reservoirLiters / LITERS_PER_GALLON.
+ *
+ * Unlike the rest of the solver, this dose is NOT derived from the Calcium
+ * ppm target — it's a real, physically-measured amount the user is telling
+ * us to mix in (e.g. from their own product's dosing instructions), so the
+ * conversion is a straight unit conversion rather than a target-matching
+ * calculation.
+ */
+export function calciumChlorideGramsFromDosePerGallon(
+  gramsPerGallon: number,
+  stockVolumeLiters: number,
+  dilutionRatio: number
+): number {
+  if (!(gramsPerGallon > 0) || stockVolumeLiters <= 0 || dilutionRatio <= 0) return 0
+  const reservoirLiters = stockVolumeLiters * dilutionRatio
+  return (gramsPerGallon * reservoirLiters) / LITERS_PER_GALLON
+}
+
 export interface TankRecipe {
   tankA: SaltAmounts
   tankB: SaltAmounts
@@ -354,6 +378,20 @@ export function unionIncludedSalts(parts: PartAnalysis[]): IncludedSaltsSelectio
     }
   }
   return union
+}
+
+/**
+ * Sum every part's user-specified Calcium Chloride g/gal-of-feed dose (see
+ * `calciumChlorideGramsFromDosePerGallon`). Used alongside `unionIncludedSalts`
+ * by the recipe layouts that recombine nutrients across parts by chemistry
+ * rather than by bottle, so a dose entered on any part still applies to
+ * those combined recipes.
+ */
+export function sumCalciumChlorideGramsPerGallon(parts: PartAnalysis[]): number {
+  return parts.reduce((total, part) => {
+    if (!part.includedSalts?.calciumChloride) return total
+    return total + parsePositive(part.calciumChlorideGramsPerGallon)
+  }, 0)
 }
 
 /** Max parts for which the Separate Nitrogen tapering layout is offered */
