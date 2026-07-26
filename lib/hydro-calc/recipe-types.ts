@@ -268,12 +268,7 @@ export interface SaltCheckboxOption {
 export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
   { id: "calciumCarbonate", label: "Calcium Carbonate", sublabel: "", saltKeys: ["calciumCarbonate"] },
-  {
-    id: "calciumChloride",
-    label: "Calcium Chloride",
-    sublabel: "Also check this for a plain Calcium Nitrate product with a small Calcium Chloride top-up",
-    saltKeys: ["calciumChloride"],
-  },
+  { id: "calciumChloride", label: "Calcium Chloride", sublabel: "", saltKeys: ["calciumChloride"] },
   { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
   { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
   {
