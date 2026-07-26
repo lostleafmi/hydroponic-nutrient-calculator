@@ -155,20 +155,22 @@ export function combineDirectAddCalciumCarbonate(
 }
 
 /**
- * Convert a user-specified Calcium Chloride dose — grams of dry CaCl₂·2H₂O
- * per US gallon of working (reservoir) feed — into the grams needed for one
- * full stock-tank refill at the given volume/ratio. This is the inverse of
+ * Convert a literal feed-rate dose — grams of a raw salt per US gallon of
+ * working (reservoir) feed — into the grams needed for one full stock-tank
+ * refill at the given volume/ratio. This is the inverse of
  * `buildDirectAddCalciumCarbonate`'s `gramsPerGallon` calc: since
  * `reservoirLiters = stockVolumeLiters * dilutionRatio`,
  *   grams = gramsPerGallon * reservoirLiters / LITERS_PER_GALLON.
  *
- * Unlike the rest of the solver, this dose is NOT derived from the Calcium
- * ppm target — it's a real, physically-measured amount the user is telling
- * us to mix in (e.g. from their own product's dosing instructions), so the
- * conversion is a straight unit conversion rather than a target-matching
- * calculation.
+ * Unlike most of the solver, a dose passed through this function is NOT
+ * derived from an elemental ppm target — it's a real, physically-measured
+ * amount the user is telling us to mix in (e.g. a Calcium Chloride top-up
+ * dose from a product's own instructions, or Calcium Nitrate's own
+ * feed-chart dose when it's the sole salt behind a part — see
+ * `isCalciumNitrateSoleDoseSource`) — so the conversion here is a straight
+ * unit conversion rather than a target-matching calculation.
  */
-export function calciumChlorideGramsFromDosePerGallon(
+export function gramsFromFeedRatePerGallon(
   gramsPerGallon: number,
   stockVolumeLiters: number,
   dilutionRatio: number
@@ -176,6 +178,36 @@ export function calciumChlorideGramsFromDosePerGallon(
   if (!(gramsPerGallon > 0) || stockVolumeLiters <= 0 || dilutionRatio <= 0) return 0
   const reservoirLiters = stockVolumeLiters * dilutionRatio
   return (gramsPerGallon * reservoirLiters) / LITERS_PER_GALLON
+}
+
+/**
+ * Elemental ppm in the final working (reservoir) solution contributed by a
+ * literal feed-rate dose of `gramsPerGallon` of a salt that is
+ * `elementFraction` (by weight) the target element.
+ *
+ *   ppm (mg/L) = (gramsPerGallon / LITERS_PER_GALLON) [g/L] × elementFraction × 1000 [mg/g]
+ *
+ * This is a plain unit conversion, not a solve — notably it does NOT depend
+ * on stock volume or dilution ratio, because ppm is a working-solution
+ * concentration: it's the same no matter how the stock tank sizing is set
+ * up (see `gramsFromFeedRatePerGallon` for the stock-tank-relative amount,
+ * which DOES depend on those).
+ */
+export function elementalPpmFromDosePerGallon(gramsPerGallon: number, elementFraction: number): number {
+  if (!(gramsPerGallon > 0) || elementFraction <= 0) return 0
+  return (gramsPerGallon / LITERS_PER_GALLON) * elementFraction * 1000
+}
+
+/**
+ * Elemental Calcium ppm contributed by a Calcium Chloride g/gal dose (see
+ * `elementalPpmFromDosePerGallon`). Calcium Chloride's optional per-gallon
+ * amount (entered on the Guaranteed Analysis screen) is a raw salt addition
+ * separate from any %-based guaranteed-analysis field, so this is the only
+ * place its Calcium ends up counted toward the overall Calcium target —
+ * see `calculateElementalTargets`.
+ */
+export function calciumChlorideElementalCalciumPpm(gramsPerGallon: number): number {
+  return elementalPpmFromDosePerGallon(gramsPerGallon, RAW_SALTS.calciumChloride.ca)
 }
 
 export interface TankRecipe {
@@ -390,7 +422,7 @@ export function unionIncludedSalts(parts: PartAnalysis[]): IncludedSaltsSelectio
 
 /**
  * Sum every part's user-specified Calcium Chloride g/gal-of-feed dose (see
- * `calciumChlorideGramsFromDosePerGallon`). Used alongside `unionIncludedSalts`
+ * `gramsFromFeedRatePerGallon`). Used alongside `unionIncludedSalts`
  * by the recipe layouts that recombine nutrients across parts by chemistry
  * rather than by bottle, so a dose entered on any part still applies to
  * those combined recipes.
@@ -817,15 +849,73 @@ export function parsePositive(value: string | undefined): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
-/** Grams of concentrate applied per liter of working (reservoir) solution */
-export function getConcentrateGramsPerLiter(part: NutrientPart): number {
+/**
+ * A nutrient part's own feed-chart dose, normalized to dry grams per US
+ * gallon of working (reservoir) feed — converting a liquid `ml_per_gallon`
+ * dose via the standard liquid-concentrate density when needed.
+ */
+export function getDoseGramsPerGallon(part: NutrientPart): number {
   const dose = parsePositive(part.dose)
   if (dose === 0) return 0
+  return part.unit === "ml_per_gallon" ? dose * LIQUID_CONCENTRATE_DENSITY : dose
+}
 
-  const gramsPerGallon =
-    part.unit === "ml_per_gallon" ? dose * LIQUID_CONCENTRATE_DENSITY : dose
+/** Grams of concentrate applied per liter of working (reservoir) solution */
+export function getConcentrateGramsPerLiter(part: NutrientPart): number {
+  return getDoseGramsPerGallon(part) / LITERS_PER_GALLON
+}
 
-  return gramsPerGallon / LITERS_PER_GALLON
+/**
+ * True when a part's declared salts are (at most) Calcium Nitrate + Calcium
+ * Chloride + the always-available chelated-micronutrient package — i.e.
+ * nothing else on the label competes for a share of the part's own
+ * feed-chart dose. Only in that narrow case is it safe to treat the part's
+ * dose as literally "grams of Calcium Nitrate per gallon" rather than
+ * re-deriving Calcium Nitrate's amount from the elemental Calcium/Nitrogen
+ * targets — once another macro salt (KNO₃, MKP, MgSO₄, Calcium Carbonate,
+ * etc.) is also checked on the same part, the dose represents a blend and
+ * can no longer be attributed to Calcium Nitrate alone.
+ *
+ * See the Calcium-solving block in `calculateStockTankRecipe` (recipe
+ * solver) for where this gates using the literal dose instead of the usual
+ * ppm-target-derived amount.
+ */
+export function isCalciumNitrateSoleDoseSource(selection: IncludedSaltsSelection | undefined): boolean {
+  if (!selection || !selection.calciumNitrate) return false
+  const OTHER_MACRO_KEYS: Array<keyof IncludedSaltsSelection> = [
+    "calciumCarbonate",
+    "potassiumNitrate",
+    "potassiumSulfate",
+    "monoPotassiumPhosphate",
+    "monoAmmoniumPhosphate",
+    "magnesiumSulfate",
+    "ammoniumNitrateOrSulfate",
+  ]
+  return OTHER_MACRO_KEYS.every((key) => !selection[key])
+}
+
+/**
+ * Sum every part's own feed-chart dose (see `getDoseGramsPerGallon`), but
+ * ONLY for parts where Calcium Nitrate is the sole macro salt behind that
+ * dose (see `isCalciumNitrateSoleDoseSource`) AND that part also carries an
+ * explicit Calcium Chloride top-up dose — i.e. exactly the "generic Calcium
+ * Nitrate + a measured pinch of Calcium Chloride" bottle the literal-dose
+ * treatment is meant for. Used alongside `sumCalciumChlorideGramsPerGallon`
+ * by the recipe layouts that recombine nutrients across parts by chemistry
+ * rather than by bottle, so those doses still carry through to those
+ * combined recipes instead of being silently dropped back to the usual
+ * ppm-target-derived amount.
+ */
+export function sumCalciumNitrateGramsPerGallon(partsAnalysis: PartAnalysis[], parts: NutrientPart[]): number {
+  const partsById = new Map(parts.map((part) => [part.id, part]))
+  return partsAnalysis.reduce((total, analysis) => {
+    if (!analysis.includedSalts?.calciumChloride) return total
+    if (parsePositive(analysis.calciumChlorideGramsPerGallon) === 0) return total
+    if (!isCalciumNitrateSoleDoseSource(analysis.includedSalts)) return total
+    const part = partsById.get(analysis.id)
+    if (!part) return total
+    return total + getDoseGramsPerGallon(part)
+  }, 0)
 }
 
 /** Non-zero salts in a safe mixing order for display */

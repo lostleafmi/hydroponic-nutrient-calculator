@@ -16,12 +16,15 @@ import type { PartAnalysis } from "@/components/hydro-calc/guaranteed-analysis-s
 import type { NutrientPart } from "@/components/hydro-calc/feeding-rates-screen"
 import {
   buildDirectAddCalciumCarbonate,
-  calciumChlorideGramsFromDosePerGallon,
+  calciumChlorideElementalCalciumPpm,
   combineDirectAddCalciumCarbonate,
   emptyElementalTargets,
   emptySaltAmounts,
   getConcentrateGramsPerLiter,
+  getDoseGramsPerGallon,
   getEnabledSaltKeys,
+  gramsFromFeedRatePerGallon,
+  isCalciumNitrateSoleDoseSource,
   parsePositive,
   RAW_SALTS,
   SALT_DISPLAY_ORDER,
@@ -68,20 +71,36 @@ export function calculateElementalTargets(
     if (!analysis) continue
 
     const concentrateGramsPerLiter = getConcentrateGramsPerLiter(feedingPart)
-    if (concentrateGramsPerLiter === 0) continue
+    if (concentrateGramsPerLiter > 0) {
+      totals.nitrogen += percentToPpm(parsePositive(analysis.nitrogen), concentrateGramsPerLiter)
+      totals.phosphorus += percentToPpm(parsePositive(analysis.phosphate) * P2O5_TO_P, concentrateGramsPerLiter)
+      totals.potassium += percentToPpm(parsePositive(analysis.potash) * K2O_TO_K, concentrateGramsPerLiter)
+      totals.calcium += percentToPpm(parsePositive(analysis.calcium), concentrateGramsPerLiter)
+      totals.magnesium += percentToPpm(parsePositive(analysis.magnesium), concentrateGramsPerLiter)
+      totals.sulfur += percentToPpm(parsePositive(analysis.sulfur), concentrateGramsPerLiter)
+      totals.iron += percentToPpm(parsePositive(analysis.iron), concentrateGramsPerLiter)
+      totals.manganese += percentToPpm(parsePositive(analysis.manganese), concentrateGramsPerLiter)
+      totals.zinc += percentToPpm(parsePositive(analysis.zinc), concentrateGramsPerLiter)
+      totals.boron += percentToPpm(parsePositive(analysis.boron), concentrateGramsPerLiter)
+      totals.copper += percentToPpm(parsePositive(analysis.copper), concentrateGramsPerLiter)
+      totals.molybdenum += percentToPpm(parsePositive(analysis.molybdenum), concentrateGramsPerLiter)
+    }
 
-    totals.nitrogen += percentToPpm(parsePositive(analysis.nitrogen), concentrateGramsPerLiter)
-    totals.phosphorus += percentToPpm(parsePositive(analysis.phosphate) * P2O5_TO_P, concentrateGramsPerLiter)
-    totals.potassium += percentToPpm(parsePositive(analysis.potash) * K2O_TO_K, concentrateGramsPerLiter)
-    totals.calcium += percentToPpm(parsePositive(analysis.calcium), concentrateGramsPerLiter)
-    totals.magnesium += percentToPpm(parsePositive(analysis.magnesium), concentrateGramsPerLiter)
-    totals.sulfur += percentToPpm(parsePositive(analysis.sulfur), concentrateGramsPerLiter)
-    totals.iron += percentToPpm(parsePositive(analysis.iron), concentrateGramsPerLiter)
-    totals.manganese += percentToPpm(parsePositive(analysis.manganese), concentrateGramsPerLiter)
-    totals.zinc += percentToPpm(parsePositive(analysis.zinc), concentrateGramsPerLiter)
-    totals.boron += percentToPpm(parsePositive(analysis.boron), concentrateGramsPerLiter)
-    totals.copper += percentToPpm(parsePositive(analysis.copper), concentrateGramsPerLiter)
-    totals.molybdenum += percentToPpm(parsePositive(analysis.molybdenum), concentrateGramsPerLiter)
+    // Calcium Chloride's optional per-gallon amount (see the Guaranteed
+    // Analysis screen) is a raw salt addition entered SEPARATELY from the
+    // %-based guaranteed-analysis fields above — it isn't folded into
+    // `analysis.calcium`, so its elemental Calcium never showed up here (or
+    // anywhere the Calcium target is used: the stock-tank solver above, the
+    // EC estimate, and the "What your plants will get" ppm breakdown all
+    // silently dropped it). Add it on top, straight from the dose, using
+    // the same conversion the solver uses to size Calcium Chloride's own
+    // stock-tank grams (`calciumChlorideElementalCalciumPpm` /
+    // `gramsFromFeedRatePerGallon` — see `calculateStockTankRecipe`), so the
+    // displayed target and the actual recipe agree on how much Calcium
+    // Chloride contributes.
+    if (analysis.includedSalts?.calciumChloride) {
+      totals.calcium += calciumChlorideElementalCalciumPpm(parsePositive(analysis.calciumChlorideGramsPerGallon))
+    }
   }
 
   return totals
@@ -180,13 +199,24 @@ export function calculateStockTankRecipe(
   includedSalts?: IncludedSaltsSelection,
   /**
    * Optional user-specified Calcium Chloride dose in grams per US gallon of
-   * working (reservoir) feed (see `calciumChlorideGramsFromDosePerGallon`).
-   * When provided and > 0, it takes priority over the ppm-target-derived
-   * share below — see the Calcium-solving block for details. Zero/omitted
-   * falls back to that share-based amount so Calcium Chloride still gets a
-   * real, non-zero allocation.
+   * working (reservoir) feed (see `gramsFromFeedRatePerGallon`). When
+   * provided and > 0, it takes priority over the ppm-target-derived share
+   * below — see the Calcium-solving block for details. Zero/omitted falls
+   * back to that share-based amount so Calcium Chloride still gets a real,
+   * non-zero allocation.
    */
-  calciumChlorideGramsPerGallon: number = 0
+  calciumChlorideGramsPerGallon: number = 0,
+  /**
+   * Optional literal Calcium Nitrate feed-chart dose in grams per US gallon
+   * of working (reservoir) feed, for the SAME part as
+   * `calciumChlorideGramsPerGallon` above. Only meaningful — and only ever
+   * passed by callers — when Calcium Nitrate is that part's sole macro salt
+   * (see `isCalciumNitrateSoleDoseSource`); see the Calcium-solving block
+   * for why it takes priority over the usual ppm-target-derived amount in
+   * that case. Zero/omitted falls back to the existing ppm-target-derived
+   * sizing.
+   */
+  calciumNitrateGramsPerGallon: number = 0
 ): TankRecipe {
   const tankA = emptySaltAmounts()
   const tankB = emptySaltAmounts()
@@ -276,11 +306,32 @@ export function calculateStockTankRecipe(
   // is accounted for. This is what lets a part be "Chloride only" (nothing
   // left over to assign) or "Nitrate + a specified amount of Chloride"
   // (Nitrate absorbs the remainder) using the same code path.
+  //
+  // That "remainder" handling is what feeds Calcium's own ppm target into
+  // Calcium Nitrate — which, further down, may then get resized again to
+  // close a Nitrogen gap (see the Nitrogen block below). Both of those
+  // steps solve backward from an elemental ppm target using
+  // RAW_SALTS.calciumNitrate's *assumed* pure-salt fractions (16.9% Ca,
+  // 11.8% N), which is exactly what you want when replicating an unknown
+  // blend from its label %s — but it reintroduces real error whenever the
+  // caller *also* supplies `calciumNitrateGramsPerGallon`: a literal,
+  // physically-measured feed-chart dose for this same part, valid only when
+  // Calcium Nitrate is that part's sole macro salt (see
+  // `isCalciumNitrateSoleDoseSource`). In that specific case — a plain
+  // Calcium Nitrate bottle with a measured Calcium Chloride top-up, e.g.
+  // "2.5 g/gal Calcium Nitrate + 0.25 g/gal Calcium Chloride" mirroring a
+  // manufacturer's own "1 lb + 0.1 lb per gallon of stock" directions —
+  // both doses are already known exactly, so both are scaled straight from
+  // their feed rates via `gramsFromFeedRatePerGallon` (same conversion,
+  // same stock volume/dilution ratio) instead of being re-derived from
+  // %-based targets built on an assumed salt purity that may not match the
+  // real product.
   const CALCIUM_CHLORIDE_MINOR_SHARE = 0.1
 
   let calciumNitrateGrams = 0
   let calciumCarbonateGrams = 0
   let calciumChlorideGrams = 0
+  let calciumNitrateSizedFromFeedRate = false
   const nitrateEnabled = isEnabled("calciumNitrate")
   const carbonateEnabled = isEnabled("calciumCarbonate")
   const chlorideEnabled = isEnabled("calciumChloride")
@@ -291,28 +342,46 @@ export function calculateStockTankRecipe(
       warnings.push({ element: "calcium", label: "Calcium" })
     } else {
       const explicitChlorideGrams = chlorideEnabled
-        ? calciumChlorideGramsFromDosePerGallon(calciumChlorideGramsPerGallon, stockVolumeLiters, dilutionRatio)
+        ? gramsFromFeedRatePerGallon(calciumChlorideGramsPerGallon, stockVolumeLiters, dilutionRatio)
         : 0
 
       if (explicitChlorideGrams > 0) {
         calciumChlorideGrams = explicitChlorideGrams
-        const chlorideCalciumPpm = ppmFromSaltInStock(
+        let calciumPpmAlreadySized = ppmFromSaltInStock(
           calciumChlorideGrams,
           RAW_SALTS.calciumChloride.ca,
           stockVolumeLiters,
           dilutionRatio
         )
-        // Any Calcium the fixed dose doesn't cover falls to the primary
-        // source(s), split evenly — same "equal share" policy used below
-        // for two primary sources with no Chloride at all. If Chloride is
-        // the only enabled source and its fixed dose undershoots the
-        // target, that's expected (a real measured amount, not solved
-        // backward from the target) rather than a warning-worthy gap.
-        const remainingCalciumPpm = Math.max(0, targets.calcium - chlorideCalciumPpm)
-        const primarySourceCount = (nitrateEnabled ? 1 : 0) + (carbonateEnabled ? 1 : 0)
-        const primaryShareEachPpm = primarySourceCount > 0 ? remainingCalciumPpm / primarySourceCount : 0
 
-        if (nitrateEnabled) {
+        const explicitNitrateGrams = nitrateEnabled
+          ? gramsFromFeedRatePerGallon(calciumNitrateGramsPerGallon, stockVolumeLiters, dilutionRatio)
+          : 0
+        if (explicitNitrateGrams > 0) {
+          calciumNitrateGrams = explicitNitrateGrams
+          calciumNitrateSizedFromFeedRate = true
+          calciumPpmAlreadySized += ppmFromSaltInStock(
+            calciumNitrateGrams,
+            RAW_SALTS.calciumNitrate.ca,
+            stockVolumeLiters,
+            dilutionRatio
+          )
+        }
+
+        // Any Calcium the fixed dose(s) above don't cover falls to whichever
+        // primary source(s) are still unsized, split evenly — same "equal
+        // share" policy used below for two primary sources with no Chloride
+        // at all. If Chloride is the only enabled source (or every primary
+        // source ended up sized from its own feed rate) and the fixed
+        // dose(s) undershoot the target, that's expected (real measured
+        // amounts, not solved backward from the target) rather than a
+        // warning-worthy gap.
+        const remainingCalciumPpm = Math.max(0, targets.calcium - calciumPpmAlreadySized)
+        const unsizedPrimarySourceCount =
+          (nitrateEnabled && !calciumNitrateSizedFromFeedRate ? 1 : 0) + (carbonateEnabled ? 1 : 0)
+        const primaryShareEachPpm = unsizedPrimarySourceCount > 0 ? remainingCalciumPpm / unsizedPrimarySourceCount : 0
+
+        if (nitrateEnabled && !calciumNitrateSizedFromFeedRate) {
           calciumNitrateGrams = saltGramsForTargetPpm(
             primaryShareEachPpm,
             RAW_SALTS.calciumNitrate.ca,
@@ -485,7 +554,7 @@ export function calculateStockTankRecipe(
         "potassiumNitrate",
         saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.potassiumNitrate.n, stockVolumeLiters, dilutionRatio)
       )
-    } else if (nitrateEnabled) {
+    } else if (nitrateEnabled && !calciumNitrateSizedFromFeedRate) {
       // No dedicated nitrate-only salt is enabled, but Calcium Nitrate is —
       // re-size it off the full (MAP-adjusted) Nitrogen target instead of
       // its Calcium-only share. This grams value is always ≥ the
@@ -498,6 +567,15 @@ export function calculateStockTankRecipe(
       // ends up sized for Nitrogen (its primary job here), Chloride keeps
       // its small top-up share untouched. Carbonate's and Chloride's own
       // allocations are untouched either way.
+      //
+      // Skipped when `calciumNitrateSizedFromFeedRate` is true: that means
+      // the caller gave us Calcium Nitrate's own literal feed-chart dose
+      // (see the Calcium-solving block above), so overriding it here would
+      // silently replace a real, physically-measured amount with a
+      // %-derived guess — exactly the bug this whole feed-rate path exists
+      // to avoid. Any true Nitrogen shortfall against the label's %N is
+      // left for `ammoniumNitrate/ammoniumSulfate` below (or reported as a
+      // gap) rather than papered over by inflating Calcium Nitrate.
       calciumNitrateGrams = saltGramsForTargetPpm(
         nitrogenTargetAfterMap,
         RAW_SALTS.calciumNitrate.n,
@@ -514,9 +592,15 @@ export function calculateStockTankRecipe(
         "ammoniumSulfate",
         saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.ammoniumSulfate.n, stockVolumeLiters, dilutionRatio)
       )
-    } else {
+    } else if (!calciumNitrateSizedFromFeedRate) {
       warnings.push({ element: "nitrogen", label: "Nitrogen" })
     }
+    // else: Calcium Nitrate was sized from its own explicit feed-chart dose
+    // above and no other Nitrogen salt is enabled to close the rest of the
+    // gap. Same as Calcium Chloride's fixed dose undershooting its share of
+    // the Calcium target (see the Calcium-solving block) — a real,
+    // physically-measured dose falling short of a %-derived target is
+    // expected, not a "salt is unchecked" gap, so it isn't warned on here.
   }
 
   assignToTankA("calciumNitrate", calciumNitrateGrams)
@@ -647,7 +731,8 @@ export function calculateSeparateCalciumRecipe(
   dilutionRatio: number,
   includedSalts?: IncludedSaltsSelection,
   keepMicronutrientsSeparate: boolean = false,
-  calciumChlorideGramsPerGallon: number = 0
+  calciumChlorideGramsPerGallon: number = 0,
+  calciumNitrateGramsPerGallon: number = 0
 ): ThreeTankRecipe {
   const {
     tankA,
@@ -660,7 +745,8 @@ export function calculateSeparateCalciumRecipe(
     stockVolumeLiters,
     dilutionRatio,
     includedSalts,
-    calciumChlorideGramsPerGallon
+    calciumChlorideGramsPerGallon,
+    calciumNitrateGramsPerGallon
   )
 
   const tank1 = emptySaltAmounts()
@@ -702,6 +788,24 @@ export function calculateSeparateCalciumRecipe(
     isApproximate,
     directAddCalciumCarbonate,
   }
+}
+
+/**
+ * A part's literal Calcium Nitrate feed-chart dose, for passing straight
+ * through to `calculateStockTankRecipe`'s `calciumNitrateGramsPerGallon`
+ * param — but ONLY when that's actually meaningful: the part must carry an
+ * explicit, non-zero Calcium Chloride top-up dose (the pairing this
+ * literal-dose treatment exists for — see the Calcium-solving block in
+ * `calculateStockTankRecipe`), and Calcium Nitrate must be that part's sole
+ * macro salt (see `isCalciumNitrateSoleDoseSource`) so the part's overall
+ * dose can be safely attributed to Calcium Nitrate alone. Returns 0
+ * (falling back to the existing ppm-target-derived sizing) otherwise.
+ */
+function calciumNitrateGramsPerGallonForPart(analysis: PartAnalysis, feedingPart: NutrientPart): number {
+  if (!analysis.includedSalts?.calciumChloride) return 0
+  if (parsePositive(analysis.calciumChlorideGramsPerGallon) === 0) return 0
+  if (!isCalciumNitrateSoleDoseSource(analysis.includedSalts)) return 0
+  return getDoseGramsPerGallon(feedingPart)
 }
 
 function combineSaltAmounts(a: SaltAmounts, b: SaltAmounts): SaltAmounts {
@@ -760,7 +864,8 @@ export function calculateMultiPartStockTankRecipe(
       stockVolumeLiters,
       dilutionRatio,
       analysis.includedSalts,
-      parsePositive(analysis.calciumChlorideGramsPerGallon)
+      parsePositive(analysis.calciumChlorideGramsPerGallon),
+      calciumNitrateGramsPerGallonForPart(analysis, feedingPart)
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
@@ -838,7 +943,8 @@ export function calculateDoserMultiPartRecipe(
       stockVolumeLiters,
       dilutionRatio,
       analysis.includedSalts,
-      parsePositive(analysis.calciumChlorideGramsPerGallon)
+      parsePositive(analysis.calciumChlorideGramsPerGallon),
+      calciumNitrateGramsPerGallonForPart(analysis, feedingPart)
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
@@ -888,7 +994,8 @@ export function calculateDirectMixRecipe(
   targets: ElementalTargets,
   reservoirLiters: number,
   includedSalts?: IncludedSaltsSelection,
-  calciumChlorideGramsPerGallon: number = 0
+  calciumChlorideGramsPerGallon: number = 0,
+  calciumNitrateGramsPerGallon: number = 0
 ): DirectMixRecipe {
   // A 1:1 stock tank of exactly reservoirLiters is equivalent to working-strength direct mix.
   const stockRecipe = calculateStockTankRecipe(
@@ -896,7 +1003,8 @@ export function calculateDirectMixRecipe(
     reservoirLiters,
     1,
     includedSalts,
-    calciumChlorideGramsPerGallon
+    calciumChlorideGramsPerGallon,
+    calciumNitrateGramsPerGallon
   )
 
   const combined = emptySaltAmounts()
@@ -1040,7 +1148,8 @@ const EC_ADDITIVE_BUFFER_MS_CM = 0.08
 export function estimateEcFromElementalTargets(
   targets: ElementalTargets,
   includedSalts?: IncludedSaltsSelection,
-  calciumChlorideGramsPerGallon: number = 0
+  calciumChlorideGramsPerGallon: number = 0,
+  calciumNitrateGramsPerGallon: number = 0
 ): number | null {
   const hasMacro =
     targets.nitrogen > 0 ||
@@ -1052,7 +1161,14 @@ export function estimateEcFromElementalTargets(
 
   if (!hasMacro) return null
 
-  const stockRecipe = calculateStockTankRecipe(targets, 1, 1, includedSalts, calciumChlorideGramsPerGallon)
+  const stockRecipe = calculateStockTankRecipe(
+    targets,
+    1,
+    1,
+    includedSalts,
+    calciumChlorideGramsPerGallon,
+    calciumNitrateGramsPerGallon
+  )
   const salts = emptySaltAmounts()
   for (const key of Object.keys(salts) as SaltKey[]) {
     salts[key] = stockRecipe.tankA[key] + stockRecipe.tankB[key]

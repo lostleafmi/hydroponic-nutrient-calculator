@@ -24,6 +24,7 @@ import {
 } from "@/lib/hydro-calc/recipe-calculator"
 import {
   sumCalciumChlorideGramsPerGallon,
+  sumCalciumNitrateGramsPerGallon,
   unionIncludedSalts,
   type DirectMixRecipe,
   type ElementalTargets,
@@ -84,11 +85,13 @@ export async function calculateRecipeAction(
   // selection directly inside calculate*MultiPart*Recipe below.
   const combinedIncludedSalts = unionIncludedSalts(partsAnalysis)
   const combinedCalciumChlorideGramsPerGallon = sumCalciumChlorideGramsPerGallon(partsAnalysis)
+  const combinedCalciumNitrateGramsPerGallon = sumCalciumNitrateGramsPerGallon(partsAnalysis, parts)
 
   const estimatedEc = estimateEcFromElementalTargets(
     targets,
     combinedIncludedSalts,
-    combinedCalciumChlorideGramsPerGallon
+    combinedCalciumChlorideGramsPerGallon,
+    combinedCalciumNitrateGramsPerGallon
   )
 
   const threeTankRecipe = calculateSeparateCalciumRecipe(
@@ -97,7 +100,8 @@ export async function calculateRecipeAction(
     dilutionRatio,
     combinedIncludedSalts,
     keepMicrosSeparate,
-    combinedCalciumChlorideGramsPerGallon
+    combinedCalciumChlorideGramsPerGallon,
+    combinedCalciumNitrateGramsPerGallon
   )
 
   const multiPartRecipe =
@@ -109,7 +113,8 @@ export async function calculateRecipeAction(
     targets,
     stockVolumeLiters,
     combinedIncludedSalts,
-    combinedCalciumChlorideGramsPerGallon
+    combinedCalciumChlorideGramsPerGallon,
+    combinedCalciumNitrateGramsPerGallon
   )
 
   return {

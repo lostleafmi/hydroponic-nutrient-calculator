@@ -56,6 +56,7 @@ import { saveFormulationToDashboardAction } from "@/app/actions/formulations"
 import {
   DOSER_PRESET_RATIOS,
   RAW_SALTS,
+  calciumChlorideElementalCalciumPpm,
   checkRecipeSolubility,
   emptyElementalTargets,
   emptySaltAmounts,
@@ -63,15 +64,21 @@ import {
   formatGrams,
   formatMl,
   formatPpm,
+  getDoseGramsPerGallon,
   getOrderedSaltEntries,
+  gramsFromFeedRatePerGallon,
   hasValidRecipeInput,
+  isCalciumNitrateSoleDoseSource,
   isSeparateNitrogenAvailable,
   LITERS_PER_GALLON,
   MICRO_LABELS,
+  parsePositive,
   pickDoserPresetForRatio,
   roundDownToNiceRatio,
   stockTankMlPerGallon,
   stockTankMlPerLiter,
+  sumCalciumChlorideGramsPerGallon,
+  sumCalciumNitrateGramsPerGallon,
   unionIncludedSalts,
   type DirectMixRecipe,
   type MicroKey,
@@ -268,6 +275,28 @@ export function RecipeScreen({
 
   const targets = calcResult?.targets ?? EMPTY_TARGETS
   const anchor = calcResult?.anchor ?? null
+
+  // How much of `targets.calcium` above comes from Calcium Chloride's
+  // optional per-gallon dose (summed across every part that has one) —
+  // computed the same way the solver folds it into the target (see
+  // `calciumChlorideElementalCalciumPpm` / `calculateElementalTargets`) so
+  // the "What your plants will get" tooltip can show the calculation path.
+  const calciumChlorideGramsPerGallonCombined = useMemo(
+    () => sumCalciumChlorideGramsPerGallon(partsAnalysis),
+    [partsAnalysis]
+  )
+  const calciumChloridePpmContribution = calciumChlorideElementalCalciumPpm(calciumChlorideGramsPerGallonCombined)
+  // Combined Calcium Nitrate literal feed-chart dose (see
+  // `sumCalciumNitrateGramsPerGallon`) — only non-zero for parts where
+  // Calcium Nitrate is paired with an explicit Calcium Chloride dose (see
+  // `isCalciumNitrateSoleDoseSource`). Used for the same calculation-path
+  // tooltips as the Chloride dose above, on the combined-recipe layouts
+  // (Separate Nitrogen Tank 1, Direct Mix) that don't otherwise expose a
+  // per-part dose.
+  const calciumNitrateGramsPerGallonCombined = useMemo(
+    () => sumCalciumNitrateGramsPerGallon(partsAnalysis, parts),
+    [partsAnalysis, parts]
+  )
   const estimated = useMemo(
     () => new Set<MicroKey>(calcResult?.estimatedMicros ?? []),
     [calcResult]
@@ -1110,7 +1139,15 @@ export function RecipeScreen({
                 <TargetCard label="Nitrogen (N)" value={formatPpm(targets.nitrogen)} primary />
                 <TargetCard label="Phosphorus (P)" value={formatPpm(targets.phosphorus)} />
                 <TargetCard label="Potassium (K)" value={formatPpm(targets.potassium)} primary />
-                <TargetCard label="Calcium (Ca)" value={formatPpm(targets.calcium)} />
+                <TargetCard
+                  label="Calcium (Ca)"
+                  value={formatPpm(targets.calcium)}
+                  tooltip={
+                    calciumChloridePpmContribution > 0
+                      ? calciumChloridePpmTooltip(calciumChlorideGramsPerGallonCombined, calciumChloridePpmContribution)
+                      : undefined
+                  }
+                />
                 <TargetCard label="Magnesium (Mg)" value={formatPpm(targets.magnesium)} />
                 <TargetCard label="Sulfur (S)" value={formatPpm(targets.sulfur)} />
                 <TargetCard label="Iron (Fe)" value={formatPpm(targets.iron)} micro estimated={estimated.has("iron")} />
@@ -1314,11 +1351,31 @@ export function RecipeScreen({
                   name={RAW_SALTS.calciumNitrate.name}
                   formula={RAW_SALTS.calciumNitrate.formula}
                   amount={scaledGrams(threeTankRecipe.tank1.calciumNitrate)}
+                  tooltip={
+                    calciumNitrateGramsPerGallonCombined > 0
+                      ? feedRateGramsTooltip(
+                          RAW_SALTS.calciumNitrate.name,
+                          calciumNitrateGramsPerGallonCombined,
+                          solubilityBasisVolumeLiters,
+                          solubilityBasisDilutionRatio
+                        )
+                      : undefined
+                  }
                 />
                 <SaltRow
                   name={RAW_SALTS.calciumChloride.name}
                   formula={RAW_SALTS.calciumChloride.formula}
                   amount={scaledGrams(threeTankRecipe.tank1.calciumChloride)}
+                  tooltip={
+                    calciumChlorideGramsPerGallonCombined > 0
+                      ? feedRateGramsTooltip(
+                          RAW_SALTS.calciumChloride.name,
+                          calciumChlorideGramsPerGallonCombined,
+                          solubilityBasisVolumeLiters,
+                          solubilityBasisDilutionRatio
+                        )
+                      : undefined
+                  }
                 />
               </div>
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
@@ -1535,6 +1592,10 @@ export function RecipeScreen({
       {hasValidData && usesPerPartTanks && (
         <PerPartStockTankCards
           tanks={multiPartRecipe.tanks}
+          partsAnalysis={partsAnalysis}
+          parts={parts}
+          stockVolumeLiters={solubilityBasisVolumeLiters}
+          dilutionRatio={solubilityBasisDilutionRatio}
           stockTankSize={stockTankSize}
           stockTankUnit={stockTankUnit}
           isDoser={stockTankOption === "doser"}
@@ -1562,15 +1623,38 @@ export function RecipeScreen({
                 order shown here always matches what gets saved to the
                 Dashboard / Feeding Scheduler. */}
             <div className="space-y-2 mb-4">
-              {getOrderedSaltEntries(directRecipe.salts).map(([key, amount]) => (
-                <SaltRow
-                  key={key}
-                  name={RAW_SALTS[key].name}
-                  formula={RAW_SALTS[key].formula}
-                  amount={scaledGrams(amount)}
-                  micro={MICRO_SALT_KEYS.has(key)}
-                />
-              ))}
+              {getOrderedSaltEntries(directRecipe.salts).map(([key, amount]) => {
+                // Direct Mix always solves at a 1:1 "dilution ratio" (the
+                // stock volume IS the reservoir — see `calculateDirectMixRecipe`),
+                // so the feed-rate tooltip uses ratio 1 regardless of the
+                // dilution ratio configured elsewhere on this screen.
+                const tooltip =
+                  key === "calciumChloride" && calciumChlorideGramsPerGallonCombined > 0
+                    ? feedRateGramsTooltip(
+                        RAW_SALTS.calciumChloride.name,
+                        calciumChlorideGramsPerGallonCombined,
+                        solubilityBasisVolumeLiters,
+                        1
+                      )
+                    : key === "calciumNitrate" && calciumNitrateGramsPerGallonCombined > 0
+                      ? feedRateGramsTooltip(
+                          RAW_SALTS.calciumNitrate.name,
+                          calciumNitrateGramsPerGallonCombined,
+                          solubilityBasisVolumeLiters,
+                          1
+                        )
+                      : undefined
+                return (
+                  <SaltRow
+                    key={key}
+                    name={RAW_SALTS[key].name}
+                    formula={RAW_SALTS[key].formula}
+                    amount={scaledGrams(amount)}
+                    micro={MICRO_SALT_KEYS.has(key)}
+                    tooltip={tooltip}
+                  />
+                )
+              })}
             </div>
             {directRecipe.directAddCalciumCarbonate && directRecipe.directAddCalciumCarbonate.grams > 0 && (
               <p className="text-xs leading-relaxed text-muted-foreground">
@@ -1859,18 +1943,72 @@ export function RecipeScreen({
   )
 }
 
+/**
+ * Calculation-path tooltip for "how does the Calcium Chloride g/gal dose
+ * become elemental Calcium ppm" — shown on the Calcium target card whenever
+ * a Calcium Chloride dose is contributing to the total (see
+ * `calciumChlorideElementalCalciumPpm` / `calculateElementalTargets`).
+ */
+function calciumChloridePpmTooltip(gramsPerGallon: number, ppm: number): React.ReactNode {
+  return (
+    <div className="space-y-1.5">
+      <p>
+        Includes {formatPpm(ppm)} of elemental Calcium from your Calcium Chloride dose, on top of
+        whatever your other Calcium source(s) contribute.
+      </p>
+      <p className="font-mono text-[11px] leading-snug">
+        {gramsPerGallon} g/gal ÷ {LITERS_PER_GALLON} L/gal × 1000 mg/g × {(RAW_SALTS.calciumChloride.ca * 100).toFixed(2)}%
+        Ca = {formatPpm(ppm)}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Calculation-path tooltip for "how does a g/gal feed rate become grams in
+ * the stock tank" — used for any salt whose amount is scaled straight from
+ * a literal, physically-measured feed rate rather than solved backward from
+ * an elemental target (Calcium Chloride's dose always; Calcium Nitrate's
+ * own feed-chart dose when it's the sole salt behind a part paired with an
+ * explicit Calcium Chloride dose — see `isCalciumNitrateSoleDoseSource` and
+ * the Calcium-solving block in `calculateStockTankRecipe`).
+ */
+function feedRateGramsTooltip(
+  saltLabel: string,
+  gramsPerGallon: number,
+  stockVolumeLiters: number,
+  dilutionRatio: number
+): React.ReactNode {
+  const grams = gramsFromFeedRatePerGallon(gramsPerGallon, stockVolumeLiters, dilutionRatio)
+  const reservoirGallons = (stockVolumeLiters * dilutionRatio) / LITERS_PER_GALLON
+  return (
+    <div className="space-y-1.5">
+      <p>
+        {saltLabel} is scaled straight from the {gramsPerGallon} g/gal feed rate you entered — the
+        same dilution-ratio/stock-volume scaling used for every other salt in this tank.
+      </p>
+      <p className="font-mono text-[11px] leading-snug">
+        {gramsPerGallon} g/gal × {reservoirGallons.toFixed(1)} gal (this stock tank&apos;s full
+        reservoir at your dilution ratio) = {formatGrams(grams)}
+      </p>
+    </div>
+  )
+}
+
 function TargetCard({
   label,
   value,
   primary = false,
   micro = false,
   estimated = false,
+  tooltip,
 }: {
   label: string
   value: string
   primary?: boolean
   micro?: boolean
   estimated?: boolean
+  tooltip?: React.ReactNode
 }) {
   return (
     <div
@@ -1882,8 +2020,16 @@ function TargetCard({
             : "border-border bg-secondary/30"
       }`}
     >
-      <p className={`text-xs font-medium ${micro ? "text-muted-foreground" : "text-muted-foreground"}`}>
-        {label}
+      <p className={`flex items-center gap-1 text-xs font-medium ${micro ? "text-muted-foreground" : "text-muted-foreground"}`}>
+        <span>{label}</span>
+        {tooltip && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <HelpCircle className="h-3 w-3 shrink-0 cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs text-xs">{tooltip}</TooltipContent>
+          </Tooltip>
+        )}
       </p>
       <p
         className={`text-lg font-semibold font-mono ${
@@ -1904,11 +2050,13 @@ function SaltRow({
   formula,
   amount,
   micro = false,
+  tooltip,
 }: {
   name: string
   formula: string
   amount: string
   micro?: boolean
+  tooltip?: React.ReactNode
 }) {
   if (amount === "—") return null
 
@@ -1919,7 +2067,17 @@ function SaltRow({
       }`}
     >
       <div>
-        <p className={`font-medium ${micro ? "text-sm" : ""} text-foreground`}>{name}</p>
+        <p className={`flex items-center gap-1.5 font-medium ${micro ? "text-sm" : ""} text-foreground`}>
+          <span>{name}</span>
+          {tooltip && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="h-3.5 w-3.5 shrink-0 cursor-help text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-xs">{tooltip}</TooltipContent>
+            </Tooltip>
+          )}
+        </p>
         <p className="text-xs text-muted-foreground font-mono">{formula}</p>
       </div>
       <p className="font-mono font-semibold text-foreground">{amount}</p>
@@ -1929,18 +2087,63 @@ function SaltRow({
 
 function PerPartStockTankCards({
   tanks,
+  partsAnalysis,
+  parts,
+  stockVolumeLiters,
+  dilutionRatio,
   stockTankSize,
   stockTankUnit,
   isDoser,
   ecScaleFactor,
 }: {
   tanks: PartStockTank[]
+  partsAnalysis: PartAnalysis[]
+  parts: NutrientPart[]
+  stockVolumeLiters: number
+  dilutionRatio: number
   stockTankSize: string
   stockTankUnit: "gallons" | "liters"
   isDoser: boolean
   ecScaleFactor: number
 }) {
   const scaledGrams = (g: number) => formatGrams(g * ecScaleFactor)
+  const analysisById = new Map(partsAnalysis.map((a) => [a.id, a]))
+  const partById = new Map(parts.map((p) => [p.id, p]))
+
+  // Per-tank calculation-path tooltips for whichever salts in THAT tank were
+  // scaled straight from a literal feed rate rather than solved backward
+  // from the elemental targets — Calcium Chloride's own dose always;
+  // Calcium Nitrate's feed-chart dose only when it's the sole macro salt on
+  // that part (see `isCalciumNitrateSoleDoseSource` and the Calcium-solving
+  // block in `calculateStockTankRecipe`).
+  const feedRateTooltipsByPartId = new Map<string, Partial<Record<SaltKey, React.ReactNode>>>()
+  for (const analysis of partsAnalysis) {
+    const part = partById.get(analysis.id)
+    if (!part) continue
+    const chlorideDose = analysis.includedSalts?.calciumChloride ? parsePositive(analysis.calciumChlorideGramsPerGallon) : 0
+    if (chlorideDose <= 0) continue
+
+    const tooltips: Partial<Record<SaltKey, React.ReactNode>> = {
+      calciumChloride: feedRateGramsTooltip(
+        RAW_SALTS.calciumChloride.name,
+        chlorideDose,
+        stockVolumeLiters,
+        dilutionRatio
+      ),
+    }
+    if (isCalciumNitrateSoleDoseSource(analysis.includedSalts)) {
+      const nitrateDose = getDoseGramsPerGallon(part)
+      if (nitrateDose > 0) {
+        tooltips.calciumNitrate = feedRateGramsTooltip(
+          RAW_SALTS.calciumNitrate.name,
+          nitrateDose,
+          stockVolumeLiters,
+          dilutionRatio
+        )
+      }
+    }
+    feedRateTooltipsByPartId.set(analysis.id, tooltips)
+  }
   const tankStyles = [
     {
       border: "border-primary/50",
@@ -1978,6 +2181,7 @@ function PerPartStockTankCards({
         const macroEntries = saltEntries.filter(([key]) => !MICRO_SALT_KEYS.has(key))
         const microEntries = saltEntries.filter(([key]) => MICRO_SALT_KEYS.has(key))
         const unitLabel = stockTankUnit === "gallons" ? "gallons" : "liters"
+        const tankFeedRateTooltips = feedRateTooltipsByPartId.get(tank.partId) ?? {}
 
         return (
           <Card key={tank.partId} className={`border-2 ${style.border} bg-card`}>
@@ -2008,6 +2212,7 @@ function PerPartStockTankCards({
                     name={RAW_SALTS[key].name}
                     formula={RAW_SALTS[key].formula}
                     amount={scaledGrams(amount)}
+                    tooltip={tankFeedRateTooltips[key]}
                   />
                 ))}
                 {microEntries.length > 0 && (
