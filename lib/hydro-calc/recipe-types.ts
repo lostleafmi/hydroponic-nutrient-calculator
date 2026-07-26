@@ -298,7 +298,8 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   {
     id: "chelatedMicronutrients",
     label: "Chelated Micronutrients (Fe, Mn, Zn, B, Cu, Mo)",
-    sublabel: "Iron EDTA/DTPA, Manganese EDTA, Copper EDTA, Zinc EDTA, Boric Acid, Sodium Molybdate, etc.",
+    sublabel:
+      "Iron EDTA/DTPA, Manganese EDTA, Copper EDTA, Zinc EDTA, Boric Acid, Sodium Borate, Sodium Molybdate",
     saltKeys: ["ironDTPA", "manganeseSulfate", "zincSulfate", "boricAcid", "copperSulfate", "sodiumMolybdate"],
   },
 ]

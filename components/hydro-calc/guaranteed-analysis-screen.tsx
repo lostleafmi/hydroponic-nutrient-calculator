@@ -258,7 +258,7 @@ function SaltCheckboxRow({
 }) {
   return (
     <div
-      className={`flex items-start gap-3 rounded-lg border-2 p-3 transition-colors ${
+      className={`flex items-center gap-3 rounded-lg border-2 p-3 transition-colors ${
         checked ? "border-primary/40 bg-primary/5" : "border-border bg-secondary/20"
       }`}
     >
@@ -266,11 +266,16 @@ function SaltCheckboxRow({
         id={inputId}
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next === true)}
-        className="mt-0.5"
+        className="shrink-0"
       />
-      <Label htmlFor={inputId} className="flex flex-1 cursor-pointer flex-col gap-0.5">
-        <span className="font-medium text-foreground">{label}</span>
-        {sublabel && <span className="text-xs text-muted-foreground">{sublabel}</span>}
+      {/* `justify-center` centers the label block vertically whenever this
+          card ends up taller than its own text — e.g. sitting in the same
+          grid row as a card with a sublabel — instead of leaving it pinned
+          to the top with empty space below. `text-pretty` avoids ragged,
+          single-word wrapped lines on the longer salt names/sublabels. */}
+      <Label htmlFor={inputId} className="flex flex-1 cursor-pointer flex-col justify-center gap-1">
+        <span className="text-pretty font-medium leading-snug text-foreground">{label}</span>
+        {sublabel && <span className="text-pretty text-xs leading-snug text-muted-foreground">{sublabel}</span>}
       </Label>
     </div>
   )
