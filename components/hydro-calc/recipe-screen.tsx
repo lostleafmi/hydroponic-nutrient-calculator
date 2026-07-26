@@ -1945,38 +1945,27 @@ export function RecipeScreen({
 }
 
 /**
- * Calculation-path tooltip for the "Estimated EC" card. Always explains the
- * base ion-conductivity model; when a literally-dosed Calcium Nitrate part
- * needed a real-vs-generic composition correction (see
- * `calciumNitrateLiteralDoseEcPpmDelta`), also shows that adjustment and its
- * direction — otherwise a real product richer than the generic assumed
- * composition (a common case: many commercial Calcium Nitrate blends run
- * ahead of the plain tetrahydrate formula) would silently under-count its
- * ionic contribution to EC.
+ * Calculation-path tooltip for the "Estimated EC" card. Kept short and
+ * plain-language on purpose — growers just need to know the number is an
+ * estimate and to trust their meter, not the underlying ion-conductivity
+ * math (see `estimateEcFromElementalTargets` in `recipe-calculator.ts` for
+ * that detail). When a literally-dosed Calcium Nitrate part needed a
+ * real-vs-generic composition correction (see
+ * `calciumNitrateLiteralDoseEcPpmDelta`), a short second line notes that too.
  */
-/** Signed ppm delta for display — `formatPpm` returns "—" for non-positive values, which won't do here. */
-function formatSignedPpm(ppm: number): string {
-  const sign = ppm > 0 ? "+" : ppm < 0 ? "−" : "±"
-  return `${sign}${Math.abs(ppm).toFixed(1)} ppm`
-}
-
 function estimatedEcTooltip(delta: { calciumPpmDelta: number; nitrogenPpmDelta: number }): React.ReactNode {
   const hasDelta = Math.abs(delta.calciumPpmDelta) > 0.01 || Math.abs(delta.nitrogenPpmDelta) > 0.01
   return (
     <div className="space-y-1.5">
       <p>
-        Estimated electrical conductivity of your final reservoir at 25 °C. Calculated from every
-        dissolved ion — including Chloride from Calcium Chloride — then adjusted with a real-world
-        buffer to account for chelated micronutrients, pH compounds, and other ionic contributors
-        found in commercial fertilizers. Actual measured EC typically varies by ±0.2 mS/cm depending
-        on your water quality, temperature, and specific product formulation.
+        Estimated from the nutrient profile. Real EC can differ from manufacturer charts because
+        of water, temperature, and how the chart was measured. Use your meter for final
+        adjustments.
       </p>
       {hasDelta && (
         <p>
-          Also corrected for your Calcium Nitrate&apos;s real label percentages
-          {delta.calciumPpmDelta >= 0 ? " running richer" : " running leaner"} than a generic
-          Calcium Nitrate salt would be, adding {formatSignedPpm(delta.calciumPpmDelta)} Ca and{" "}
-          {formatSignedPpm(delta.nitrogenPpmDelta)} N to the ionic total before the EC math above.
+          Also adjusted for your Calcium Nitrate&apos;s real label strength, which runs{" "}
+          {delta.calciumPpmDelta >= 0 ? "a bit richer" : "a bit leaner"} than a generic assumption.
         </p>
       )}
     </div>
