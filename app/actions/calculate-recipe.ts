@@ -27,6 +27,7 @@ import {
 import {
   sumCalciumChlorideGramsPerGallon,
   sumCalciumNitrateGramsPerGallon,
+  sumUreaNitrogenPpm,
   unionIncludedSalts,
   type DirectMixRecipe,
   type ElementalTargets,
@@ -105,6 +106,7 @@ export async function calculateRecipeAction(
   const combinedIncludedSalts = unionIncludedSalts(partsAnalysis)
   const combinedCalciumChlorideGramsPerGallon = sumCalciumChlorideGramsPerGallon(partsAnalysis)
   const combinedCalciumNitrateGramsPerGallon = sumCalciumNitrateGramsPerGallon(partsAnalysis, parts)
+  const combinedUreaNitrogenPpm = sumUreaNitrogenPpm(partsAnalysis, parts)
   const calciumNitrateEcDelta = calciumNitrateLiteralDoseEcPpmDelta(partsAnalysis, parts)
 
   // Sulfur is never itself a salt-sizing input (see `saltDerivedSulfurPpm`),
@@ -117,7 +119,8 @@ export async function calculateRecipeAction(
     targetsBeforeSaltSulfur,
     combinedIncludedSalts,
     combinedCalciumChlorideGramsPerGallon,
-    combinedCalciumNitrateGramsPerGallon
+    combinedCalciumNitrateGramsPerGallon,
+    combinedUreaNitrogenPpm
   )
   const targets: ElementalTargets = {
     ...targetsBeforeSaltSulfur,
@@ -129,7 +132,8 @@ export async function calculateRecipeAction(
     combinedIncludedSalts,
     combinedCalciumChlorideGramsPerGallon,
     combinedCalciumNitrateGramsPerGallon,
-    calciumNitrateEcDelta
+    calciumNitrateEcDelta,
+    combinedUreaNitrogenPpm
   )
 
   const threeTankRecipe = calculateSeparateCalciumRecipe(
@@ -138,7 +142,8 @@ export async function calculateRecipeAction(
     dilutionRatio,
     combinedIncludedSalts,
     combinedCalciumChlorideGramsPerGallon,
-    combinedCalciumNitrateGramsPerGallon
+    combinedCalciumNitrateGramsPerGallon,
+    combinedUreaNitrogenPpm
   )
 
   const multiPartRecipe =
@@ -151,7 +156,8 @@ export async function calculateRecipeAction(
     stockVolumeLiters,
     combinedIncludedSalts,
     combinedCalciumChlorideGramsPerGallon,
-    combinedCalciumNitrateGramsPerGallon
+    combinedCalciumNitrateGramsPerGallon,
+    combinedUreaNitrogenPpm
   )
 
   return {

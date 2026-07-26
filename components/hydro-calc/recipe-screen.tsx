@@ -78,6 +78,7 @@ import {
   stockTankMlPerLiter,
   sumCalciumChlorideGramsPerGallon,
   sumCalciumNitrateGramsPerGallon,
+  sumUreaNitrogenPpm,
   unionIncludedSalts,
   type DirectMixRecipe,
   type MicroKey,
@@ -283,6 +284,13 @@ export function RecipeScreen({
   // per-part dose.
   const calciumNitrateGramsPerGallonCombined = useMemo(
     () => sumCalciumNitrateGramsPerGallon(partsAnalysis, parts),
+    [partsAnalysis, parts]
+  )
+  // Combined Urea-Nitrogen ppm contribution (see `sumUreaNitrogenPpm`) — used
+  // for the same "What your plants will get" calculation-path tooltip as
+  // Calcium Chloride's Calcium contribution above.
+  const ureaNitrogenPpmCombined = useMemo(
+    () => sumUreaNitrogenPpm(partsAnalysis, parts),
     [partsAnalysis, parts]
   )
   const estimated = useMemo(
@@ -527,11 +535,16 @@ export function RecipeScreen({
       note: "CaCl₂·2H₂O - dihydrate form, a nitrogen-free calcium source",
     },
     { key: "potassiumNitrate", name: "Potassium Nitrate", note: "KNO₃ - also called saltpeter" },
+    { key: "ammoniumNitrate", name: "Ammonium Nitrate", note: "NH₄NO₃" },
+    {
+      key: "urea",
+      name: "Urea",
+      note: "CO(NH₂)₂ - a nitrogen-only source; check your label's % Urea Nitrogen",
+    },
     { key: "monoPotassiumPhosphate", name: "Mono Potassium Phosphate", note: "MKP, KH₂PO₄" },
     { key: "monoAmmoniumPhosphate", name: "Monoammonium Phosphate", note: "MAP, NH₄H₂PO₄" },
     { key: "magnesiumSulfate", name: "Magnesium Sulfate", note: "Epsom salt, MgSO₄·7H₂O" },
     { key: "potassiumSulfate", name: "Potassium Sulfate", note: "K₂SO₄ - sulfate of potash" },
-    { key: "ammoniumNitrate", name: "Ammonium Nitrate", note: "NH₄NO₃" },
     { key: "ammoniumSulfate", name: "Ammonium Sulfate", note: "(NH₄)₂SO₄" },
     {
       key: "ironDTPA",
@@ -1085,7 +1098,14 @@ export function RecipeScreen({
           ) : (
             <>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <TargetCard label="Nitrogen (N)" value={formatPpm(targets.nitrogen)} primary />
+                <TargetCard
+                  label="Nitrogen (N)"
+                  value={formatPpm(targets.nitrogen)}
+                  primary
+                  tooltip={
+                    ureaNitrogenPpmCombined > 0 ? ureaNitrogenPpmTooltip(ureaNitrogenPpmCombined) : undefined
+                  }
+                />
                 <TargetCard label="Phosphorus (P)" value={formatPpm(targets.phosphorus)} />
                 <TargetCard label="Potassium (K)" value={formatPpm(targets.potassium)} primary />
                 <TargetCard
@@ -1367,8 +1387,8 @@ export function RecipeScreen({
               </CardTitle>
               <CardDescription>
                 {tank2IncludesMicros
-                  ? "The rest of your main salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank. Safe to combine because calcium stays in Tank 1."
-                  : "The rest of your main salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄). Safe to combine in this stock tank because calcium stays in Tank 1."}
+                  ? "The rest of your main salts (KNO₃, Urea, MKP/MAP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank. Safe to combine because calcium stays in Tank 1."
+                  : "The rest of your main salts (KNO₃, Urea, MKP/MAP, MgSO₄, K₂SO₄). Safe to combine in this stock tank because calcium stays in Tank 1."}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -1382,6 +1402,11 @@ export function RecipeScreen({
                   name={RAW_SALTS.ammoniumNitrate.name}
                   formula={RAW_SALTS.ammoniumNitrate.formula}
                   amount={scaledGrams(threeTankRecipe.tank2.ammoniumNitrate)}
+                />
+                <SaltRow
+                  name={RAW_SALTS.urea.name}
+                  formula={RAW_SALTS.urea.formula}
+                  amount={scaledGrams(threeTankRecipe.tank2.urea)}
                 />
                 <SaltRow
                   name={RAW_SALTS.monoPotassiumPhosphate.name}
@@ -1896,6 +1921,23 @@ function calciumChloridePpmTooltip(gramsPerGallon: number, ppm: number): React.R
       <p className="font-mono text-[11px] leading-snug">
         {gramsPerGallon} g/gal ÷ {LITERS_PER_GALLON} L/gal × 1000 mg/g × {(RAW_SALTS.calciumChloride.ca * 100).toFixed(2)}%
         Ca = {formatPpm(ppm)}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Calculation-path tooltip for "how does the % Urea Nitrogen label value
+ * become elemental Nitrogen ppm" — shown on the Nitrogen target card
+ * whenever Urea is contributing to the total (see
+ * `ureaNitrogenPpmForPart` / `sumUreaNitrogenPpm`).
+ */
+function ureaNitrogenPpmTooltip(ppm: number): React.ReactNode {
+  return (
+    <div className="space-y-1.5">
+      <p>
+        Includes {formatPpm(ppm)} of elemental Nitrogen from your Urea&apos;s % Urea Nitrogen, on
+        top of whatever your other Nitrogen source(s) contribute.
       </p>
     </div>
   )

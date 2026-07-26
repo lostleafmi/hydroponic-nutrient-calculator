@@ -85,6 +85,7 @@ export interface SaltAmounts {
   calciumCarbonate: number
   calciumChloride: number
   potassiumNitrate: number
+  urea: number
   monoPotassiumPhosphate: number
   monoAmmoniumPhosphate: number
   magnesiumSulfate: number
@@ -210,6 +211,54 @@ export function calciumChlorideElementalCalciumPpm(gramsPerGallon: number): numb
   return elementalPpmFromDosePerGallon(gramsPerGallon, RAW_SALTS.calciumChloride.ca)
 }
 
+/**
+ * Element ppm in the final working solution from a single % (by weight) in
+ * the concentrate. ppm = (% / 100) × g concentrate per L × 1000 mg/g.
+ *
+ * This is the same unit conversion `calculateElementalTargets` applies to
+ * every guaranteed-analysis field (N, P₂O₅, K₂O, Ca, Mg, S, micros) — kept
+ * here (rather than duplicated in the server-only solver) so
+ * `ureaNitrogenPpmForPart` below, and any other client-safe %-based
+ * calculation, can share it.
+ */
+export function percentToPpm(percent: number, concentrateGramsPerLiter: number): number {
+  return (percent / 100) * concentrateGramsPerLiter * 1000
+}
+
+/**
+ * Elemental Nitrogen ppm contributed by a part's own "% Urea Nitrogen"
+ * field (the value listed on the label, e.g. "Urea Nitrogen 46%") — only
+ * meaningful when that part has Urea checked in "Salts & Inputs Included".
+ * Uses the same %-to-ppm conversion as the main Guaranteed Analysis %N
+ * field (see `percentToPpm`), scaled by this part's own dose (via
+ * `getConcentrateGramsPerLiter`), so it folds into the overall Nitrogen
+ * target the same way Calcium Chloride's dose folds into the Calcium
+ * target — see `calculateElementalTargets`.
+ */
+export function ureaNitrogenPpmForPart(part: NutrientPart, analysis: PartAnalysis): number {
+  if (!analysis.includedSalts?.urea) return 0
+  const concentrateGramsPerLiter = getConcentrateGramsPerLiter(part)
+  if (concentrateGramsPerLiter <= 0) return 0
+  return percentToPpm(parsePositive(analysis.ureaNitrogenPercent), concentrateGramsPerLiter)
+}
+
+/**
+ * Sum every part's Urea-Nitrogen ppm contribution (see
+ * `ureaNitrogenPpmForPart`). Used alongside `unionIncludedSalts` by the
+ * recipe layouts that recombine nutrients across parts by chemistry rather
+ * than by bottle (Separate Nitrogen, Direct Mix, EC estimate), so a %
+ * Urea Nitrogen entered on any part still applies to those combined
+ * recipes — mirroring `sumCalciumChlorideGramsPerGallon`.
+ */
+export function sumUreaNitrogenPpm(partsAnalysis: PartAnalysis[], parts: NutrientPart[]): number {
+  const partsById = new Map(parts.map((part) => [part.id, part]))
+  return partsAnalysis.reduce((total, analysis) => {
+    const part = partsById.get(analysis.id)
+    if (!part) return total
+    return total + ureaNitrogenPpmForPart(part, analysis)
+  }, 0)
+}
+
 export interface TankRecipe {
   tankA: SaltAmounts
   tankB: SaltAmounts
@@ -242,6 +291,13 @@ export const RAW_SALTS = {
   // target), but is kept here for the EC estimate, which does account for it.
   calciumChloride: { name: "Calcium Chloride", formula: "CaCl₂·2H₂O", ca: 0.2726, cl: 0.4823 },
   potassiumNitrate: { name: "Potassium Nitrate", formula: "KNO₃", k: 0.387, n: 0.139 },
+  // Pure Urea is 46.6% N by weight. The user-entered "% Urea Nitrogen" label
+  // value drives how much elemental Nitrogen this contributes (see
+  // `ureaNitrogenPpmForPart`); this fixed fraction is only used to convert
+  // that known Nitrogen ppm back into grams of dry Urea for the stock tank
+  // (and for the EC/solubility estimates), the same way every other salt's
+  // grams are derived from an elemental target.
+  urea: { name: "Urea", formula: "CO(NH₂)₂", n: 0.466 },
   monoPotassiumPhosphate: { name: "Mono Potassium Phosphate (MKP)", formula: "KH₂PO₄", k: 0.287, p: 0.228 },
   monoAmmoniumPhosphate: { name: "Monoammonium Phosphate (MAP)", formula: "NH₄H₂PO₄", n: 0.122, p: 0.269 },
   magnesiumSulfate: { name: "Magnesium Sulfate (Epsom Salt)", formula: "MgSO₄·7H₂O", mg: 0.099, s: 0.130 },
@@ -281,6 +337,7 @@ export interface IncludedSaltsSelection {
   calciumCarbonate: boolean
   calciumChloride: boolean
   potassiumNitrate: boolean
+  urea: boolean
   potassiumSulfate: boolean
   monoPotassiumPhosphate: boolean
   monoAmmoniumPhosphate: boolean
@@ -295,6 +352,7 @@ export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
   calciumCarbonate: false,
   calciumChloride: false,
   potassiumNitrate: false,
+  urea: false,
   potassiumSulfate: false,
   monoPotassiumPhosphate: false,
   monoAmmoniumPhosphate: false,
@@ -309,6 +367,7 @@ export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
   calciumCarbonate: true,
   calciumChloride: true,
   potassiumNitrate: true,
+  urea: true,
   potassiumSulfate: true,
   monoPotassiumPhosphate: true,
   monoAmmoniumPhosphate: true,
@@ -338,6 +397,7 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   { id: "calciumCarbonate", label: "Calcium Carbonate", sublabel: "", saltKeys: ["calciumCarbonate"] },
   { id: "calciumChloride", label: "Calcium Chloride", sublabel: "", saltKeys: ["calciumChloride"] },
   { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
+  { id: "urea", label: "Urea", sublabel: "", saltKeys: ["urea"] },
   { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
   {
     id: "monoPotassiumPhosphate",
@@ -462,6 +522,7 @@ export const SALT_DISPLAY_ORDER: SaltKey[] = [
   "calciumChloride",
   "potassiumNitrate",
   "ammoniumNitrate",
+  "urea",
   "monoPotassiumPhosphate",
   "monoAmmoniumPhosphate",
   "magnesiumSulfate",
@@ -510,7 +571,10 @@ export interface DirectMixRecipe {
  * concentrations are low enough that the same ions coexist safely.
  *
  * Tank A — calcium-side (Ca²⁺ source, incl. Calcium Chloride + compatible
- *          nitrates / chelated iron)
+ *          nitrates / chelated iron). Urea is a neutral, non-ionic molecule
+ *          that doesn't react with Ca²⁺, PO₄³⁻, or SO₄²⁻, so it's grouped
+ *          here alongside the other Nitrogen sources rather than for any
+ *          precipitation-avoidance reason.
  * Tank B — phosphate / sulfate-side (PO₄³⁻ + SO₄²⁻ salts, plus the chelated
  *          micronutrients — chelates are compatible with both tanks
  *          chemically, but grouped here alongside the other non-Calcium
@@ -522,6 +586,7 @@ export const TANK_A_SALTS = [
   "calciumChloride",
   "potassiumNitrate",
   "ammoniumNitrate",
+  "urea",
   "ironDTPA",
 ] as const satisfies readonly SaltKey[]
 
@@ -547,10 +612,10 @@ export const TANK_B_SALTS = [
  *          Calcium Carbonate when used instead (or alongside) as a
  *          nitrogen-free calcium source (taper Tank 1 for end-of-flower N
  *          reduction when Calcium Nitrate is the source)
- * Tank 2 — Everything else: remaining macros (KNO₃, MKP/MAP, MgSO₄, K₂SO₄)
- *          plus the micronutrients (Fe-DTPA, Mn/Zn/Cu EDTA chelates, boric
- *          acid, sodium molybdate) — always merged together into one clean
- *          Tank 2 rather than split into a separate micros tank.
+ * Tank 2 — Everything else: remaining macros (KNO₃, MKP/MAP, MgSO₄, K₂SO₄,
+ *          Urea) plus the micronutrients (Fe-DTPA, Mn/Zn/Cu EDTA chelates,
+ *          boric acid, sodium molybdate) — always merged together into one
+ *          clean Tank 2 rather than split into a separate micros tank.
  */
 export const TANK_1_SALTS = [
   "calciumNitrate",
@@ -561,6 +626,7 @@ export const TANK_1_SALTS = [
 export const TANK_2_SALTS = [
   "potassiumNitrate",
   "ammoniumNitrate",
+  "urea",
   "monoPotassiumPhosphate",
   "monoAmmoniumPhosphate",
   "magnesiumSulfate",
@@ -632,6 +698,8 @@ export const SOLUBILITY_LIMITS_G_PER_L: Record<SaltKey, number> = {
   // Dihydrate form, ~74.5 g/100 mL (745 g/L) at 20 °C — highly soluble.
   calciumChloride: 745,
   potassiumNitrate: 316,
+  // Highly soluble — 1080 g/L at 20 °C (Merck Index / OECD SIDS data).
+  urea: 1080,
   monoPotassiumPhosphate: 226,
   monoAmmoniumPhosphate: 368,
   magnesiumSulfate: 710,
@@ -829,6 +897,7 @@ export function emptySaltAmounts(): SaltAmounts {
     calciumCarbonate: 0,
     calciumChloride: 0,
     potassiumNitrate: 0,
+    urea: 0,
     monoPotassiumPhosphate: 0,
     monoAmmoniumPhosphate: 0,
     magnesiumSulfate: 0,
@@ -902,6 +971,7 @@ export function isCalciumNitrateSoleDoseSource(selection: IncludedSaltsSelection
   const OTHER_MACRO_KEYS: Array<keyof IncludedSaltsSelection> = [
     "calciumCarbonate",
     "potassiumNitrate",
+    "urea",
     "potassiumSulfate",
     "monoPotassiumPhosphate",
     "monoAmmoniumPhosphate",

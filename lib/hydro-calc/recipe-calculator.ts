@@ -26,6 +26,7 @@ import {
   gramsFromFeedRatePerGallon,
   isCalciumNitrateSoleDoseSource,
   parsePositive,
+  percentToPpm,
   RAW_SALTS,
   SALT_DISPLAY_ORDER,
   TANK_1_SALTS,
@@ -33,6 +34,7 @@ import {
   TANK_3_SALTS,
   TANK_A_SALTS,
   TANK_B_SALTS,
+  ureaNitrogenPpmForPart,
   MICRO_KEYS,
   MICRO_TO_FE_RATIO,
   type DirectAddCalciumCarbonate,
@@ -49,14 +51,6 @@ import {
   type TankRecipe,
   type ThreeTankRecipe,
 } from "@/lib/hydro-calc/recipe-types"
-
-/**
- * Element ppm in the final working solution from a single % (by weight) in the concentrate.
- * ppm = (% / 100) × g concentrate per L × 1000 mg/g
- */
-function percentToPpm(percent: number, concentrateGramsPerLiter: number): number {
-  return (percent / 100) * concentrateGramsPerLiter * 1000
-}
 
 /** Per-part elemental contribution, summed across all dosed parts */
 export function calculateElementalTargets(
@@ -101,6 +95,14 @@ export function calculateElementalTargets(
     if (analysis.includedSalts?.calciumChloride) {
       totals.calcium += calciumChlorideElementalCalciumPpm(parsePositive(analysis.calciumChlorideGramsPerGallon))
     }
+
+    // Urea's "% Urea Nitrogen" label value (see the Guaranteed Analysis
+    // screen) is entered SEPARATELY from the main %N field above — folded
+    // in here the same way Calcium Chloride's dose is folded into the
+    // Calcium target, so it reaches the Nitrogen target, the stock-tank
+    // solver, the EC estimate, and the "What your plants will get" ppm
+    // breakdown consistently. See `ureaNitrogenPpmForPart`.
+    totals.nitrogen += ureaNitrogenPpmForPart(feedingPart, analysis)
   }
 
   return totals
@@ -221,7 +223,7 @@ function ppmFromSaltInStock(
 
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
- * Tank A — Ca(NO₃)₂, CaCl₂, KNO₃/NH₄NO₃ (remaining N), Fe-DTPA  (see TANK_A_SALTS)
+ * Tank A — Ca(NO₃)₂, CaCl₂, KNO₃/NH₄NO₃ (remaining N), Urea, Fe-DTPA  (see TANK_A_SALTS)
  * Tank B — MKP/MAP (Phosphorus), MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), chelated micronutrients (Mn/Zn/Cu-EDTA, boric acid, sodium molybdate)  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
@@ -270,7 +272,18 @@ export function calculateStockTankRecipe(
    * that case. Zero/omitted falls back to the existing ppm-target-derived
    * sizing.
    */
-  calciumNitrateGramsPerGallon: number = 0
+  calciumNitrateGramsPerGallon: number = 0,
+  /**
+   * Elemental Nitrogen ppm already known to come specifically from Urea
+   * (see `ureaNitrogenPpmForPart` / `sumUreaNitrogenPpm`) — already folded
+   * into `targets.nitrogen` by `calculateElementalTargets`. Sizing Urea
+   * off this known amount directly (rather than leaving it to the generic
+   * "remaining Nitrogen" logic below, which would just as happily reach
+   * for KNO₃/NH₄NO₃ instead) keeps the resolved recipe faithful to what
+   * the user actually declared for Urea specifically — the same way MAP's
+   * own Nitrogen contribution is subtracted out before that logic runs.
+   */
+  ureaNitrogenPpm: number = 0
 ): TankRecipe {
   const tankA = emptySaltAmounts()
   const tankB = emptySaltAmounts()
@@ -587,6 +600,17 @@ export function calculateStockTankRecipe(
     }
   }
 
+  // Urea's Nitrogen contribution is a known, real declared amount (the
+  // user's own "% Urea Nitrogen" label value — see the doc comment on
+  // `ureaNitrogenPpm` above), so it's sized off that directly rather than
+  // left to the generic "remaining Nitrogen" priority order below — the
+  // same treatment MAP's Nitrogen gets just below.
+  let ureaGrams = 0
+  if (ureaNitrogenPpm > 0 && isEnabled("urea")) {
+    ureaGrams = saltGramsForTargetPpm(ureaNitrogenPpm, RAW_SALTS.urea.n, stockVolumeLiters, dilutionRatio)
+  }
+  const nitrogenFromUrea = ppmFromSaltInStock(ureaGrams, RAW_SALTS.urea.n, stockVolumeLiters, dilutionRatio)
+
   // MAP's Nitrogen contribution (if any) is folded into the Nitrogen target
   // before the remaining-Nitrogen math below runs — otherwise it would chase
   // the *full* Nitrogen target with another salt on top of what MAP already
@@ -597,7 +621,7 @@ export function calculateStockTankRecipe(
     stockVolumeLiters,
     dilutionRatio
   )
-  const nitrogenTargetAfterMap = Math.max(0, targets.nitrogen - nitrogenFromMap)
+  const nitrogenTargetAfterMap = Math.max(0, targets.nitrogen - nitrogenFromMap - nitrogenFromUrea)
 
   // Priority for the remaining N (after MAP's fixed contribution, if any):
   // KNO₃ → more Ca(NO₃)₂ → NH₄NO₃ → (NH₄)₂SO₄
@@ -658,6 +682,11 @@ export function calculateStockTankRecipe(
   }
 
   assignToTankA("calciumNitrate", calciumNitrateGrams)
+  // Urea is a neutral, non-ionic molecule with no precipitation conflicts —
+  // it's grouped into Tank A alongside the other Nitrogen sources (Calcium
+  // Nitrate, Potassium Nitrate, Ammonium Nitrate) rather than for any
+  // chemistry-driven reason. See the `TANK_A_SALTS` doc comment.
+  assignToTankA("urea", ureaGrams)
   // Calcium Chloride is soluble at stock-tank strength, so — unlike Calcium
   // Carbonate — it's assigned straight into Tank A alongside Calcium Nitrate
   // rather than surfaced as a direct reservoir addition.
@@ -785,7 +814,8 @@ export function calculateSeparateCalciumRecipe(
   dilutionRatio: number,
   includedSalts?: IncludedSaltsSelection,
   calciumChlorideGramsPerGallon: number = 0,
-  calciumNitrateGramsPerGallon: number = 0
+  calciumNitrateGramsPerGallon: number = 0,
+  ureaNitrogenPpm: number = 0
 ): ThreeTankRecipe {
   const {
     tankA,
@@ -799,13 +829,14 @@ export function calculateSeparateCalciumRecipe(
     dilutionRatio,
     includedSalts,
     calciumChlorideGramsPerGallon,
-    calciumNitrateGramsPerGallon
+    calciumNitrateGramsPerGallon,
+    ureaNitrogenPpm
   )
 
   const tank1 = emptySaltAmounts()
   const tank2 = emptySaltAmounts()
 
-  const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>(["potassiumNitrate", "ammoniumNitrate"])
+  const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>(["potassiumNitrate", "ammoniumNitrate", "urea"])
 
   for (const key of TANK_1_SALTS) {
     tank1[key] = tankA[key]
@@ -906,7 +937,8 @@ export function calculateMultiPartStockTankRecipe(
       dilutionRatio,
       analysis.includedSalts,
       parsePositive(analysis.calciumChlorideGramsPerGallon),
-      calciumNitrateGramsPerGallonForPart(analysis, feedingPart)
+      calciumNitrateGramsPerGallonForPart(analysis, feedingPart),
+      ureaNitrogenPpmForPart(feedingPart, analysis)
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
@@ -985,7 +1017,8 @@ export function calculateDoserMultiPartRecipe(
       dilutionRatio,
       analysis.includedSalts,
       parsePositive(analysis.calciumChlorideGramsPerGallon),
-      calciumNitrateGramsPerGallonForPart(analysis, feedingPart)
+      calciumNitrateGramsPerGallonForPart(analysis, feedingPart),
+      ureaNitrogenPpmForPart(feedingPart, analysis)
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
@@ -1036,7 +1069,8 @@ export function calculateDirectMixRecipe(
   reservoirLiters: number,
   includedSalts?: IncludedSaltsSelection,
   calciumChlorideGramsPerGallon: number = 0,
-  calciumNitrateGramsPerGallon: number = 0
+  calciumNitrateGramsPerGallon: number = 0,
+  ureaNitrogenPpm: number = 0
 ): DirectMixRecipe {
   // A 1:1 stock tank of exactly reservoirLiters is equivalent to working-strength direct mix.
   const stockRecipe = calculateStockTankRecipe(
@@ -1045,7 +1079,8 @@ export function calculateDirectMixRecipe(
     1,
     includedSalts,
     calciumChlorideGramsPerGallon,
-    calciumNitrateGramsPerGallon
+    calciumNitrateGramsPerGallon,
+    ureaNitrogenPpm
   )
 
   const combined = emptySaltAmounts()
@@ -1136,6 +1171,9 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
   // Carbonate's own conductivity contribution is omitted (like the
   // micronutrient sulfates) — Calcium Carbonate's near-zero solubility keeps
   // any real-world dose small enough that the omission is negligible.
+  // Urea (`salts.urea`) is likewise never added to the ion sum below — it's
+  // a neutral, non-ionic molecule that doesn't dissociate in solution, so it
+  // contributes essentially nothing to real-world EC.
   const caPpm =
     salts.calciumNitrate * RAW_SALTS.calciumNitrate.ca * 1000 +
     salts.calciumCarbonate * RAW_SALTS.calciumCarbonate.ca * 1000 +
@@ -1222,7 +1260,8 @@ export function saltDerivedSulfurPpm(
   targets: ElementalTargets,
   includedSalts?: IncludedSaltsSelection,
   calciumChlorideGramsPerGallon: number = 0,
-  calciumNitrateGramsPerGallon: number = 0
+  calciumNitrateGramsPerGallon: number = 0,
+  ureaNitrogenPpm: number = 0
 ): number {
   const stockRecipe = calculateStockTankRecipe(
     targets,
@@ -1230,7 +1269,8 @@ export function saltDerivedSulfurPpm(
     1,
     includedSalts,
     calciumChlorideGramsPerGallon,
-    calciumNitrateGramsPerGallon
+    calciumNitrateGramsPerGallon,
+    ureaNitrogenPpm
   )
   // Magnesium Sulfate, Potassium Sulfate, and Ammonium Sulfate are always
   // assigned to Tank B (see `calculateStockTankRecipe`).
@@ -1264,7 +1304,8 @@ export function estimateEcFromElementalTargets(
   calciumNitrateLiteralDoseEcDelta: { calciumPpmDelta: number; nitrogenPpmDelta: number } = {
     calciumPpmDelta: 0,
     nitrogenPpmDelta: 0,
-  }
+  },
+  ureaNitrogenPpm: number = 0
 ): number | null {
   const hasMacro =
     targets.nitrogen > 0 ||
@@ -1282,7 +1323,8 @@ export function estimateEcFromElementalTargets(
     1,
     includedSalts,
     calciumChlorideGramsPerGallon,
-    calciumNitrateGramsPerGallon
+    calciumNitrateGramsPerGallon,
+    ureaNitrogenPpm
   )
   const salts = emptySaltAmounts()
   for (const key of Object.keys(salts) as SaltKey[]) {

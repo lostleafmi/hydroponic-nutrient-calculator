@@ -11,6 +11,7 @@ import { ImageLightbox } from "@/components/hydro-calc/image-lightbox"
 import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical, AlertCircle, AlertTriangle, ZoomIn } from "lucide-react"
 import {
   DEFAULT_INCLUDED_SALTS,
+  parsePositive,
   SALT_CHECKBOX_OPTIONS,
   type IncludedSaltsSelection,
 } from "@/lib/hydro-calc/recipe-types"
@@ -43,6 +44,14 @@ export interface PartAnalysis {
    * target instead of leaving Calcium Chloride at zero.
    */
   calciumChlorideGramsPerGallon?: string
+  /**
+   * The "% Urea Nitrogen" value listed on this part's label — required
+   * (unlike Calcium Chloride's optional dose above) when
+   * `includedSalts.urea` is checked, since there's no sensible fallback:
+   * Urea's Nitrogen contribution can't be inferred from anything else on
+   * the label. See `ureaNitrogenPpmForPart`.
+   */
+  ureaNitrogenPercent?: string
 }
 
 // Combined analysis from all parts (for backwards compatibility)
@@ -91,6 +100,11 @@ export function GuaranteedAnalysisScreen({
   onNext 
 }: GuaranteedAnalysisScreenProps) {
   const [saltErrorPartIds, setSaltErrorPartIds] = useState<Set<string>>(new Set())
+  // Tracks parts where Urea is checked but its required "% Urea Nitrogen"
+  // field is blank/invalid — unlike Calcium Chloride's optional dose, there's
+  // no sensible fallback for Urea's Nitrogen contribution, so this blocks
+  // "Continue to Feeding Rates" the same way `saltErrorPartIds` does.
+  const [ureaErrorPartIds, setUreaErrorPartIds] = useState<Set<string>>(new Set())
 
   const addPart = () => {
     const partLetter = String.fromCharCode(65 + partsAnalysis.length)
@@ -140,17 +154,45 @@ export function GuaranteedAnalysisScreen({
         return next
       })
     }
+
+    // Unchecking Urea means its % field is no longer required, so any
+    // outstanding error for this part no longer applies.
+    if (saltId === "urea" && !checked) {
+      setUreaErrorPartIds((prev) => {
+        if (!prev.has(partId)) return prev
+        const next = new Set(prev)
+        next.delete(partId)
+        return next
+      })
+    }
+  }
+
+  const updateUreaNitrogenPercent = (partId: string, value: string) => {
+    updatePart(partId, { ureaNitrogenPercent: value })
+    if (parsePositive(value) > 0) {
+      setUreaErrorPartIds((prev) => {
+        if (!prev.has(partId)) return prev
+        const next = new Set(prev)
+        next.delete(partId)
+        return next
+      })
+    }
   }
 
   const handleNext = () => {
     const partsMissingSalts = partsAnalysis.filter(
       (part) => !SALT_CHECKBOX_OPTIONS.some((opt) => part.includedSalts[opt.id])
     )
-    if (partsMissingSalts.length > 0) {
+    const partsMissingUreaPercent = partsAnalysis.filter(
+      (part) => part.includedSalts.urea && parsePositive(part.ureaNitrogenPercent) <= 0
+    )
+    if (partsMissingSalts.length > 0 || partsMissingUreaPercent.length > 0) {
       setSaltErrorPartIds(new Set(partsMissingSalts.map((p) => p.id)))
+      setUreaErrorPartIds(new Set(partsMissingUreaPercent.map((p) => p.id)))
       return
     }
     setSaltErrorPartIds(new Set())
+    setUreaErrorPartIds(new Set())
     onNext()
   }
 
@@ -200,11 +242,13 @@ export function GuaranteedAnalysisScreen({
               index={index}
               canRemove={partsAnalysis.length > 1}
               hasSaltError={saltErrorPartIds.has(part.id)}
+              hasUreaError={ureaErrorPartIds.has(part.id)}
               onUpdate={(updates) => updatePart(part.id, updates)}
               onRemove={() => removePart(part.id)}
               onFileUpload={(file) => handleFileUpload(part.id, file)}
               onRemovePhoto={() => removePhoto(part.id)}
               onToggleSalt={(saltId, checked) => toggleSalt(part.id, saltId, checked)}
+              onUreaNitrogenPercentChange={(value) => updateUreaNitrogenPercent(part.id, value)}
             />
           ))}
 
@@ -322,21 +366,25 @@ function PartAnalysisCard({
   index,
   canRemove,
   hasSaltError,
+  hasUreaError,
   onUpdate,
   onRemove,
   onFileUpload,
   onRemovePhoto,
   onToggleSalt,
+  onUreaNitrogenPercentChange,
 }: {
   part: PartAnalysis
   index: number
   canRemove: boolean
   hasSaltError: boolean
+  hasUreaError: boolean
   onUpdate: (updates: Partial<PartAnalysis>) => void
   onRemove: () => void
   onFileUpload: (file: File) => void
   onRemovePhoto: () => void
   onToggleSalt: (saltId: keyof IncludedSaltsSelection, checked: boolean) => void
+  onUreaNitrogenPercentChange: (value: string) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -657,6 +705,39 @@ function PartAnalysisCard({
                       className="h-7 w-20 border-2 border-border bg-background text-right font-mono text-xs"
                     />
                     <span className="text-xs text-muted-foreground">g/gal</span>
+                  </div>
+                )}
+                {option.id === "urea" && (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Label
+                        htmlFor={`salt-${part.id}-${option.id}-percent`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        % Urea Nitrogen (required)
+                      </Label>
+                      <Input
+                        id={`salt-${part.id}-${option.id}-percent`}
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        required
+                        value={part.ureaNitrogenPercent ?? ""}
+                        onChange={(e) => onUreaNitrogenPercentChange(e.target.value)}
+                        placeholder="0.0"
+                        aria-invalid={hasUreaError}
+                        className={`h-7 w-20 border-2 bg-background text-right font-mono text-xs ${
+                          hasUreaError ? "border-destructive" : "border-border"
+                        }`}
+                      />
+                      <span className="text-xs text-muted-foreground">%</span>
+                    </div>
+                    {hasUreaError && (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-destructive">
+                        <AlertCircle className="h-3 w-3 shrink-0" />
+                        Enter the % Urea Nitrogen from the label to continue.
+                      </p>
+                    )}
                   </div>
                 )}
               </SaltCheckboxRow>
