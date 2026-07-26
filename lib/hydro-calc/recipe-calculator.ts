@@ -1287,13 +1287,18 @@ const EC_ADDITIVE_BUFFER_MS_CM = 0.08
  * often isn't required on fertilizer labels — showed 0 ppm Sulfur even when
  * Magnesium Sulfate was very much dissolved in the reservoir.
  *
- * Deliberately additive on top of any Guaranteed-Analysis-declared Sulfur
- * (folded into `targets.sulfur` already by `calculateElementalTargets`),
- * not a replacement — a real product's declared %S and the solver's own
- * choice of raw salt to hit a DIFFERENT target (Mg/K/N) are independent
- * sources of real, physically dissolved Sulfur. Only ever adds — never
- * invents Sulfur when no sulfate salt actually gets allocated (all three
- * terms below are naturally 0 in that case).
+ * Intended as a FALLBACK for when the Guaranteed Analysis declares no Sulfur
+ * at all (0% / field omitted, common since Sulfur often isn't a required
+ * label field) — the caller (`calculateRecipeAction`) only folds this into
+ * `targets.sulfur` when `calculateElementalTargets`'s own GA-derived Sulfur
+ * is 0. When a label DOES declare a real %S, that declared value already
+ * reflects the product's total elemental Sulfur — including whatever it
+ * derives from its own sulfate salts — so this estimate must NOT be summed
+ * on top of it; doing so double-counts the same Sulfur and overshoots the
+ * target (e.g. a 2% S label, ~63 ppm, showing ~160 ppm because ~97 ppm of
+ * solver-side MgSO4/K2SO4-derived Sulfur was being added on top). Only ever
+ * adds — never invents Sulfur when no sulfate salt actually gets allocated
+ * (all three terms below are naturally 0 in that case).
  *
  * Computed the same layout-independent way `estimateEcFromElementalTargets`
  * does (1 L stock at a 1:1 ratio — ppm at working strength doesn't depend on

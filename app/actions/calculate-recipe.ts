@@ -61,12 +61,14 @@ export interface CalculateRecipeResult {
    */
   calciumNitrateEcPpmDelta: { calciumPpmDelta: number; nitrogenPpmDelta: number }
   /**
-   * How much of `targets.sulfur` above comes from Magnesium Sulfate /
+   * How much of `targets.sulfur` above is filled in from Magnesium Sulfate /
    * Potassium Sulfate / Ammonium Sulfate actually being allocated in the
-   * resolved recipe, on top of whatever the Guaranteed Analysis itself
-   * declared (see `saltDerivedSulfurPpm`). Zero when no sulfate salt ends
-   * up used. Exposed so the UI can show this piece of the Sulfur
-   * calculation path.
+   * resolved recipe (see `saltDerivedSulfurPpm`). Only ever non-zero when
+   * the Guaranteed Analysis itself declares 0 / no Sulfur — when the label
+   * declares a real %S, that value is used as-is and this is always 0, since
+   * the declared %S already reflects the product's total elemental Sulfur
+   * (including whatever it derives from its own sulfate salts). Exposed so
+   * the UI can show this piece of the Sulfur calculation path.
    */
   saltDerivedSulfurPpm: number
   threeTankRecipe: ThreeTankRecipe
@@ -112,16 +114,28 @@ export async function calculateRecipeAction(
   // Sulfur is never itself a salt-sizing input (see `saltDerivedSulfurPpm`),
   // so folding in whatever Sulfur the resolved recipe's own Magnesium
   // Sulfate / Potassium Sulfate / Ammonium Sulfate allocation brings along
-  // — on top of whatever the Guaranteed Analysis already declared — can't
-  // change any other target or salt amount below. Safe to do once, right
-  // here, before every recipe layout is built from `targets`.
-  const sulfurFromSulfateSalts = saltDerivedSulfurPpm(
-    targetsBeforeSaltSulfur,
-    combinedIncludedSalts,
-    combinedCalciumChlorideGramsPerGallon,
-    combinedCalciumNitrateGramsPerGallon,
-    combinedUreaNitrogenPpm
-  )
+  // can't change any other target or salt amount below. Safe to do once,
+  // right here, before every recipe layout is built from `targets`.
+  //
+  // IMPORTANT: only fill in salt-derived Sulfur when the Guaranteed Analysis
+  // itself is silent on Sulfur (0 / not declared). When a label *does*
+  // declare a %S, that declared value already reflects the real, total
+  // elemental Sulfur the product delivers — including whatever comes from
+  // its own sulfate salts. Adding the solver's independently-computed
+  // salt-derived estimate on top in that case double-counts the same
+  // Sulfur and overshoots the target (e.g. a 2% S label — ~63 ppm — was
+  // showing ~160 ppm because ~97 ppm of solver-side MgSO4/K2SO4-derived
+  // Sulfur was being summed on top of the label's own 63 ppm).
+  const sulfurFromSulfateSalts =
+    targetsBeforeSaltSulfur.sulfur > 0
+      ? 0
+      : saltDerivedSulfurPpm(
+          targetsBeforeSaltSulfur,
+          combinedIncludedSalts,
+          combinedCalciumChlorideGramsPerGallon,
+          combinedCalciumNitrateGramsPerGallon,
+          combinedUreaNitrogenPpm
+        )
   const targets: ElementalTargets = {
     ...targetsBeforeSaltSulfur,
     sulfur: targetsBeforeSaltSulfur.sulfur + sulfurFromSulfateSalts,
