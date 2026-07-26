@@ -7,7 +7,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical, AlertCircle, AlertTriangle } from "lucide-react"
+import { ImageLightbox } from "@/components/hydro-calc/image-lightbox"
+import { HelpCircle, ArrowRight, Upload, Camera, Check, Plus, Trash2, ImageIcon, X, FlaskConical, AlertCircle, AlertTriangle, ZoomIn } from "lucide-react"
 import {
   DEFAULT_INCLUDED_SALTS,
   SALT_CHECKBOX_OPTIONS,
@@ -297,6 +298,7 @@ function PartAnalysisCard({
   onToggleSalt: (saltId: keyof IncludedSaltsSelection, checked: boolean) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -485,15 +487,32 @@ function PartAnalysisCard({
             />
             {part.photoUrl ? (
               <div className="space-y-3 w-full">
-                <div className="relative flex h-64 items-center justify-center rounded-lg overflow-hidden border border-border bg-background">
+                <button
+                  type="button"
+                  onClick={() => setLightboxOpen(true)}
+                  aria-label={`View full-size photo of ${part.name} label`}
+                  className="group relative flex h-64 w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-lg border border-border bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
                   <img 
                     src={part.photoUrl} 
                     alt={`Label for ${part.name}`}
                     className="max-h-full max-w-full object-contain"
                   />
-                </div>
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
+                    <span className="flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white">
+                      <ZoomIn className="h-3.5 w-3.5" />
+                      Tap to zoom
+                    </span>
+                  </div>
+                </button>
+                <ImageLightbox
+                  src={part.photoUrl}
+                  alt={`Label for ${part.name}`}
+                  open={lightboxOpen}
+                  onOpenChange={setLightboxOpen}
+                />
                 <p className="text-sm text-muted-foreground">
-                  Photo uploaded. Use it as a reference while entering values manually.
+                  Photo uploaded. Use it as a reference while entering values manually. Tap the photo to zoom in and read small text.
                 </p>
                 <div className="flex items-center justify-center gap-2">
                   <Button
