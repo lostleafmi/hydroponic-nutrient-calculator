@@ -937,6 +937,41 @@ export function roundDownToNiceRatio(ratio: number): number {
 }
 
 /**
+ * Practical ceiling for the *auto-recommended* dilution ratio — separate
+ * from (and always ≤ than) the purely mathematical solubility ceiling
+ * (`maxSafeDilutionRatio`).
+ *
+ * `checkTankSolubility`'s safe ratio is ratio-invariant: it depends only on
+ * each salt's elemental target/dose relative to its own solubility limit,
+ * never on the resulting stock-tank/reservoir size. That's correct for
+ * "will this salt precipitate," but it has no opinion on whether the ratio
+ * is something a real stock tank would ever run at. A part with an
+ * especially small feed-chart dose — e.g. a liquid-line "booster" bottle
+ * dosed at well under 1 mL/gal, or a Calcium Chloride top-up dose that's a
+ * tiny fraction of the Calcium target — can mathematically tolerate a ratio
+ * in the hundreds (1:600, 1:800+) without any salt actually approaching its
+ * solubility limit, since so little of it is needed either way. Nobody
+ * mixes a stock tank that concentrated by hand, and even the strongest
+ * common commercial doser/proportioner tops out around 1:200 (see
+ * `DOSER_PRESET_RATIOS`) — so this doubles as a sensible ceiling for manual
+ * A+B / multi-tank setups too, not just doser mode.
+ *
+ * Only caps the *auto-picked* recommendation — a user who explicitly types
+ * in a higher custom ratio is still free to do so.
+ */
+export const MAX_PRACTICAL_DILUTION_RATIO = 200
+
+/**
+ * `roundDownToNiceRatio`, clamped to `MAX_PRACTICAL_DILUTION_RATIO` — this is
+ * the "nice number" callers should actually auto-apply. Kept as a distinct
+ * export (rather than folding the cap into `roundDownToNiceRatio` itself) so
+ * the underlying salt-safe math stays inspectable/testable on its own.
+ */
+export function pickPracticalAutoDilutionRatio(maxSafeDilutionRatio: number): number {
+  return Math.min(roundDownToNiceRatio(maxSafeDilutionRatio), MAX_PRACTICAL_DILUTION_RATIO)
+}
+
+/**
  * Common dilution ratios that commercial dosers / proportioners are built
  * around. Listed high-to-low so the picker can find the strongest preset that
  * still leaves the stock tank safely in solution.

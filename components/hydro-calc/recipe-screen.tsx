@@ -70,10 +70,11 @@ import {
   isCalciumNitrateSoleDoseSource,
   isSeparateNitrogenAvailable,
   LITERS_PER_GALLON,
+  MAX_PRACTICAL_DILUTION_RATIO,
   MICRO_LABELS,
   parsePositive,
   pickDoserPresetForRatio,
-  roundDownToNiceRatio,
+  pickPracticalAutoDilutionRatio,
   stockTankMlPerGallon,
   stockTankMlPerLiter,
   SPECIALTY_CALCIUM_SALT_IDS,
@@ -399,9 +400,27 @@ export function RecipeScreen({
     if (stockTankOption === "doser" && doserPreset !== null) {
       return doserPreset
     }
-    const ratio = roundDownToNiceRatio(solubilityReport.maxSafeDilutionRatio)
+    // `pickPracticalAutoDilutionRatio` caps the purely mathematical
+    // salt-safe ceiling (`maxSafeDilutionRatio`) at `MAX_PRACTICAL_DILUTION_RATIO`
+    // — without this, a part with a very small feed-chart dose (e.g. a
+    // low-dose liquid-line booster) can report a "safe" ratio in the
+    // hundreds even though nobody mixes a stock tank that concentrated by
+    // hand. See the doc comment on `MAX_PRACTICAL_DILUTION_RATIO`.
+    const ratio = pickPracticalAutoDilutionRatio(solubilityReport.maxSafeDilutionRatio)
     return Number.isFinite(ratio) && ratio > 0 ? ratio : null
   }, [solubilityReport, stockTankOption, doserPreset])
+
+  // True when the salt-safe ceiling itself is well beyond what's practical
+  // for a hand-mixed stock tank — i.e. `recommendedRatio` above is capped by
+  // `MAX_PRACTICAL_DILUTION_RATIO` rather than by the recipe's own chemistry.
+  // Drives the extra note under the ratio input so users aren't left
+  // wondering why a "safely dissolved" ratio isn't the absolute maximum the
+  // math would technically allow.
+  const dilutionRatioIsCappedForPracticality =
+    solubilityReport !== null &&
+    recommendedRatio !== null &&
+    !(stockTankOption === "doser" && doserPreset !== null) &&
+    solubilityReport.maxSafeDilutionRatio > MAX_PRACTICAL_DILUTION_RATIO
 
   // Whenever the recommendation changes (different recipe, stock volume, or
   // tank layout) and the user hasn't typed a custom value, snap the input to
@@ -926,6 +945,13 @@ export function RecipeScreen({
                       ? "You're using a custom value. We recommend the value we picked below."
                       : "Auto-picked from your recipe to keep salts safely dissolved."}
                 </p>
+                {!ratioIsManual && dilutionRatioIsCappedForPracticality && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Your recipe&apos;s doses are light enough that the salts alone would stay dissolved
+                    well past 1:{MAX_PRACTICAL_DILUTION_RATIO} — capped here at a realistic ratio for a
+                    hand-mixed stock tank rather than suggesting an impractically concentrated one.
+                  </p>
+                )}
               </div>
             )}
 
