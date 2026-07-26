@@ -302,6 +302,7 @@ export function RecipeScreen({
     [calcResult]
   )
   const estimatedEc = calcResult?.estimatedEc ?? null
+  const calciumNitrateEcPpmDelta = calcResult?.calciumNitrateEcPpmDelta ?? { calciumPpmDelta: 0, nitrogenPpmDelta: 0 }
   const threeTankRecipe = calcResult?.threeTankRecipe ?? EMPTY_THREE_TANK_RECIPE
   const multiPartRecipe = calcResult?.multiPartRecipe ?? EMPTY_MULTI_PART_RECIPE
   const directRecipe = calcResult?.directRecipe ?? EMPTY_DIRECT_RECIPE
@@ -1106,11 +1107,7 @@ export function RecipeScreen({
                       <HelpCircle className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
-                      Estimated electrical conductivity of your final reservoir at 25 °C. Calculated
-                      from macro-nutrient targets, then adjusted with a real-world buffer to account
-                      for chelated micronutrients, pH compounds, and other ionic contributors found
-                      in commercial fertilizers. Actual measured EC typically varies by ±0.2 mS/cm
-                      depending on your water quality, temperature, and specific product formulation.
+                      {estimatedEcTooltip(calciumNitrateEcPpmDelta)}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -1939,6 +1936,45 @@ export function RecipeScreen({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+/**
+ * Calculation-path tooltip for the "Estimated EC" card. Always explains the
+ * base ion-conductivity model; when a literally-dosed Calcium Nitrate part
+ * needed a real-vs-generic composition correction (see
+ * `calciumNitrateLiteralDoseEcPpmDelta`), also shows that adjustment and its
+ * direction — otherwise a real product richer than the generic assumed
+ * composition (a common case: many commercial Calcium Nitrate blends run
+ * ahead of the plain tetrahydrate formula) would silently under-count its
+ * ionic contribution to EC.
+ */
+/** Signed ppm delta for display — `formatPpm` returns "—" for non-positive values, which won't do here. */
+function formatSignedPpm(ppm: number): string {
+  const sign = ppm > 0 ? "+" : ppm < 0 ? "−" : "±"
+  return `${sign}${Math.abs(ppm).toFixed(1)} ppm`
+}
+
+function estimatedEcTooltip(delta: { calciumPpmDelta: number; nitrogenPpmDelta: number }): React.ReactNode {
+  const hasDelta = Math.abs(delta.calciumPpmDelta) > 0.01 || Math.abs(delta.nitrogenPpmDelta) > 0.01
+  return (
+    <div className="space-y-1.5">
+      <p>
+        Estimated electrical conductivity of your final reservoir at 25 °C. Calculated from every
+        dissolved ion — including Chloride from Calcium Chloride — then adjusted with a real-world
+        buffer to account for chelated micronutrients, pH compounds, and other ionic contributors
+        found in commercial fertilizers. Actual measured EC typically varies by ±0.2 mS/cm depending
+        on your water quality, temperature, and specific product formulation.
+      </p>
+      {hasDelta && (
+        <p>
+          Also corrected for your Calcium Nitrate&apos;s real label percentages
+          {delta.calciumPpmDelta >= 0 ? " running richer" : " running leaner"} than a generic
+          Calcium Nitrate salt would be, adding {formatSignedPpm(delta.calciumPpmDelta)} Ca and{" "}
+          {formatSignedPpm(delta.nitrogenPpmDelta)} N to the ionic total before the EC math above.
+        </p>
+      )}
     </div>
   )
 }

@@ -15,6 +15,7 @@ import type { PartAnalysis } from "@/components/hydro-calc/guaranteed-analysis-s
 import type { NutrientPart } from "@/components/hydro-calc/feeding-rates-screen"
 import {
   applyMicroEstimates,
+  calciumNitrateLiteralDoseEcPpmDelta,
   calculateDirectMixRecipe,
   calculateDoserMultiPartRecipe,
   calculateElementalTargets,
@@ -49,6 +50,15 @@ export interface CalculateRecipeResult {
   estimatedMicros: MicroKey[]
   anchor: MicroKey | null
   estimatedEc: number | null
+  /**
+   * How much of `estimatedEc` above comes from correcting a literally-dosed
+   * Calcium Nitrate part's ion content to its real declared label %N/%Ca
+   * instead of `RAW_SALTS.calciumNitrate`'s generic assumed composition
+   * (see `calciumNitrateLiteralDoseEcPpmDelta`). Zero when no part
+   * qualifies. Exposed so the UI can show this piece of the EC calculation
+   * path.
+   */
+  calciumNitrateEcPpmDelta: { calciumPpmDelta: number; nitrogenPpmDelta: number }
   threeTankRecipe: ThreeTankRecipe
   multiPartRecipe: MultiPartTankRecipe
   directRecipe: DirectMixRecipe
@@ -86,12 +96,14 @@ export async function calculateRecipeAction(
   const combinedIncludedSalts = unionIncludedSalts(partsAnalysis)
   const combinedCalciumChlorideGramsPerGallon = sumCalciumChlorideGramsPerGallon(partsAnalysis)
   const combinedCalciumNitrateGramsPerGallon = sumCalciumNitrateGramsPerGallon(partsAnalysis, parts)
+  const calciumNitrateEcDelta = calciumNitrateLiteralDoseEcPpmDelta(partsAnalysis, parts)
 
   const estimatedEc = estimateEcFromElementalTargets(
     targets,
     combinedIncludedSalts,
     combinedCalciumChlorideGramsPerGallon,
-    combinedCalciumNitrateGramsPerGallon
+    combinedCalciumNitrateGramsPerGallon,
+    calciumNitrateEcDelta
   )
 
   const threeTankRecipe = calculateSeparateCalciumRecipe(
@@ -122,6 +134,7 @@ export async function calculateRecipeAction(
     estimatedMicros: Array.from(estimated),
     anchor,
     estimatedEc,
+    calciumNitrateEcPpmDelta: calciumNitrateEcDelta,
     threeTankRecipe,
     multiPartRecipe,
     directRecipe,

@@ -106,6 +106,58 @@ export function calculateElementalTargets(
   return totals
 }
 
+/**
+ * How much more (or less) Calcium/Nitrogen ppm a literally-dosed Calcium
+ * Nitrate part's *real* declared label composition delivers compared to
+ * what `RAW_SALTS.calciumNitrate`'s generic composition (16.9% Ca, 11.8%
+ * N — the tetrahydrate's pure chemical formula, not necessarily what any
+ * given commercial product actually is) would imply for the same dose.
+ *
+ * This matters only for the EC estimate (`estimateEcFromElementalTargets`).
+ * For every ordinary, ppm-target-solved salt, grams are back-derived FROM a
+ * ppm target using `RAW_SALTS`' generic fraction, so recomputing ion
+ * content from those grams via the same fraction round-trips back to
+ * exactly that target — no error. But a literally-dosed Calcium Nitrate
+ * part's grams (see `isCalciumNitrateSoleDoseSource` and the
+ * Calcium-solving block in `calculateStockTankRecipe`) come straight from
+ * a real, physically-measured feed rate instead — so reconstructing ITS ion
+ * content for EC purposes has to use the real label %N/%Ca (already known,
+ * and already what the elemental targets above are built from), or the
+ * estimate silently drops however much the real product's %N/%Ca run ahead
+ * of (or behind) the generic assumption. A common case where they run
+ * ahead: many commercial "15.5-0-0 +19% Ca" Calcium Nitrate products are
+ * richer than the pure tetrahydrate formula RAW_SALTS models.
+ */
+export function calciumNitrateLiteralDoseEcPpmDelta(
+  partsAnalysis: PartAnalysis[],
+  parts: NutrientPart[]
+): { calciumPpmDelta: number; nitrogenPpmDelta: number } {
+  const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
+  let calciumPpmDelta = 0
+  let nitrogenPpmDelta = 0
+
+  for (const feedingPart of parts) {
+    const analysis = analysisById.get(feedingPart.id)
+    if (!analysis) continue
+    if (!analysis.includedSalts?.calciumChloride) continue
+    if (parsePositive(analysis.calciumChlorideGramsPerGallon) === 0) continue
+    if (!isCalciumNitrateSoleDoseSource(analysis.includedSalts)) continue
+
+    const concentrateGramsPerLiter = getConcentrateGramsPerLiter(feedingPart)
+    if (concentrateGramsPerLiter === 0) continue
+
+    const realCalciumPpm = percentToPpm(parsePositive(analysis.calcium), concentrateGramsPerLiter)
+    const realNitrogenPpm = percentToPpm(parsePositive(analysis.nitrogen), concentrateGramsPerLiter)
+    const genericCalciumPpm = percentToPpm(RAW_SALTS.calciumNitrate.ca * 100, concentrateGramsPerLiter)
+    const genericNitrogenPpm = percentToPpm(RAW_SALTS.calciumNitrate.n * 100, concentrateGramsPerLiter)
+
+    calciumPpmDelta += realCalciumPpm - genericCalciumPpm
+    nitrogenPpmDelta += realNitrogenPpm - genericNitrogenPpm
+  }
+
+  return { calciumPpmDelta, nitrogenPpmDelta }
+}
+
 /** Guaranteed-analysis oxide → elemental conversion factors */
 const P2O5_TO_P = 30.974 / 70.974 // ≈ 0.436
 const K2O_TO_K = 78.169 / 94.196 // ≈ 0.830
@@ -1079,6 +1131,17 @@ function ecContribution(molarity: number, lambda: number): number {
   return molarity * lambda
 }
 
+/**
+ * Like `ppmToMolPerLiter`, but preserves the sign instead of clamping
+ * negative input to 0 — needed for `calciumNitrateLiteralDoseEcPpmDelta`'s
+ * correction below, which can legitimately be negative (a real product
+ * running *below* the generic assumed %N/%Ca).
+ */
+function signedPpmToMolPerLiter(ppm: number, atomicWeight: number): number {
+  if (atomicWeight <= 0) return 0
+  return ppm / (atomicWeight * 1000)
+}
+
 /** EC (mS/cm) from dissolved ions at working-solution strength */
 function ecFromSaltAmounts(salts: SaltAmounts): number {
   // Carbonate's own conductivity contribution is omitted (like the
@@ -1149,7 +1212,18 @@ export function estimateEcFromElementalTargets(
   targets: ElementalTargets,
   includedSalts?: IncludedSaltsSelection,
   calciumChlorideGramsPerGallon: number = 0,
-  calciumNitrateGramsPerGallon: number = 0
+  calciumNitrateGramsPerGallon: number = 0,
+  /**
+   * Optional real-vs-generic Ca/N ppm correction for a literally-dosed
+   * Calcium Nitrate part (see `calciumNitrateLiteralDoseEcPpmDelta`).
+   * Corrects the ion content reconstructed from `calciumNitrateGramsPerGallon`
+   * below, which otherwise always assumes `RAW_SALTS.calciumNitrate`'s
+   * generic composition regardless of the real product's declared label %.
+   */
+  calciumNitrateLiteralDoseEcDelta: { calciumPpmDelta: number; nitrogenPpmDelta: number } = {
+    calciumPpmDelta: 0,
+    nitrogenPpmDelta: 0,
+  }
 ): number | null {
   const hasMacro =
     targets.nitrogen > 0 ||
@@ -1181,6 +1255,22 @@ export function estimateEcFromElementalTargets(
   const baseEc = ecFromSaltAmounts(salts)
   if (!Number.isFinite(baseEc) || baseEc <= 0) return null
 
-  const correctedEc = baseEc * EC_REAL_WORLD_FACTOR + EC_ADDITIVE_BUFFER_MS_CM
+  // Apply the real-vs-generic Ca/N correction (see
+  // `calciumNitrateLiteralDoseEcPpmDelta`) on top of the grams-reconstructed
+  // ionic sum above, which — for a literally-dosed Calcium Nitrate part —
+  // always assumed the generic composition no matter what the real product
+  // actually declares.
+  const deltaEc =
+    ecContribution(
+      signedPpmToMolPerLiter(calciumNitrateLiteralDoseEcDelta.calciumPpmDelta, ION_ATOMIC_WEIGHT.Ca),
+      ION_CONDUCTIVITY.Ca
+    ) +
+    ecContribution(
+      signedPpmToMolPerLiter(calciumNitrateLiteralDoseEcDelta.nitrogenPpmDelta, ION_ATOMIC_WEIGHT.N),
+      ION_CONDUCTIVITY.NO3
+    )
+  const correctedBaseEc = Math.max(0, baseEc + deltaEc)
+
+  const correctedEc = correctedBaseEc * EC_REAL_WORLD_FACTOR + EC_ADDITIVE_BUFFER_MS_CM
   return Number.isFinite(correctedEc) && correctedEc > 0 ? correctedEc : null
 }
