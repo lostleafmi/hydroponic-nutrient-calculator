@@ -568,7 +568,11 @@ function PartAnalysisCard({
           </div>
 
           {/* Photo Upload Section */}
-          <div className="rounded-lg border-2 border-dashed border-border bg-secondary/20 p-4 flex flex-col items-center justify-center text-center min-h-[300px]">
+          <div
+            className={`rounded-lg border-2 border-dashed border-border bg-secondary/20 p-4 flex flex-col items-center justify-center text-center ${
+              part.photoUrl ? "" : "min-h-[300px]"
+            }`}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -583,12 +587,25 @@ function PartAnalysisCard({
                   type="button"
                   onClick={() => setLightboxOpen(true)}
                   aria-label={`View full-size photo of ${part.name} label`}
-                  className="group relative flex h-64 w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-lg border border-border bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="group relative block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <img 
-                    src={part.photoUrl} 
+                  {/*
+                   * No fixed height here on purpose — sizing the box to a
+                   * constant like h-64 forces every photo into that box via
+                   * object-contain, which shrinks portrait-orientation label
+                   * photos (the common case when photographing a bottle) down
+                   * to a tiny, hard-to-read strip. `h-auto` + `max-h-[70vh]`
+                   * instead lets the box grow to the image's own natural
+                   * aspect ratio — full column width, height whatever that
+                   * implies — so the label's numbers render as large as
+                   * possible, only capped so a very tall photo can't take
+                   * over the whole page. Zoom is still available for
+                   * fine detail via the lightbox below.
+                   */}
+                  <img
+                    src={part.photoUrl}
                     alt={`Label for ${part.name}`}
-                    className="max-h-full max-w-full object-contain"
+                    className="block h-auto max-h-[70vh] w-full object-contain"
                   />
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
                     <span className="flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white">
