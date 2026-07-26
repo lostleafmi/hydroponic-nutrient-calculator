@@ -1201,6 +1201,58 @@ const EC_REAL_WORLD_FACTOR = 1.1
 const EC_ADDITIVE_BUFFER_MS_CM = 0.08
 
 /**
+ * Real elemental Sulfur ppm delivered by whichever sulfate-based salts —
+ * Magnesium Sulfate, Potassium Sulfate, Ammonium Sulfate — the solver
+ * actually allocates a non-zero amount of. Sulfur is unique among the
+ * elemental targets: nothing in `calculateStockTankRecipe` ever sizes a
+ * salt off `targets.sulfur` (see the comment there — MgSO₄ is sized purely
+ * off the Magnesium target, K₂SO₄ off any Potassium shortfall, (NH₄)₂SO₄
+ * off any Nitrogen shortfall). So whatever Sulfur those three salts happen
+ * to bring along as a byproduct of satisfying OTHER targets was, until now,
+ * only ever accounted for inside the EC estimate's ion sum
+ * (`ecFromSaltAmounts`) — never folded back into the Sulfur *target* itself,
+ * which is what "What your plants will get" displays. That meant a
+ * Guaranteed Analysis with 0%/no declared Sulfur — common, since Sulfur
+ * often isn't required on fertilizer labels — showed 0 ppm Sulfur even when
+ * Magnesium Sulfate was very much dissolved in the reservoir.
+ *
+ * Deliberately additive on top of any Guaranteed-Analysis-declared Sulfur
+ * (folded into `targets.sulfur` already by `calculateElementalTargets`),
+ * not a replacement — a real product's declared %S and the solver's own
+ * choice of raw salt to hit a DIFFERENT target (Mg/K/N) are independent
+ * sources of real, physically dissolved Sulfur. Only ever adds — never
+ * invents Sulfur when no sulfate salt actually gets allocated (all three
+ * terms below are naturally 0 in that case).
+ *
+ * Computed the same layout-independent way `estimateEcFromElementalTargets`
+ * does (1 L stock at a 1:1 ratio — ppm at working strength doesn't depend on
+ * stock volume/dilution ratio), so this is a property of the elemental
+ * targets and salt selection alone, not of any particular tank layout.
+ */
+export function saltDerivedSulfurPpm(
+  targets: ElementalTargets,
+  includedSalts?: IncludedSaltsSelection,
+  calciumChlorideGramsPerGallon: number = 0,
+  calciumNitrateGramsPerGallon: number = 0
+): number {
+  const stockRecipe = calculateStockTankRecipe(
+    targets,
+    1,
+    1,
+    includedSalts,
+    calciumChlorideGramsPerGallon,
+    calciumNitrateGramsPerGallon
+  )
+  // Magnesium Sulfate, Potassium Sulfate, and Ammonium Sulfate are always
+  // assigned to Tank B (see `calculateStockTankRecipe`).
+  return (
+    ppmFromSaltInStock(stockRecipe.tankB.magnesiumSulfate, RAW_SALTS.magnesiumSulfate.s, 1, 1) +
+    ppmFromSaltInStock(stockRecipe.tankB.potassiumSulfate, RAW_SALTS.potassiumSulfate.s, 1, 1) +
+    ppmFromSaltInStock(stockRecipe.tankB.ammoniumSulfate, RAW_SALTS.ammoniumSulfate.s, 1, 1)
+  )
+}
+
+/**
  * Estimate the EC of the final working reservoir from elemental ppm targets.
  * Uses the same salt selection as the stock-tank recipe at working strength,
  * sums ion conductivity at 25 °C, then applies an empirical real-world

@@ -22,6 +22,7 @@ import {
   calculateMultiPartStockTankRecipe,
   calculateSeparateCalciumRecipe,
   estimateEcFromElementalTargets,
+  saltDerivedSulfurPpm,
 } from "@/lib/hydro-calc/recipe-calculator"
 import {
   sumCalciumChlorideGramsPerGallon,
@@ -59,6 +60,15 @@ export interface CalculateRecipeResult {
    * path.
    */
   calciumNitrateEcPpmDelta: { calciumPpmDelta: number; nitrogenPpmDelta: number }
+  /**
+   * How much of `targets.sulfur` above comes from Magnesium Sulfate /
+   * Potassium Sulfate / Ammonium Sulfate actually being allocated in the
+   * resolved recipe, on top of whatever the Guaranteed Analysis itself
+   * declared (see `saltDerivedSulfurPpm`). Zero when no sulfate salt ends
+   * up used. Exposed so the UI can show this piece of the Sulfur
+   * calculation path.
+   */
+  saltDerivedSulfurPpm: number
   threeTankRecipe: ThreeTankRecipe
   multiPartRecipe: MultiPartTankRecipe
   directRecipe: DirectMixRecipe
@@ -86,7 +96,7 @@ export async function calculateRecipeAction(
   const dilutionRatio = sanitizePositiveNumber(input.dilutionRatio, 100)
 
   const rawTargets = calculateElementalTargets(partsAnalysis, parts)
-  const { targets, estimated, anchor } = applyMicroEstimates(rawTargets)
+  const { targets: targetsBeforeSaltSulfur, estimated, anchor } = applyMicroEstimates(rawTargets)
 
   // The Separate-Nitrogen and Direct-Mix layouts intentionally recombine
   // nutrients across parts by chemistry rather than by bottle, so they draw
@@ -97,6 +107,23 @@ export async function calculateRecipeAction(
   const combinedCalciumChlorideGramsPerGallon = sumCalciumChlorideGramsPerGallon(partsAnalysis)
   const combinedCalciumNitrateGramsPerGallon = sumCalciumNitrateGramsPerGallon(partsAnalysis, parts)
   const calciumNitrateEcDelta = calciumNitrateLiteralDoseEcPpmDelta(partsAnalysis, parts)
+
+  // Sulfur is never itself a salt-sizing input (see `saltDerivedSulfurPpm`),
+  // so folding in whatever Sulfur the resolved recipe's own Magnesium
+  // Sulfate / Potassium Sulfate / Ammonium Sulfate allocation brings along
+  // — on top of whatever the Guaranteed Analysis already declared — can't
+  // change any other target or salt amount below. Safe to do once, right
+  // here, before every recipe layout is built from `targets`.
+  const sulfurFromSulfateSalts = saltDerivedSulfurPpm(
+    targetsBeforeSaltSulfur,
+    combinedIncludedSalts,
+    combinedCalciumChlorideGramsPerGallon,
+    combinedCalciumNitrateGramsPerGallon
+  )
+  const targets: ElementalTargets = {
+    ...targetsBeforeSaltSulfur,
+    sulfur: targetsBeforeSaltSulfur.sulfur + sulfurFromSulfateSalts,
+  }
 
   const estimatedEc = estimateEcFromElementalTargets(
     targets,
@@ -135,6 +162,7 @@ export async function calculateRecipeAction(
     anchor,
     estimatedEc,
     calciumNitrateEcPpmDelta: calciumNitrateEcDelta,
+    saltDerivedSulfurPpm: sulfurFromSulfateSalts,
     threeTankRecipe,
     multiPartRecipe,
     directRecipe,

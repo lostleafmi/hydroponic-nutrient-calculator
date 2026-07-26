@@ -303,6 +303,7 @@ export function RecipeScreen({
   )
   const estimatedEc = calcResult?.estimatedEc ?? null
   const calciumNitrateEcPpmDelta = calcResult?.calciumNitrateEcPpmDelta ?? { calciumPpmDelta: 0, nitrogenPpmDelta: 0 }
+  const saltDerivedSulfurPpm = calcResult?.saltDerivedSulfurPpm ?? 0
   const threeTankRecipe = calcResult?.threeTankRecipe ?? EMPTY_THREE_TANK_RECIPE
   const multiPartRecipe = calcResult?.multiPartRecipe ?? EMPTY_MULTI_PART_RECIPE
   const directRecipe = calcResult?.directRecipe ?? EMPTY_DIRECT_RECIPE
@@ -1146,7 +1147,15 @@ export function RecipeScreen({
                   }
                 />
                 <TargetCard label="Magnesium (Mg)" value={formatPpm(targets.magnesium)} />
-                <TargetCard label="Sulfur (S)" value={formatPpm(targets.sulfur)} />
+                <TargetCard
+                  label="Sulfur (S)"
+                  value={formatPpm(targets.sulfur)}
+                  tooltip={
+                    saltDerivedSulfurPpm > 0
+                      ? saltDerivedSulfurPpmTooltip(targets.sulfur - saltDerivedSulfurPpm, saltDerivedSulfurPpm)
+                      : undefined
+                  }
+                />
                 <TargetCard label="Iron (Fe)" value={formatPpm(targets.iron)} micro estimated={estimated.has("iron")} />
                 <TargetCard label="Manganese (Mn)" value={formatPpm(targets.manganese)} micro estimated={estimated.has("manganese")} />
                 <TargetCard label="Zinc (Zn)" value={formatPpm(targets.zinc)} micro estimated={estimated.has("zinc")} />
@@ -1975,6 +1984,32 @@ function estimatedEcTooltip(delta: { calciumPpmDelta: number; nitrogenPpmDelta: 
           {formatSignedPpm(delta.nitrogenPpmDelta)} N to the ionic total before the EC math above.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Calculation-path tooltip for "why is Sulfur higher than my Guaranteed
+ * Analysis says" — shown on the Sulfur target card whenever Magnesium
+ * Sulfate, Potassium Sulfate, and/or Ammonium Sulfate actually end up
+ * allocated in the resolved recipe (see `saltDerivedSulfurPpm` in
+ * `recipe-calculator.ts`). `gaSulfurPpm` is whatever the Guaranteed
+ * Analysis itself declared (0 if it wasn't listed at all — common, since
+ * Sulfur often isn't a required label field); `saltSulfurPpm` is the real
+ * Sulfur those sulfate salts bring along as a byproduct of satisfying the
+ * Magnesium/Potassium/Nitrogen targets, whether or not the label mentioned
+ * it.
+ */
+function saltDerivedSulfurPpmTooltip(gaSulfurPpm: number, saltSulfurPpm: number): React.ReactNode {
+  return (
+    <div className="space-y-1.5">
+      <p>
+        Includes {formatPpm(saltSulfurPpm)} of elemental Sulfur delivered as a byproduct of the
+        Magnesium Sulfate, Potassium Sulfate, and/or Ammonium Sulfate actually used in your recipe
+        — on top of the {gaSulfurPpm > 0 ? formatPpm(gaSulfurPpm) : "0 ppm"} your Guaranteed Analysis
+        itself declares. Sulfur is never chased directly; it just comes along whenever one of those
+        salts is picked to satisfy the Magnesium, Potassium, or Nitrogen target.
+      </p>
     </div>
   )
 }
