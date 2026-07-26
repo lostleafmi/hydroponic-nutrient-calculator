@@ -89,6 +89,7 @@ export interface SaltAmounts {
   monoPotassiumPhosphate: number
   monoAmmoniumPhosphate: number
   magnesiumSulfate: number
+  magnesiumNitrate: number
   potassiumSulfate: number
   ammoniumNitrate: number
   ammoniumSulfate: number
@@ -301,6 +302,10 @@ export const RAW_SALTS = {
   monoPotassiumPhosphate: { name: "Mono Potassium Phosphate (MKP)", formula: "KH₂PO₄", k: 0.287, p: 0.228 },
   monoAmmoniumPhosphate: { name: "Monoammonium Phosphate (MAP)", formula: "NH₄H₂PO₄", n: 0.122, p: 0.269 },
   magnesiumSulfate: { name: "Magnesium Sulfate (Epsom Salt)", formula: "MgSO₄·7H₂O", mg: 0.099, s: 0.130 },
+  // Hexahydrate form (Mg(NO₃)₂·6H₂O) — the common hydroponic/lab-grade form.
+  // Both fractions derived from the salt's molecular weight (256.4 g/mol):
+  // Mg 24.31/256.4 ≈ 9.5%, N (2 × 14.01)/256.4 ≈ 10.9%.
+  magnesiumNitrate: { name: "Magnesium Nitrate", formula: "Mg(NO₃)₂·6H₂O", mg: 0.095, n: 0.109 },
   potassiumSulfate: { name: "Potassium Sulfate", formula: "K₂SO₄", k: 0.449, s: 0.184 },
   ammoniumNitrate: { name: "Ammonium Nitrate", formula: "NH₄NO₃", n: 0.35 },
   ammoniumSulfate: { name: "Ammonium Sulfate", formula: "(NH₄)₂SO₄", n: 0.212, s: 0.243 },
@@ -355,6 +360,7 @@ export interface IncludedSaltsSelection {
   monoPotassiumPhosphate: boolean
   monoAmmoniumPhosphate: boolean
   magnesiumSulfate: boolean
+  magnesiumNitrate: boolean
   ammoniumNitrateOrSulfate: boolean
   chelatedMicronutrients: boolean
 }
@@ -372,6 +378,7 @@ export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
   monoPotassiumPhosphate: false,
   monoAmmoniumPhosphate: false,
   magnesiumSulfate: false,
+  magnesiumNitrate: false,
   ammoniumNitrateOrSulfate: false,
   chelatedMicronutrients: false,
 }
@@ -389,6 +396,7 @@ export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
   monoPotassiumPhosphate: true,
   monoAmmoniumPhosphate: true,
   magnesiumSulfate: true,
+  magnesiumNitrate: true,
   ammoniumNitrateOrSulfate: true,
   chelatedMicronutrients: true,
 }
@@ -435,6 +443,12 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
     label: "Magnesium Sulfate",
     sublabel: "",
     saltKeys: ["magnesiumSulfate"],
+  },
+  {
+    id: "magnesiumNitrate",
+    label: "Magnesium Nitrate",
+    sublabel: "",
+    saltKeys: ["magnesiumNitrate"],
   },
   {
     id: "ammoniumNitrateOrSulfate",
@@ -571,6 +585,7 @@ export const SALT_DISPLAY_ORDER: SaltKey[] = [
   "calciumChloride",
   "potassiumNitrate",
   "ammoniumNitrate",
+  "magnesiumNitrate",
   "urea",
   "monoPotassiumPhosphate",
   "monoAmmoniumPhosphate",
@@ -623,7 +638,12 @@ export interface DirectMixRecipe {
  *          nitrates / chelated iron). Urea is a neutral, non-ionic molecule
  *          that doesn't react with Ca²⁺, PO₄³⁻, or SO₄²⁻, so it's grouped
  *          here alongside the other Nitrogen sources rather than for any
- *          precipitation-avoidance reason.
+ *          precipitation-avoidance reason. Magnesium Nitrate lives here too,
+ *          not with Magnesium Sulfate in Tank B — Mg²⁺ is fully compatible
+ *          with the nitrate salts (no precipitation risk with Ca²⁺), but it
+ *          WOULD risk precipitating as insoluble magnesium phosphate
+ *          (Mg₃(PO₄)₂) if it shared a concentrated stock tank with Tank B's
+ *          MKP/MAP.
  * Tank B — phosphate / sulfate-side (PO₄³⁻ + SO₄²⁻ salts, plus the chelated
  *          micronutrients — chelates are compatible with both tanks
  *          chemically, but grouped here alongside the other non-Calcium
@@ -635,6 +655,7 @@ export const TANK_A_SALTS = [
   "calciumChloride",
   "potassiumNitrate",
   "ammoniumNitrate",
+  "magnesiumNitrate",
   "urea",
   "ironDTPA",
 ] as const satisfies readonly SaltKey[]
@@ -661,10 +682,11 @@ export const TANK_B_SALTS = [
  *          Calcium Carbonate when used instead (or alongside) as a
  *          nitrogen-free calcium source (taper Tank 1 for end-of-flower N
  *          reduction when Calcium Nitrate is the source)
- * Tank 2 — Everything else: remaining macros (KNO₃, MKP/MAP, MgSO₄, K₂SO₄,
- *          Urea) plus the micronutrients (Fe-DTPA, Mn/Zn/Cu EDTA chelates,
- *          boric acid, sodium molybdate) — always merged together into one
- *          clean Tank 2 rather than split into a separate micros tank.
+ * Tank 2 — Everything else: remaining macros (KNO₃, Mg(NO₃)₂, MKP/MAP,
+ *          MgSO₄, K₂SO₄, Urea) plus the micronutrients (Fe-DTPA, Mn/Zn/Cu
+ *          EDTA chelates, boric acid, sodium molybdate) — always merged
+ *          together into one clean Tank 2 rather than split into a separate
+ *          micros tank.
  */
 export const TANK_1_SALTS = [
   "calciumNitrate",
@@ -675,6 +697,7 @@ export const TANK_1_SALTS = [
 export const TANK_2_SALTS = [
   "potassiumNitrate",
   "ammoniumNitrate",
+  "magnesiumNitrate",
   "urea",
   "monoPotassiumPhosphate",
   "monoAmmoniumPhosphate",
@@ -752,6 +775,8 @@ export const SOLUBILITY_LIMITS_G_PER_L: Record<SaltKey, number> = {
   monoPotassiumPhosphate: 226,
   monoAmmoniumPhosphate: 368,
   magnesiumSulfate: 710,
+  // Hexahydrate form, 420 g/L at 20 °C (Sigma-Aldrich / Merck technical data).
+  magnesiumNitrate: 420,
   potassiumSulfate: 111,
   ammoniumNitrate: 1920,
   ammoniumSulfate: 754,
@@ -950,6 +975,7 @@ export function emptySaltAmounts(): SaltAmounts {
     monoPotassiumPhosphate: 0,
     monoAmmoniumPhosphate: 0,
     magnesiumSulfate: 0,
+    magnesiumNitrate: 0,
     potassiumSulfate: 0,
     ammoniumNitrate: 0,
     ammoniumSulfate: 0,
@@ -1025,6 +1051,7 @@ export function isCalciumNitrateSoleDoseSource(selection: IncludedSaltsSelection
     "monoPotassiumPhosphate",
     "monoAmmoniumPhosphate",
     "magnesiumSulfate",
+    "magnesiumNitrate",
     "ammoniumNitrateOrSulfate",
   ]
   return OTHER_MACRO_KEYS.every((key) => !selection[key])

@@ -223,7 +223,7 @@ function ppmFromSaltInStock(
 
 /**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
- * Tank A — Ca(NO₃)₂, CaCl₂, KNO₃/NH₄NO₃ (remaining N), Urea, Fe-DTPA  (see TANK_A_SALTS)
+ * Tank A — Ca(NO₃)₂, CaCl₂, KNO₃/NH₄NO₃ (remaining N), Mg(NO₃)₂, Urea, Fe-DTPA  (see TANK_A_SALTS)
  * Tank B — MKP/MAP (Phosphorus), MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), chelated micronutrients (Mn/Zn/Cu-EDTA, boric acid, sodium molybdate)  (see TANK_B_SALTS)
  *
  * Calcium and phosphate are assigned to opposite tanks by construction so they
@@ -611,6 +611,46 @@ export function calculateStockTankRecipe(
   }
   const nitrogenFromUrea = ppmFromSaltInStock(ureaGrams, RAW_SALTS.urea.n, stockVolumeLiters, dilutionRatio)
 
+  // Magnesium — MgSO₄ is the default Mg source; Mg(NO₃)₂ is an alternate Mg
+  // source that also brings along nitrate-Nitrogen. Sized here (before the
+  // remaining-Nitrogen resolution below) so Magnesium Nitrate's own Nitrogen
+  // contribution can be subtracted out first, the same way Urea's and MAP's
+  // are just above. When both Mg sources are enabled, split the Magnesium
+  // target evenly between them — the same "equal share" policy used for
+  // Calcium when more than one primary source is enabled (see the
+  // Calcium-solving block above).
+  const magnesiumSulfateEnabled = isEnabled("magnesiumSulfate")
+  const magnesiumNitrateEnabled = isEnabled("magnesiumNitrate")
+  let magnesiumNitrateGrams = 0
+  if (targets.magnesium > 0) {
+    if (!magnesiumSulfateEnabled && !magnesiumNitrateEnabled) {
+      warnings.push({ element: "magnesium", label: "Magnesium" })
+    } else {
+      const magnesiumSourceCount = (magnesiumSulfateEnabled ? 1 : 0) + (magnesiumNitrateEnabled ? 1 : 0)
+      const magnesiumPpmEach = targets.magnesium / magnesiumSourceCount
+      if (magnesiumSulfateEnabled) {
+        assignToTankB(
+          "magnesiumSulfate",
+          saltGramsForTargetPpm(magnesiumPpmEach, RAW_SALTS.magnesiumSulfate.mg, stockVolumeLiters, dilutionRatio)
+        )
+      }
+      if (magnesiumNitrateEnabled) {
+        magnesiumNitrateGrams = saltGramsForTargetPpm(
+          magnesiumPpmEach,
+          RAW_SALTS.magnesiumNitrate.mg,
+          stockVolumeLiters,
+          dilutionRatio
+        )
+      }
+    }
+  }
+  const nitrogenFromMagnesiumNitrate = ppmFromSaltInStock(
+    magnesiumNitrateGrams,
+    RAW_SALTS.magnesiumNitrate.n,
+    stockVolumeLiters,
+    dilutionRatio
+  )
+
   // MAP's Nitrogen contribution (if any) is folded into the Nitrogen target
   // before the remaining-Nitrogen math below runs — otherwise it would chase
   // the *full* Nitrogen target with another salt on top of what MAP already
@@ -621,7 +661,10 @@ export function calculateStockTankRecipe(
     stockVolumeLiters,
     dilutionRatio
   )
-  const nitrogenTargetAfterMap = Math.max(0, targets.nitrogen - nitrogenFromMap - nitrogenFromUrea)
+  const nitrogenTargetAfterMap = Math.max(
+    0,
+    targets.nitrogen - nitrogenFromMap - nitrogenFromUrea - nitrogenFromMagnesiumNitrate
+  )
 
   // Priority for the remaining N (after MAP's fixed contribution, if any):
   // KNO₃ → more Ca(NO₃)₂ → NH₄NO₃ → (NH₄)₂SO₄
@@ -691,6 +734,11 @@ export function calculateStockTankRecipe(
   // Carbonate — it's assigned straight into Tank A alongside Calcium Nitrate
   // rather than surfaced as a direct reservoir addition.
   assignToTankA("calciumChloride", calciumChlorideGrams)
+  // Magnesium Nitrate lives in Tank A, not alongside Magnesium Sulfate in
+  // Tank B — see the `TANK_A_SALTS` doc comment for why. Sized above,
+  // alongside Urea and MAP, so its Nitrogen could be subtracted from the
+  // remaining-Nitrogen target before this point.
+  assignToTankA("magnesiumNitrate", magnesiumNitrateGrams)
   // Calcium Carbonate deliberately does NOT go into tankA (see the function
   // doc comment) — it's surfaced separately below as a reservoir addition.
   const directAddCalciumCarbonate = buildDirectAddCalciumCarbonate(
@@ -708,18 +756,6 @@ export function calculateStockTankRecipe(
       )
     } else {
       warnings.push({ element: "iron", label: "Iron" })
-    }
-  }
-
-  // Magnesium — MgSO₄ is the only Mg source we model
-  if (targets.magnesium > 0) {
-    if (isEnabled("magnesiumSulfate")) {
-      assignToTankB(
-        "magnesiumSulfate",
-        saltGramsForTargetPpm(targets.magnesium, RAW_SALTS.magnesiumSulfate.mg, stockVolumeLiters, dilutionRatio)
-      )
-    } else {
-      warnings.push({ element: "magnesium", label: "Magnesium" })
     }
   }
 
@@ -836,7 +872,12 @@ export function calculateSeparateCalciumRecipe(
   const tank1 = emptySaltAmounts()
   const tank2 = emptySaltAmounts()
 
-  const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>(["potassiumNitrate", "ammoniumNitrate", "urea"])
+  const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>([
+    "potassiumNitrate",
+    "ammoniumNitrate",
+    "magnesiumNitrate",
+    "urea",
+  ])
 
   for (const key of TANK_1_SALTS) {
     tank1[key] = tankA[key]
@@ -1189,13 +1230,16 @@ function ecFromSaltAmounts(salts: SaltAmounts): number {
   const pFromMkp = salts.monoPotassiumPhosphate * RAW_SALTS.monoPotassiumPhosphate.p * 1000
   const nFromMap = salts.monoAmmoniumPhosphate * RAW_SALTS.monoAmmoniumPhosphate.n * 1000
   const pFromMap = salts.monoAmmoniumPhosphate * RAW_SALTS.monoAmmoniumPhosphate.p * 1000
-  const mgPpm = salts.magnesiumSulfate * RAW_SALTS.magnesiumSulfate.mg * 1000
+  const nFromMgNo3 = salts.magnesiumNitrate * RAW_SALTS.magnesiumNitrate.n * 1000
+  const mgPpm =
+    salts.magnesiumSulfate * RAW_SALTS.magnesiumSulfate.mg * 1000 +
+    salts.magnesiumNitrate * RAW_SALTS.magnesiumNitrate.mg * 1000
   const sFromMgSO4 = salts.magnesiumSulfate * RAW_SALTS.magnesiumSulfate.s * 1000
   const kFromK2SO4 = salts.potassiumSulfate * RAW_SALTS.potassiumSulfate.k * 1000
   const sFromK2SO4 = salts.potassiumSulfate * RAW_SALTS.potassiumSulfate.s * 1000
 
   const kPpm = kFromKno3 + kFromMkp + kFromK2SO4
-  const nPpm = nFromCaNo3 + nFromKno3 + nFromNh4no3 + nFromNh4so4 + nFromMap
+  const nPpm = nFromCaNo3 + nFromKno3 + nFromNh4no3 + nFromNh4so4 + nFromMap + nFromMgNo3
   const pPpm = pFromMkp + pFromMap
   const sPpm = sFromMgSO4 + sFromK2SO4 + sFromNh4so4
 
