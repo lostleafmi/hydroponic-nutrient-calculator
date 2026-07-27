@@ -417,26 +417,28 @@ export interface SaltCheckboxOption {
   saltKeys: SaltKey[]
 }
 
+// Alphabetized by `label` — except `chelatedMicronutrients`, which is
+// deliberately pinned last since it's the larger full-width option (see
+// `fullWidth` in guaranteed-analysis-screen.tsx). Order here drives the
+// on-screen checkbox order directly; it has no effect on solver behavior
+// (every other consumer of this list uses `.some()` or builds a `Set`).
 export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
-  { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
+  {
+    id: "ammoniumNitrateOrSulfate",
+    label: "Ammonium Nitrate / Ammonium Sulfate",
+    sublabel: "",
+    saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
+  },
+  { id: "calciumAcetate", label: "Calcium Acetate", sublabel: "", saltKeys: [] },
   { id: "calciumCarbonate", label: "Calcium Carbonate", sublabel: "", saltKeys: ["calciumCarbonate"] },
   { id: "calciumChloride", label: "Calcium Chloride", sublabel: "", saltKeys: ["calciumChloride"] },
-  { id: "calciumAcetate", label: "Calcium Acetate", sublabel: "", saltKeys: [] },
   { id: "calciumGluconate", label: "Calcium Gluconate", sublabel: "", saltKeys: [] },
-  { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
-  { id: "urea", label: "Urea", sublabel: "", saltKeys: ["urea"] },
-  { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
+  { id: "calciumNitrate", label: "Calcium Nitrate", sublabel: "", saltKeys: ["calciumNitrate"] },
   {
-    id: "monoPotassiumPhosphate",
-    label: "Monopotassium Phosphate",
+    id: "magnesiumNitrate",
+    label: "Magnesium Nitrate",
     sublabel: "",
-    saltKeys: ["monoPotassiumPhosphate"],
-  },
-  {
-    id: "monoAmmoniumPhosphate",
-    label: "Monoammonium Phosphate (MAP)",
-    sublabel: "",
-    saltKeys: ["monoAmmoniumPhosphate"],
+    saltKeys: ["magnesiumNitrate"],
   },
   {
     id: "magnesiumSulfate",
@@ -445,17 +447,20 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
     saltKeys: ["magnesiumSulfate"],
   },
   {
-    id: "magnesiumNitrate",
-    label: "Magnesium Nitrate",
+    id: "monoAmmoniumPhosphate",
+    label: "Monoammonium Phosphate (MAP)",
     sublabel: "",
-    saltKeys: ["magnesiumNitrate"],
+    saltKeys: ["monoAmmoniumPhosphate"],
   },
   {
-    id: "ammoniumNitrateOrSulfate",
-    label: "Ammonium Nitrate / Ammonium Sulfate",
+    id: "monoPotassiumPhosphate",
+    label: "Monopotassium Phosphate",
     sublabel: "",
-    saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
+    saltKeys: ["monoPotassiumPhosphate"],
   },
+  { id: "potassiumNitrate", label: "Potassium Nitrate", sublabel: "", saltKeys: ["potassiumNitrate"] },
+  { id: "potassiumSulfate", label: "Potassium Sulfate", sublabel: "", saltKeys: ["potassiumSulfate"] },
+  { id: "urea", label: "Urea", sublabel: "", saltKeys: ["urea"] },
   {
     id: "chelatedMicronutrients",
     label: "Chelated Micronutrients",
