@@ -151,6 +151,7 @@ export function FeedingRatesScreen({
                 recommended
                 safetyLabel="Safest"
                 safetyTone="safe"
+                note="Only for flower recipes"
               />
             )}
             <StockTankOptionCard
@@ -326,6 +327,7 @@ function StockTankOptionCard({
   selected = false,
   safetyLabel,
   safetyTone = "safe",
+  note,
 }: {
   value: string
   title: string
@@ -335,6 +337,14 @@ function StockTankOptionCard({
   selected?: boolean
   safetyLabel?: string
   safetyTone?: SafetyTone
+  /**
+   * Short clarifying disclaimer badge shown next to the title — e.g. scoping
+   * a mode to a specific use case (see "Separate Nitrogen"'s "Only for
+   * flower recipes" note). Purely informational: unlike `safetyLabel`, it's
+   * neutral-toned rather than a safety signal, and doesn't gate or change
+   * which mode the user can pick.
+   */
+  note?: string
 }) {
   const isRecommended = recommended
   const borderClass = selected
@@ -368,6 +378,11 @@ function StockTankOptionCard({
             >
               {SAFETY_TONE_ICON[safetyTone]}
               {safetyLabel}
+            </span>
+          )}
+          {note && (
+            <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {note}
             </span>
           )}
         </div>
