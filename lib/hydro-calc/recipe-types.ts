@@ -86,22 +86,44 @@ export const MICRO_TO_FE_RATIO: Record<MicroKey, number> = {
   molybdenum: 1 / 1200,
 }
 
+/**
+ * Iron ppm for the standard balanced micro profile used when a label declares
+ * a micro package but nothing that can anchor a ratio estimate — in practice a
+ * Molybdenum-only label (see `MICRO_ANCHOR_KEYS` and `applyMicroEstimates`).
+ *
+ * A mid-range hydroponic Iron target, chosen as an absolute value rather than
+ * back-derived from the declared micro. Fanned out through
+ * `MICRO_TO_FE_RATIO` it puts the rest of the package inside the usual
+ * hydroponic ranges (Mn ≈ 0.71, Zn ≈ 0.36, B ≈ 0.28, Cu ≈ 0.14 ppm), so the
+ * profile stays consistent with the ratios the rest of the calculator uses.
+ */
+export const DEFAULT_MICRO_PROFILE_IRON_PPM = 2.5
+
+/**
+ * How the estimated micro values were arrived at:
+ * - `anchor` — scaled off a declared micro (`EstimatedTargets.anchor`)
+ * - `default-profile` — the standard balanced profile
+ *   (`DEFAULT_MICRO_PROFILE_IRON_PPM`), used when the label declares only
+ *   micros that can't anchor a ratio estimate
+ * - `none` — nothing was estimated (the label declared no micros at all)
+ */
+export type MicroEstimateSource = "anchor" | "default-profile" | "none"
+
 export interface EstimatedTargets {
   targets: ElementalTargets
   estimated: Set<MicroKey>
   /**
-   * Element the missing micros were derived from (see `MICRO_ANCHOR_KEYS`);
-   * null when the label declared no micro usable as an anchor, in which case
-   * nothing was estimated.
+   * Element the missing micros were scaled off (see `MICRO_ANCHOR_KEYS`);
+   * null when the label declared no micro usable as an anchor.
    */
   anchor: MicroKey | null
   /**
    * Micros the label did declare but which can't anchor an estimate (i.e.
-   * Molybdenum). Only ever non-empty when `anchor` is null — lets the UI say
-   * "Mo alone isn't enough, give us Iron" instead of the misleading "we saw
-   * no micronutrients at all".
+   * Molybdenum). Only ever non-empty when `anchor` is null — lets the UI name
+   * them when explaining why the balanced default profile was used instead.
    */
   unanchoredMicros: MicroKey[]
+  estimateSource: MicroEstimateSource
 }
 
 export interface SaltAmounts {

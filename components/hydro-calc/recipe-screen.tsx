@@ -57,6 +57,7 @@ import {
   RAW_SALTS,
   calciumChlorideElementalCalciumPpm,
   checkRecipeSolubility,
+  DEFAULT_MICRO_PROFILE_IRON_PPM,
   emptyElementalTargets,
   emptySaltAmounts,
   formatEc,
@@ -301,6 +302,7 @@ export function RecipeScreen({
     [calcResult]
   )
   const unanchoredMicros = calcResult?.unanchoredMicros ?? []
+  const microEstimateSource = calcResult?.microEstimateSource ?? "none"
   const estimatedEc = calcResult?.estimatedEc ?? null
   const calciumNitrateEcPpmDelta = calcResult?.calciumNitrateEcPpmDelta ?? { calciumPpmDelta: 0, nitrogenPpmDelta: 0 }
   const saltDerivedSulfurPpm = calcResult?.saltDerivedSulfurPpm ?? 0
@@ -506,12 +508,12 @@ export function RecipeScreen({
   // layout, so this simply mirrors whether the recipe has any micros at all.
   const tank2IncludesMicros = threeTankRecipe.hasMicronutrients
 
-  const hasAnyMicro = anchor !== null
   const hasEstimates = estimated.size > 0
-  // A label that lists only Molybdenum: real, but useless as an estimate
-  // anchor (see `applyMicroEstimates`), so the rest stay at 0 and the notice
-  // below asks for a usable micro instead of claiming we saw none at all.
-  const hasUnanchoredMicrosOnly = anchor === null && unanchoredMicros.length > 0
+  // No micro on the label can anchor a ratio estimate — either nothing was
+  // declared, or only Molybdenum was, which is far too small a share to scale
+  // the others from (see `applyMicroEstimates`). The package above came from
+  // the standard balanced profile instead, which the note below explains.
+  const usedDefaultMicroProfile = microEstimateSource === "default-profile"
 
   const hasValidData = hasValidRecipeInput(partsAnalysis, parts)
 
@@ -1199,6 +1201,26 @@ export function RecipeScreen({
                 </p>
               )}
 
+              {hasEstimates && usedDefaultMicroProfile && (
+                <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                  {unanchoredMicros.length > 0 ? (
+                    <>
+                      Your label only lists{" "}
+                      {unanchoredMicros.map((key) => MICRO_LABELS[key]).join(" and ")} — too small a
+                      share of a micro package to scale the others from — so the{" "}
+                    </>
+                  ) : (
+                    <>
+                      Your label doesn&apos;t list any micronutrients, so the{" "}
+                    </>
+                  )}
+                  <span className="italic">estimated</span> values above come from a standard
+                  balanced hydroponic micro profile ({formatPpm(DEFAULT_MICRO_PROFILE_IRON_PPM)} Iron
+                  and the usual Fe : Mn : Zn : B : Cu ratios). To use your product&apos;s real
+                  numbers, enter them on Step 1.
+                </p>
+              )}
+
               {hasValidData && hasSpecialtyCalciumSource && (
                 <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
                   Your label lists Calcium Acetate and/or Calcium Gluconate as a Calcium source.
@@ -1207,30 +1229,6 @@ export function RecipeScreen({
                   using Calcium Nitrate (or Calcium Chloride, if that&apos;s already part of your
                   recipe) instead.
                 </p>
-              )}
-
-              {hasValidData && !hasAnyMicro && (
-                <div className="mt-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  <p className="text-xs leading-relaxed text-amber-300">
-                    {hasUnanchoredMicrosOnly ? (
-                      <>
-                        Your label only lists{" "}
-                        {unanchoredMicros.map((key) => MICRO_LABELS[key]).join(" and ")}, which is
-                        far too small a share of a micro package to estimate the others from — so
-                        we&apos;ve left them at 0 rather than guess. Add at least one of Iron,
-                        Manganese, Zinc, Boron or Copper (Iron is the easiest) back on Step 1 and
-                        we&apos;ll fill in the rest for a complete recipe.
-                      </>
-                    ) : (
-                      <>
-                        We didn&apos;t see any micronutrients in your label data. Add at least one
-                        micro (Iron is the easiest) back on Step 1 and we&apos;ll fill in the rest
-                        for a complete recipe.
-                      </>
-                    )}
-                  </p>
-                </div>
               )}
             </>
           )}

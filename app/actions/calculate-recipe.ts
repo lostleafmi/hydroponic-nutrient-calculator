@@ -31,6 +31,7 @@ import {
   unionIncludedSalts,
   type DirectMixRecipe,
   type ElementalTargets,
+  type MicroEstimateSource,
   type MicroKey,
   type MultiPartTankRecipe,
   type StockTankOption,
@@ -52,10 +53,12 @@ export interface CalculateRecipeResult {
   anchor: MicroKey | null
   /**
    * Declared micros that can't anchor an estimate (Molybdenum) — non-empty
-   * only when `anchor` is null and therefore nothing was estimated. See
-   * `applyMicroEstimates`.
+   * only when `anchor` is null, i.e. when the balanced default profile was
+   * used instead. See `applyMicroEstimates`.
    */
   unanchoredMicros: MicroKey[]
+  /** Whether the estimated micros came from a declared anchor or the default profile */
+  microEstimateSource: MicroEstimateSource
   estimatedEc: number | null
   /**
    * How much of `estimatedEc` above comes from correcting a literally-dosed
@@ -109,6 +112,7 @@ export async function calculateRecipeAction(
     estimated,
     anchor,
     unanchoredMicros,
+    estimateSource: microEstimateSource,
   } = applyMicroEstimates(rawTargets)
 
   // The Separate-Nitrogen and Direct-Mix layouts intentionally recombine
@@ -190,6 +194,7 @@ export async function calculateRecipeAction(
     estimatedMicros: Array.from(estimated),
     anchor,
     unanchoredMicros,
+    microEstimateSource,
     estimatedEc,
     calciumNitrateEcPpmDelta: calciumNitrateEcDelta,
     saltDerivedSulfurPpm: sulfurFromSulfateSalts,

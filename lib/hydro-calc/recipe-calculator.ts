@@ -35,6 +35,7 @@ import {
   TANK_A_SALTS,
   TANK_B_SALTS,
   ureaNitrogenPpmForPart,
+  DEFAULT_MICRO_PROFILE_IRON_PPM,
   MICRO_ANCHOR_KEYS,
   MICRO_KEYS,
   MICRO_TO_FE_RATIO,
@@ -166,35 +167,56 @@ export function calciumNitrateLiteralDoseEcPpmDelta(
 const P2O5_TO_P = 30.974 / 70.974 // ≈ 0.436
 const K2O_TO_K = 78.169 / 94.196 // ≈ 0.830
 
+export interface MicroEstimateOptions {
+  /**
+   * Whether this call may fall back to the standard balanced profile when the
+   * targets carry no anchorable micro. The per-part tank layouts pass false
+   * for every part except the one that owns the micro package (see
+   * `pickDefaultMicroProfilePartId`), so a two-part feed doesn't end up with
+   * two full micro doses stacked on top of each other. Defaults to true for
+   * the combined layouts, which run this once over every part's totals.
+   */
+  allowDefaultProfile?: boolean
+}
+
 /**
  * Fill in any missing micronutrient targets (ppm = 0) using standard
  * hydroponic Fe-anchored ratios. If Fe is missing, the first non-zero micro
  * in `MICRO_ANCHOR_KEYS` order is used to back-derive an implied Fe ppm and
  * the rest are estimated from that.
  *
- * A label whose only declared micro can't anchor an estimate — Molybdenum,
- * see `MICRO_ANCHOR_KEYS` for why — keeps that declared value and leaves
- * every other micro at 0 rather than inventing a whole micro package from
- * it.
+ * A label with no anchorable micro still gets a complete, balanced package:
+ * anything it does declare is kept as-is (a Molybdenum-only label keeps its
+ * real Mo) and the rest are filled from `DEFAULT_MICRO_PROFILE_IRON_PPM`, an
+ * absolute standard-profile Iron target — never back-derived from Mo's 1/1200
+ * ratio, see `MICRO_ANCHOR_KEYS`.
  */
-export function applyMicroEstimates(targets: ElementalTargets): EstimatedTargets {
+export function applyMicroEstimates(
+  targets: ElementalTargets,
+  { allowDefaultProfile = true }: MicroEstimateOptions = {}
+): EstimatedTargets {
   const estimated = new Set<MicroKey>()
   const result: ElementalTargets = { ...targets }
 
   const anchor = MICRO_ANCHOR_KEYS.find((key) => targets[key] > 0) ?? null
+  const unanchoredMicros = anchor === null ? MICRO_KEYS.filter((key) => targets[key] > 0) : []
 
-  if (anchor === null) {
-    return {
-      targets: result,
-      estimated,
-      anchor: null,
-      unanchoredMicros: MICRO_KEYS.filter((key) => targets[key] > 0),
-    }
+  // An all-zero target set is an empty or undosed feed rather than a product
+  // whose label forgot its micros — there's nothing to build a recipe around,
+  // so don't invent a micro package for it.
+  const hasAnyElement = Object.values(targets).some((value) => value > 0)
+  const useDefaultProfile = anchor === null && allowDefaultProfile && hasAnyElement
+
+  if (anchor === null && !useDefaultProfile) {
+    return { targets: result, estimated, anchor: null, unanchoredMicros, estimateSource: "none" }
   }
 
-  // Back-derive an implied Fe ppm from whatever anchor we have, then estimate
-  // every missing micro from that single reference value.
-  const impliedIron = result[anchor] / MICRO_TO_FE_RATIO[anchor]
+  // With a usable anchor, scale the package off that declared value. Without
+  // one, use the standard profile's absolute Iron target — scaling off an
+  // ultra-trace declared micro instead is precisely the 1200× amplification
+  // `MICRO_ANCHOR_KEYS` exists to prevent.
+  const impliedIron =
+    anchor === null ? DEFAULT_MICRO_PROFILE_IRON_PPM : result[anchor] / MICRO_TO_FE_RATIO[anchor]
 
   for (const key of MICRO_KEYS) {
     if (targets[key] > 0) continue
@@ -202,7 +224,55 @@ export function applyMicroEstimates(targets: ElementalTargets): EstimatedTargets
     estimated.add(key)
   }
 
-  return { targets: result, estimated, anchor, unanchoredMicros: [] }
+  return {
+    targets: result,
+    estimated,
+    anchor,
+    unanchoredMicros,
+    estimateSource: useDefaultProfile ? "default-profile" : "anchor",
+  }
+}
+
+/**
+ * Which part should carry the invented micro package in the per-part tank
+ * layouts (A+B stock tanks, doser), which size each part's tank from its own
+ * targets — see `calculateMultiPartStockTankRecipe`. Exactly one part may fall
+ * back to the standard balanced profile, or the feed would get one full micro
+ * dose per bottle.
+ *
+ * Returns null when some part declares an anchorable micro: that part's own
+ * ratio estimate already builds a package off real label data, so no other
+ * part should invent one on top of it.
+ *
+ * Otherwise the package goes to the part with the best claim to it — one that
+ * declares a micro at all (typically Molybdenum), then one whose label lists
+ * chelated micronutrients, then simply the first dosed part.
+ */
+function pickDefaultMicroProfilePartId(
+  partsAnalysis: PartAnalysis[],
+  parts: NutrientPart[]
+): string | null {
+  const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
+  const candidates: Array<{ part: NutrientPart; analysis: PartAnalysis; targets: ElementalTargets }> = []
+
+  for (const feedingPart of parts) {
+    if (parsePositive(feedingPart.dose) === 0) continue
+    const analysis = analysisById.get(feedingPart.id)
+    if (!analysis) continue
+
+    const targets = calculateElementalTargets([analysis], [feedingPart])
+    if (!Object.values(targets).some((value) => value > 0)) continue
+    if (MICRO_ANCHOR_KEYS.some((key) => targets[key] > 0)) return null
+
+    candidates.push({ part: feedingPart, analysis, targets })
+  }
+
+  const declaresAMicro = candidates.find(({ targets }) => MICRO_KEYS.some((key) => targets[key] > 0))
+  const listsChelatedMicros = candidates.find(
+    ({ analysis }) => analysis.includedSalts?.chelatedMicronutrients
+  )
+
+  return (declaresAMicro ?? listsChelatedMicros ?? candidates[0])?.part.id ?? null
 }
 
 /** Grams of salt in a stock tank to deliver target ppm when diluted 1:ratio */
@@ -1105,6 +1175,7 @@ export function calculateMultiPartStockTankRecipe(
   const tanks: PartStockTank[] = []
   const warningsByElement = new Map<string, SaltGapWarning>()
   const autoAddedByElement = new Map<string, SaltAutoAddNote>()
+  const defaultMicroProfilePartId = pickDefaultMicroProfilePartId(partsAnalysis, parts)
   let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
 
@@ -1117,7 +1188,9 @@ export function calculateMultiPartStockTankRecipe(
     const hasAnyElement = Object.values(rawTargets).some((value) => value > 0)
     if (!hasAnyElement) continue
 
-    const { targets } = applyMicroEstimates(rawTargets)
+    const { targets } = applyMicroEstimates(rawTargets, {
+      allowDefaultProfile: feedingPart.id === defaultMicroProfilePartId,
+    })
     const {
       tankA,
       tankB,
@@ -1187,6 +1260,7 @@ export function calculateDoserMultiPartRecipe(
   const consolidatedMicros = emptySaltAmounts()
   const warningsByElement = new Map<string, SaltGapWarning>()
   const autoAddedByElement = new Map<string, SaltAutoAddNote>()
+  const defaultMicroProfilePartId = pickDefaultMicroProfilePartId(partsAnalysis, parts)
   let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
 
@@ -1201,7 +1275,9 @@ export function calculateDoserMultiPartRecipe(
     const hasAnyElement = Object.values(rawTargets).some((value) => value > 0)
     if (!hasAnyElement) continue
 
-    const { targets } = applyMicroEstimates(rawTargets)
+    const { targets } = applyMicroEstimates(rawTargets, {
+      allowDefaultProfile: feedingPart.id === defaultMicroProfilePartId,
+    })
     const {
       tankA,
       tankB,
