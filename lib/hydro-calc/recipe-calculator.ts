@@ -667,17 +667,12 @@ export function calculateStockTankRecipe(
   )
 
   // Priority for the remaining N (after MAP's fixed contribution, if any):
-  // KNO₃ → Ca(NO₃)₂ (as a Ca(NO₃)₂/NH₄NO₃ double-salt split when Ammonium
-  // Nitrate is ALSO checked — see below) → more Ca(NO₃)₂ alone → NH₄NO₃
-  // alone → (NH₄)₂SO₄
+  // Ca(NO₃)₂/NH₄NO₃ double-salt split (when Ammonium Nitrate is checked
+  // ALONGSIDE Calcium Nitrate — see below) → KNO₃ → more Ca(NO₃)₂ alone →
+  // NH₄NO₃ alone → (NH₄)₂SO₄
   const remainingNitrogenPpm = Math.max(0, nitrogenTargetAfterMap - nitrogenFromCalciumNitrate)
   if (remainingNitrogenPpm > 0) {
-    if (isEnabled("potassiumNitrate")) {
-      assignToTankA(
-        "potassiumNitrate",
-        saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.potassiumNitrate.n, stockVolumeLiters, dilutionRatio)
-      )
-    } else if (nitrateEnabled && !calciumNitrateSizedFromFeedRate && isEnabled("ammoniumNitrate")) {
+    if (nitrateEnabled && !calciumNitrateSizedFromFeedRate && isEnabled("ammoniumNitrate")) {
       // Ammonium Nitrate checked ALONGSIDE Calcium Nitrate specifically
       // means "replicate a Calcium Ammonium Nitrate double-salt product"
       // (see that checkbox's own disclaimer). Real commercial "Calcium
@@ -687,14 +682,24 @@ export function calculateStockTankRecipe(
       // often split their %N into a small "ammoniacal" fraction alongside
       // the bulk "nitrate" fraction.
       //
-      // Before this branch existed, the plain `nitrateEnabled` branch below
-      // always ran instead whenever Calcium Nitrate was checked — routing
-      // 100% of the Nitrogen target to Calcium Nitrate and silently
-      // leaving Ammonium Nitrate at 0 even when the user explicitly
-      // checked it too (the bug this fixes: Calcium Nitrate must not
-      // silently absorb the whole target and zero out Ammonium Nitrate).
+      // Checked BEFORE KNO₃ deliberately — this branch's condition is only
+      // ever true because the user explicitly checked Ammonium Nitrate
+      // together with Calcium Nitrate, an intentional choice specific to
+      // whichever part carries that double-salt product. In the "Separate
+      // Nitrogen" (`calculateSeparateCalciumRecipe`) and "Direct Mix"
+      // layouts, `includedSalts` is the UNION of every part's own selection
+      // (nutrients get recombined across parts "by chemistry rather than by
+      // bottle" — see `unionIncludedSalts`), so a completely unrelated part
+      // (e.g. a Bloom part supplying Potassium Nitrate — very common in
+      // multi-part lines) can make `potassiumNitrate` enabled too. With KNO₃
+      // checked first, that unrelated selection always won the ENTIRE
+      // remaining-Nitrogen pot, and the double-salt branch below — despite
+      // Ammonium Nitrate being explicitly checked on its own part — never
+      // ran at all. That's the bug this fix addresses: an explicit
+      // double-salt selection must not be silently overridden by some other
+      // part's unrelated Nitrogen salt.
       //
-      // Fix: split `nitrogenTargetAfterMap` between the two salts at that
+      // Split `nitrogenTargetAfterMap` between the two salts at that
       // formula's fixed 5:1 Ca(NO₃)₂:NH₄NO₃ MOLE ratio. Both compounds
       // carry exactly 2 Nitrogen atoms per mole (Ca(NO₃)₂: 2 nitrate-N;
       // NH₄NO₃: 1 ammoniacal-N + 1 nitrate-N) — since mass ppm of an
@@ -725,6 +730,11 @@ export function calculateStockTankRecipe(
           stockVolumeLiters,
           dilutionRatio
         )
+      )
+    } else if (isEnabled("potassiumNitrate")) {
+      assignToTankA(
+        "potassiumNitrate",
+        saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.potassiumNitrate.n, stockVolumeLiters, dilutionRatio)
       )
     } else if (nitrateEnabled && !calciumNitrateSizedFromFeedRate) {
       // No dedicated nitrate-only salt is enabled, and Ammonium Nitrate
