@@ -412,7 +412,21 @@ export interface SaltCheckboxOption {
    * this unset.
    */
   elementsLabel?: string
+  /**
+   * Short helper note shown in small, secondary text under `label`. A
+   * literal `"\n"` marks an intentional line break (e.g. so a short phrase
+   * like "Ammonium calcium nitrate double salt" always renders as its own
+   * unbroken line instead of wrapping wherever happens to fit) — most
+   * sublabels are a single unbroken line and wrap normally.
+   */
   sublabel: string
+  /**
+   * Center `label`/`elementsLabel`/`sublabel` as a block instead of the
+   * default left alignment. Normally implied by the presence of
+   * `elementsLabel`; set this explicitly for options that want a centered
+   * sublabel without an elemental shorthand line.
+   */
+  centerSublabel?: boolean
   /** Underlying solver salt keys this checkbox gates */
   saltKeys: SaltKey[]
 }
@@ -426,7 +440,8 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   {
     id: "ammoniumNitrateOrSulfate",
     label: "Ammonium Nitrate / Ammonium Sulfate",
-    sublabel: "Select this and Calcium Nitrate for Ammonium calcium nitrate double salt.",
+    sublabel: "Select this and Calcium Nitrate for\nAmmonium calcium nitrate double salt.",
+    centerSublabel: true,
     saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
   },
   { id: "calciumAcetate", label: "Calcium Acetate", sublabel: "", saltKeys: [] },

@@ -292,6 +292,7 @@ function SaltCheckboxRow({
   label,
   elementsLabel,
   sublabel,
+  centerSublabel,
   checked,
   onCheckedChange,
   children,
@@ -309,7 +310,10 @@ function SaltCheckboxRow({
   label: string
   /** Short elemental shorthand shown as its own centered line under `label` (e.g. "Fe, Mn, Zn, B, Cu, Mo"). */
   elementsLabel?: string
+  /** A literal `"\n"` renders as an intentional, non-wrapping line break (see `SaltCheckboxOption.sublabel`). */
   sublabel: string
+  /** Center `label`/`elementsLabel`/`sublabel` even when there's no `elementsLabel` forcing it. */
+  centerSublabel?: boolean
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   /** Extra content (e.g. an optional amount field) shown below the label, only while checked. */
@@ -320,7 +324,15 @@ function SaltCheckboxRow({
   // Options with an `elementsLabel` pack three lines of text into one card
   // (name, element shorthand, full ingredient list) — center all three so
   // they read as one tidy block instead of a ragged left-aligned paragraph.
-  const centered = Boolean(elementsLabel)
+  // `centerSublabel` opts a plain label+sublabel option into the same
+  // treatment (e.g. a short two-line disclaimer reads better centered).
+  const centered = Boolean(elementsLabel) || Boolean(centerSublabel)
+
+  // A literal "\n" in `sublabel` marks deliberate line breaks (e.g. so a
+  // short phrase always stays on its own line instead of wrapping wherever
+  // happens to fit at the current width) — render each as its own
+  // non-wrapping line. Sublabels without a "\n" keep wrapping normally.
+  const sublabelLines = sublabel.split("\n")
 
   return (
     <div
@@ -356,7 +368,17 @@ function SaltCheckboxRow({
               {elementsLabel}
             </span>
           )}
-          {sublabel && <span className="text-pretty text-xs leading-snug text-muted-foreground">{sublabel}</span>}
+          {sublabel && (
+            <span className="text-pretty text-xs leading-snug text-muted-foreground">
+              {sublabelLines.length > 1
+                ? sublabelLines.map((line, i) => (
+                    <span key={i} className="block whitespace-nowrap">
+                      {line}
+                    </span>
+                  ))
+                : sublabel}
+            </span>
+          )}
         </Label>
       </div>
       {checked && children && <div className="mt-2 pl-8">{children}</div>}
@@ -703,6 +725,7 @@ function PartAnalysisCard({
                 label={option.label}
                 elementsLabel={option.elementsLabel}
                 sublabel={option.sublabel}
+                centerSublabel={option.centerSublabel}
                 checked={part.includedSalts[option.id]}
                 onCheckedChange={(checked) => onToggleSalt(option.id, checked)}
                 fullWidth={option.id === "chelatedMicronutrients"}
