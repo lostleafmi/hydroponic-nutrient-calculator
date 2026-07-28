@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   ShieldCheck,
   Gauge,
+  Target,
 } from "lucide-react"
 
 export interface NutrientPart {
@@ -28,9 +29,18 @@ export interface NutrientPart {
   unit: "ml_per_gallon" | "g_per_gallon"
 }
 
-import { isSeparateNitrogenAvailable } from "@/lib/hydro-calc/recipe-types"
+import {
+  isPerPartReplicationPreferred,
+  isSeparateNitrogenAvailable,
+} from "@/lib/hydro-calc/recipe-types"
 
-export type StockTankOption = "separate" | "doser" | "ab" | "direct"
+/**
+ * `"per-part"` builds one stock tank per part in the feed chart, each solved
+ * only from that part's own label, dose and checked salts. It used to be
+ * called `"ab"` — see `normalizeStockTankOption` for the compatibility shim
+ * that keeps older saved formulations loading.
+ */
+export type StockTankOption = "separate" | "doser" | "per-part" | "direct"
 
 interface FeedingRatesScreenProps {
   parts: NutrientPart[]
@@ -50,6 +60,46 @@ export function FeedingRatesScreen({
   onNext
 }: FeedingRatesScreenProps) {
   const canUseSeparateNitrogen = isSeparateNitrogenAvailable(parts.length)
+  // With more than one part, keeping each part in its own tank is what holds
+  // the recipe closest to the line being replicated — every other layout
+  // merges the parts and re-solves them as one. See
+  // `isPerPartReplicationPreferred`.
+  const prefersPerPartTanks = isPerPartReplicationPreferred(parts.length)
+  const tankCountLabel = `${parts.length} tank${parts.length === 1 ? "" : "s"}`
+
+  const perPartOptionCard = (
+    <StockTankOptionCard
+      value="per-part"
+      title="One Stock Tank per Part"
+      description={
+        prefersPerPartTanks
+          ? `Rebuilds each part of your feed chart as its own stock tank (${tankCountLabel}), from only that part's label percentages, its dose, and the salts you checked for it. Measure mL out of each tank into your reservoir by hand, exactly like you would with the original bottles — a doser works too, but isn't required.`
+          : `One stock tank for your single part (${tankCountLabel}). Measure mL out of it into your reservoir by hand, exactly like you would with the original bottle — a doser works too, but isn't required.`
+      }
+      icon={<FlaskConical className="h-5 w-5" />}
+      selected={stockTankOption === "per-part"}
+      recommended={prefersPerPartTanks}
+      accuracyLabel={prefersPerPartTanks ? "Closest to your line" : undefined}
+    />
+  )
+
+  const separateNitrogenOptionCard = canUseSeparateNitrogen ? (
+    <StockTankOptionCard
+      value="separate"
+      title="Separate Nitrogen for tapering before harvest"
+      description={
+        prefersPerPartTanks
+          ? "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor. Blends your parts together into 2 tanks by chemistry instead of keeping them separate, so the ppm can drift a little from your original line."
+          : "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor. Best for hand mixing into your reservoir or batch tank."
+      }
+      icon={<Droplets className="h-5 w-5" />}
+      selected={stockTankOption === "separate"}
+      recommended={!prefersPerPartTanks}
+      safetyLabel="Safest"
+      safetyTone="safe"
+      note="Only for flower recipes"
+    />
+  ) : null
 
   const addPart = () => {
     const newPart: NutrientPart = {
@@ -141,33 +191,19 @@ export function FeedingRatesScreen({
             onValueChange={(value) => onStockTankOptionChange(value as StockTankOption)}
             className="space-y-3"
           >
-            {canUseSeparateNitrogen && (
-              <StockTankOptionCard
-                value="separate"
-                title="Separate Nitrogen for tapering before harvest"
-                description="Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor. Best for hand mixing into your reservoir or batch tank."
-                icon={<Droplets className="h-5 w-5" />}
-                selected={stockTankOption === "separate"}
-                recommended
-                safetyLabel="Safest"
-                safetyTone="safe"
-                note="Only for flower recipes"
-              />
-            )}
+            {/* The recommended option leads: for multi-part lines that's the
+                per-part tanks, since they're the only layout that keeps each
+                part's label, dose and salts to itself and so reproduce the
+                original feed most closely. A single part has nothing to keep
+                separate, so Separate Nitrogen leads there instead. */}
+            {prefersPerPartTanks ? perPartOptionCard : separateNitrogenOptionCard}
+            {prefersPerPartTanks ? separateNitrogenOptionCard : perPartOptionCard}
             <StockTankOptionCard
               value="doser"
               title="Doser / Injector Optimized"
-              description={`Made for dosers and injectors. You get one stock tank per part in your feed chart (${parts.length} tank${parts.length === 1 ? "" : "s"}).`}
+              description={`Starts from the same one-tank-per-part recipe (${tankCountLabel}), then tunes it for injector hardware: the ratio snaps to a standard doser preset, and every part's micronutrients are pooled into one extra tank so no suction line ends up with a pinch too small to weigh accurately.`}
               icon={<Gauge className="h-5 w-5" />}
               selected={stockTankOption === "doser"}
-              recommended={!canUseSeparateNitrogen}
-            />
-            <StockTankOptionCard
-              value="ab"
-              title="Combine into A + B Tanks"
-              description="Matches your nutrient line's exact configuration"
-              icon={<FlaskConical className="h-5 w-5" />}
-              selected={stockTankOption === "ab"}
             />
             <StockTankOptionCard
               value="direct"
@@ -180,11 +216,14 @@ export function FeedingRatesScreen({
             />
           </RadioGroup>
 
-          {!canUseSeparateNitrogen && (
+          {prefersPerPartTanks && (
             <p className="text-sm leading-relaxed text-muted-foreground">
-              With {parts.length} parts in your nutrient line, we create one stock tank per part
-              to match your original feed. Separate Nitrogen tapering is only available for
-              3-part feeds or fewer.
+              With {parts.length} parts in your nutrient line, one stock tank per part is the
+              closest you can get to the original feed: each tank is solved only against its own
+              part, so Part A stays Part A instead of having nutrients shuffled into it from the
+              other bottles.
+              {!canUseSeparateNitrogen &&
+                " Separate Nitrogen tapering is only available for 3-part feeds or fewer."}
             </p>
           )}
 
@@ -327,6 +366,7 @@ function StockTankOptionCard({
   selected = false,
   safetyLabel,
   safetyTone = "safe",
+  accuracyLabel,
   note,
 }: {
   value: string
@@ -337,6 +377,13 @@ function StockTankOptionCard({
   selected?: boolean
   safetyLabel?: string
   safetyTone?: SafetyTone
+  /**
+   * Badge calling out how faithfully this mode reproduces the nutrient line
+   * the user is replicating. Distinct from `safetyLabel`, which speaks to
+   * mixing hazards rather than accuracy — a mode can be both the safest to
+   * mix and the least faithful.
+   */
+  accuracyLabel?: string
   /**
    * Short clarifying disclaimer badge shown next to the title — e.g. scoping
    * a mode to a specific use case (see "Separate Nitrogen"'s "Only for
@@ -370,6 +417,12 @@ function StockTankOptionCard({
           {isRecommended && (
             <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">
               Recommended
+            </span>
+          )}
+          {accuracyLabel && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+              <Target className="h-3.5 w-3.5" />
+              {accuracyLabel}
             </span>
           )}
           {safetyLabel && (

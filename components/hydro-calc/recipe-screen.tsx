@@ -226,7 +226,7 @@ export function RecipeScreen({
     stockTankOption === "doser" && isSeparateNitrogenAvailable(parts.length)
 
   const usesPerPartTanks =
-    (stockTankOption === "doser" && doserLayout === "per-part") || stockTankOption === "ab"
+    (stockTankOption === "doser" && doserLayout === "per-part") || stockTankOption === "per-part"
   const usesSeparateNitrogenLayout =
     stockTankOption === "separate" ||
     (canSeparateCalciumInDoser && doserLayout === "separate-ca")
@@ -695,8 +695,11 @@ export function RecipeScreen({
     if (usesSeparateNitrogenLayout) {
       return ["Tank 1", "Tank 2"]
     }
+    // Name the part alongside the tank — the whole point of this layout is
+    // that each tank stands in for one bottle of the original line, and the
+    // grower doses it wherever that bottle went.
     if (usesPerPartTanks) {
-      return multiPartRecipe.tanks.map((tank) => tank.name)
+      return multiPartRecipe.tanks.map((tank) => `${tank.name} (${tank.partName})`)
     }
     return []
   }, [stockTankOption, usesSeparateNitrogenLayout, usesPerPartTanks, multiPartRecipe.tanks])
@@ -1156,6 +1159,7 @@ export function RecipeScreen({
           mlPerGallon={mlPerGallon}
           mlPerLiter={mlPerLiter}
           isDoser={false}
+          isPerPartReplication={usesPerPartTanks}
         />
       )}
 
@@ -1424,7 +1428,7 @@ export function RecipeScreen({
       {hasValidData &&
         (stockTankOption === "separate" ||
           stockTankOption === "doser" ||
-          stockTankOption === "ab") && (
+          stockTankOption === "per-part") && (
           <>
             <div
               role="alert"
@@ -1677,7 +1681,7 @@ export function RecipeScreen({
         </>
       )}
 
-      {/* Recipe Cards — one stock tank per nutrient part (doser + A+B modes) */}
+      {/* Recipe Cards — one stock tank per nutrient part ("per-part" + doser modes) */}
       {hasValidData && usesPerPartTanks && (
         <PerPartStockTankCards
           tanks={multiPartRecipe.tanks}
@@ -2360,8 +2364,8 @@ function PerPartStockTankCards({
                 {tank.isMicroTank
                   ? `All micronutrients from every part consolidated into one tank. Feeds suction line ${tank.index} on your doser — add it to your reservoir separately from the macro tanks.`
                   : isDoser
-                    ? `Matches your ${tank.partName} from Steps 1 and 2. This tank feeds suction line ${tank.index} on your doser.`
-                    : `Matches your ${tank.partName} from Steps 1 and 2. Add this stock tank to your reservoir separately.`}
+                    ? `Built only from your ${tank.partName} — its guaranteed analysis, its feed-chart dose, and the salts you checked for it in Steps 1 and 2. This tank feeds suction line ${tank.index} on your doser.`
+                    : `Built only from your ${tank.partName} — its guaranteed analysis, its feed-chart dose, and the salts you checked for it in Steps 1 and 2, so it stays faithful to that part's label. Add this stock tank to your reservoir separately.`}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -2469,7 +2473,7 @@ function MixingSafetyBanner({
     )
   }
 
-  if (option === "ab") {
+  if (option === "per-part") {
     return (
       <div
         role="alert"
@@ -2477,10 +2481,13 @@ function MixingSafetyBanner({
       >
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
         <div className="space-y-1 text-sm leading-relaxed text-amber-100">
-          <p className="font-semibold">One stock tank per part</p>
+          <p className="font-semibold">
+            One stock tank per part — the closest match to your nutrient line
+          </p>
           <p>
-            We created {partCount} stock tank{partCount === 1 ? "" : "s"} to match the parts in
-            your nutrient line.{" "}
+            We solved {partCount} stock tank{partCount === 1 ? "" : "s"} independently, each from
+            only its own part&apos;s label, dose and checked salts, so nothing gets shuffled
+            between your parts. Measure mL out of each tank by hand — no doser needed.{" "}
             <strong>Don&apos;t pour your stock tanks into each other at full strength.</strong>{" "}
             Add each one to your reservoir on its own, with a good stir in between.
           </p>
@@ -2666,12 +2673,21 @@ function StockTankUsageCard({
   mlPerGallon,
   mlPerLiter,
   isDoser,
+  isPerPartReplication = false,
 }: {
   tankLabels: string[]
   dilutionRatio: number
   mlPerGallon: number
   mlPerLiter: number
   isDoser: boolean
+  /**
+   * True when each tank listed here corresponds to one part of the grower's
+   * original nutrient line (see `usesPerPartTanks`). Adds the note spelling
+   * out that these tanks are hand-measured drop-in replacements for the
+   * bottles they were built from — the most common misread of this mode is
+   * that per-part tanks need doser hardware.
+   */
+  isPerPartReplication?: boolean
 }) {
   const [mlUnit, setMlUnit] = useState<"gal" | "L">("gal")
 
@@ -2689,7 +2705,9 @@ function StockTankUsageCard({
               <span>How to Use These Stock Tanks</span>
             </CardTitle>
             <CardDescription>
-              How much of each stock tank to add when you fill your reservoir.
+              {isPerPartReplication
+                ? "How much of each stock tank to add when you fill your reservoir — one measurement per part, the same way you'd dose the original bottles."
+                : "How much of each stock tank to add when you fill your reservoir."}
             </CardDescription>
           </div>
           <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
@@ -2756,6 +2774,14 @@ function StockTankUsageCard({
             </li>
           ))}
         </ul>
+
+        {isPerPartReplication && (
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            A syringe, graduated cylinder or measuring jug is all you need — each tank stands in
+            for one part of your original line, so you dose them the same way and in the same
+            order you always have. A doser is optional, not required.
+          </p>
+        )}
 
         <p className="text-xs leading-relaxed text-muted-foreground">
           Pour each stock tank into your reservoir separately — never combine them at full strength

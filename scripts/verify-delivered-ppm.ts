@@ -20,10 +20,12 @@ import {
   DEFAULT_INCLUDED_SALTS,
   elementalPpmFromSaltAmounts,
   emptySaltAmounts,
+  getEnabledSaltKeys,
   isWithinMatchTolerance,
   RAW_SALTS,
   SALT_DISPLAY_ORDER,
   sumSaltAmounts,
+  TANK_3_SALTS,
   type ElementalTargets,
   type IncludedSaltsSelection,
   type SaltAmounts,
@@ -51,6 +53,9 @@ const MICRO_KEYS: Array<keyof ElementalTargets> = [
   "copper",
   "molybdenum",
 ]
+
+/** The salts that carry `MICRO_KEYS` — one per micronutrient. */
+const MICRO_SALT_KEYS = new Set<SaltKey>(TANK_3_SALTS)
 
 const ELEMENT_SYMBOLS: Record<keyof ElementalTargets, string> = {
   nitrogen: "N",
@@ -462,6 +467,132 @@ const DECLARED_DOSES_HELD_FIXED: Scenario = {
   stockTankOption: "separate",
 }
 
+/**
+ * Three parts whose salt lists share nothing, run through the per-part layout:
+ * a Calcium bottle, a P/K bottle and a Mg/S bottle. Every element has exactly
+ * one part that can legally supply it, so any cross-bottle borrowing shows up
+ * immediately (see `reportPerPartSaltContainment`) instead of hiding inside a
+ * plausible-looking total.
+ */
+const PER_PART_ISOLATION: Scenario = {
+  name: "3 parts with disjoint salt lists (per-part tanks must not borrow across bottles)",
+  partsAnalysis: [
+    {
+      id: "a",
+      name: "Cal Base",
+      nitrogen: "11.8",
+      phosphate: "",
+      potash: "",
+      calcium: "16.9",
+      magnesium: "",
+      sulfur: "",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("calciumNitrate"),
+    },
+    {
+      id: "b",
+      name: "PK Base",
+      nitrogen: "",
+      phosphate: "52.3",
+      potash: "34.6",
+      calcium: "",
+      magnesium: "",
+      sulfur: "",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("monoPotassiumPhosphate"),
+    },
+    {
+      id: "c",
+      name: "Mag Sulfur",
+      nitrogen: "",
+      phosphate: "",
+      potash: "",
+      calcium: "",
+      magnesium: "9.9",
+      sulfur: "13",
+      iron: "0.2",
+      manganese: "0.05",
+      zinc: "0.02",
+      boron: "0.02",
+      copper: "0.01",
+      molybdenum: "0.001",
+      includedSalts: salts("magnesiumSulfate", "chelatedMicronutrients"),
+    },
+  ],
+  parts: [
+    { id: "a", name: "Cal Base", dose: "4", unit: "g_per_gallon" },
+    { id: "b", name: "PK Base", dose: "1.5", unit: "g_per_gallon" },
+    { id: "c", name: "Mag Sulfur", dose: "3", unit: "g_per_gallon" },
+  ],
+  stockTankOption: "per-part",
+  // Each part's label is exactly its one salt, so every tank has a
+  // zero-residual solution and the per-part totals must land on the label.
+  expectExactMatch: true,
+}
+
+/**
+ * The per-part layout is the high-fidelity replication path for a multi-part
+ * line: each tank must be buildable from nothing but the part it represents,
+ * so a macro salt checked on Part B can never quietly show up in Part A's tank
+ * to help balance the recipe overall. That independence is the whole reason the
+ * layout tracks the original bottles more closely than the combined ones, and
+ * it's invisible in the ppm table above — a tank that borrowed a neighbour's
+ * salt would still deliver a perfectly plausible total.
+ *
+ * Scoped to macros, because micronutrients are deliberately NOT part-faithful:
+ * a label that declares no anchorable micro gets a whole balanced package
+ * invented for it (see `applyMicroEstimates`), and the doser variant pools
+ * every part's micros into one shared tank on purpose. Micro grams therefore
+ * say nothing about whether the parts were kept independent.
+ */
+function reportPerPartSaltContainment(
+  result: CalculateRecipeResult,
+  scenario: Scenario
+): boolean {
+  const analysisById = new Map(scenario.partsAnalysis.map((part) => [part.id, part]))
+  // One documented exception among the macros: an element that NO checked salt
+  // on the part can supply. The solver reaches for a fallback there rather than
+  // leave the target unmet, and reports it as a `SaltAutoAddNote`.
+  const autoAdded = new Set(
+    (result.multiPartRecipe.autoAddedSalts ?? []).map((note) => note.saltKey)
+  )
+  const macroKeys = SALT_DISPLAY_ORDER.filter((key) => !MICRO_SALT_KEYS.has(key))
+
+  let allPass = true
+  for (const tank of result.multiPartRecipe.tanks) {
+    // The doser variant's consolidated micro tank holds nothing but micros, so
+    // there's no single part to hold it to.
+    if (tank.isMicroTank) continue
+
+    const analysis = analysisById.get(tank.partId)
+    if (!analysis) continue
+
+    const allowed = getEnabledSaltKeys(analysis.includedSalts)
+    const foreign = macroKeys.filter(
+      (key) => tank.salts[key] > 0 && !allowed.has(key) && !autoAdded.has(key)
+    )
+    if (foreign.length === 0) continue
+
+    console.log(
+      `\n    ${tank.name} (${tank.partName}) holds macro salts not checked on that part: ` +
+        foreign.map((key) => `${RAW_SALTS[key].name} ${tank.salts[key].toFixed(3)} g`).join(", ")
+    )
+    allPass = false
+  }
+
+  return allPass
+}
+
 /** A layout's resolved salts, flattened to one comparable set. */
 interface ResolvedLayout {
   label: string
@@ -626,6 +757,9 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
 
   const layouts = resolvedLayouts(result)
   reportSalts("Separate Nitrogen salt amounts", layouts[0].salts)
+  for (const tank of result.multiPartRecipe.tanks) {
+    reportSalts(`Per-part ${tank.name} (${tank.partName})`, tank.salts)
+  }
 
   // Requirement: a checked Potassium Sulfate must be used when it's *needed*.
   // "Needed" means the recipe under-delivers Potassium or Sulfur — the two
@@ -677,6 +811,10 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
     allPass = false
   }
 
+  if (!reportPerPartSaltContainment(result, scenario)) {
+    allPass = false
+  }
+
   if (scenario.expectExactMatch) {
     for (const [index, layout] of layouts.entries()) {
       if (deviationsByLayout[index].length === 0) continue
@@ -713,6 +851,7 @@ async function main(): Promise<void> {
     MKP_MAP_BLEND,
     NO_DECLARED_SULFUR,
     DECLARED_DOSES_HELD_FIXED,
+    PER_PART_ISOLATION,
   ]
   const results: boolean[] = []
   for (const scenario of scenarios) {

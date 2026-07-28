@@ -240,7 +240,7 @@ export function applyMicroEstimates(
 
 /**
  * Which part should carry the invented micro package in the per-part tank
- * layouts (A+B stock tanks, doser), which size each part's tank from its own
+ * layouts ("per-part" stock tanks, doser), which size each part's tank from its own
  * targets — see `calculateMultiPartStockTankRecipe`. Exactly one part may fall
  * back to the standard balanced profile, or the feed would get one full micro
  * dose per bottle.

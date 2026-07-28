@@ -173,7 +173,7 @@ export function buildFormulationTanksData({
     return { usageRates, defaultStockTankSize, tanks, directAddCalciumCarbonate }
   }
 
-  // mode === "per-part" — one stock tank per nutrient part (doser + A+B modes)
+  // mode === "per-part" — one stock tank per nutrient part ("per-part" + doser modes)
   const usageRates: Record<string, number> = {}
   const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
     multiPartRecipe.directAddCalciumCarbonate,

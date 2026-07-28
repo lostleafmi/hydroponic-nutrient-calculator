@@ -126,9 +126,11 @@ export async function calculateRecipeAction(
 
   // The Separate-Nitrogen and Direct-Mix layouts intentionally recombine
   // nutrients across parts by chemistry rather than by bottle, so they draw
-  // from the union of every part's salt selection. Per-part tank layouts
-  // (A+B / doser "one tank per part") instead read each part's own
-  // selection directly inside calculate*MultiPart*Recipe below.
+  // from the union of every part's salt selection. The per-part tank layouts
+  // ("per-part" / doser "one tank per part") instead read each part's own
+  // selection directly inside calculate*MultiPart*Recipe below — that
+  // independence is what makes them the high-fidelity replication path for
+  // multi-part lines, so nothing here may merge their targets.
   const combinedIncludedSalts = unionIncludedSalts(partsAnalysis)
   const combinedCalciumChlorideGramsPerGallon = sumCalciumChlorideGramsPerGallon(partsAnalysis)
   const combinedCalciumNitrateGramsPerGallon = sumCalciumNitrateGramsPerGallon(partsAnalysis, parts)

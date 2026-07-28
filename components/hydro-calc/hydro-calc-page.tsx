@@ -13,7 +13,9 @@ import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-cal
 import {
   ALL_SALTS_SELECTED,
   DEFAULT_INCLUDED_SALTS,
+  defaultStockTankOption,
   isSeparateNitrogenAvailable,
+  normalizeStockTankOption,
   type IncludedSaltsSelection,
 } from "@/lib/hydro-calc/recipe-types"
 import { toast } from "@/hooks/use-toast"
@@ -154,7 +156,9 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
   const [currentScreen, setCurrentScreen] = useState<Screen>("analysis")
   const [partsAnalysis, setPartsAnalysis] = useState<PartAnalysis[]>(initialState.partsAnalysis)
   const [parts, setParts] = useState<NutrientPart[]>(initialState.parts)
-  const [stockTankOption, setStockTankOption] = useState<StockTankOption>("separate")
+  const [stockTankOption, setStockTankOption] = useState<StockTankOption>(() =>
+    defaultStockTankOption(initialState.parts.length)
+  )
 
   // Tracks which recipeInitialSettings generation is in use — incrementing forces
   // RecipeScreen to remount so its useState picks up the new initial values.
@@ -196,8 +200,11 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
         if (Array.isArray(data.parts) && data.parts.length > 0) {
           setParts(data.parts)
         }
-        if (data.stockTankOption) {
-          setStockTankOption(data.stockTankOption as StockTankOption)
+        // Older saved formulations still carry the pre-rename "ab" value for
+        // the per-part layout — see `normalizeStockTankOption`.
+        const savedStockTankOption = normalizeStockTankOption(data.stockTankOption)
+        if (savedStockTankOption) {
+          setStockTankOption(savedStockTankOption)
         }
 
         // --- Pre-fill recipe screen settings ---
@@ -234,9 +241,12 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFormulationId])
 
+  // Separate Nitrogen can't be built past 3 parts. Fall back to one tank per
+  // part rather than the doser layout — it's the same per-part recipe without
+  // assuming the grower owns an injector.
   useEffect(() => {
     if (!isSeparateNitrogenAvailable(parts.length) && stockTankOption === "separate") {
-      setStockTankOption("doser")
+      setStockTankOption("per-part")
     }
   }, [parts.length, stockTankOption])
 

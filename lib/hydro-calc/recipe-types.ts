@@ -726,10 +726,11 @@ export function getEnabledSaltKeys(selection?: IncludedSaltsSelection): Set<Salt
  * parts by chemistry rather than by original bottle (the "Separate Nitrogen"
  * 3-tank layout, the Direct Mix layout, and the EC estimate) — those modes
  * aren't trying to mirror which part a salt came from, so any salt the user
- * indicated is present *anywhere* in their product is fair game. Per-part
- * tank layouts (A+B / doser "one tank per part") must NOT use this — they
- * read each part's own `includedSalts` directly so salts stay confined to
- * the part the user said they belong to.
+ * indicated is present *anywhere* in their product is fair game. The
+ * per-part tank layouts (`"per-part"` and the doser's "one tank per part")
+ * must NOT use this — they read each part's own `includedSalts` directly so
+ * salts stay confined to the part the user said they belong to, which is
+ * what makes them the faithful replication path.
  */
 export function unionIncludedSalts(parts: PartAnalysis[]): IncludedSaltsSelection {
   const union: IncludedSaltsSelection = { ...DEFAULT_INCLUDED_SALTS }
@@ -762,6 +763,54 @@ export const SEPARATE_NITROGEN_MAX_PARTS = 3
 
 export function isSeparateNitrogenAvailable(partCount: number): boolean {
   return partCount <= SEPARATE_NITROGEN_MAX_PARTS
+}
+
+/**
+ * From this many parts up, "one stock tank per part" is the highest-fidelity
+ * way to reproduce the original nutrient line, and the UI should present it
+ * that way.
+ *
+ * Every other layout recombines the parts by chemistry and re-solves the
+ * merged elemental targets in one pass (see `unionIncludedSalts`). That's a
+ * strictly larger search space, so the merged solve can land closer to the
+ * *summed* targets — but it does so by moving nutrients between bottles,
+ * which is exactly the drift growers notice when they compare against the
+ * line they were replicating. Solving each part on its own instead keeps
+ * every tank tied to the label it came from.
+ *
+ * One part has nothing to recombine, so the distinction only starts to
+ * matter at two.
+ */
+export const PER_PART_REPLICATION_MIN_PARTS = 2
+
+export function isPerPartReplicationPreferred(partCount: number): boolean {
+  return partCount >= PER_PART_REPLICATION_MIN_PARTS
+}
+
+/**
+ * `"per-part"` was previously called `"ab"`, back when the option was framed
+ * as "combine into A + B tanks". The name was always a misnomer — the layout
+ * builds one tank per part in the feed chart, not a fixed pair of chemistry
+ * tanks — so it's since been renamed. Saved formulations still carry the old
+ * value, so normalize whatever comes back from storage before using it.
+ */
+export function normalizeStockTankOption(value: unknown): StockTankOption | null {
+  if (value === "ab") return "per-part"
+  if (value === "separate" || value === "doser" || value === "per-part" || value === "direct") {
+    return value
+  }
+  return null
+}
+
+/**
+ * Which layout a fresh session should start on. Multi-part lines default to
+ * the per-part tanks that reproduce them most faithfully (see
+ * `isPerPartReplicationPreferred`); a single-part feed has no parts to keep
+ * separate, so it starts on the Separate Nitrogen layout instead, which buys
+ * end-of-flower tapering for free.
+ */
+export function defaultStockTankOption(partCount: number): StockTankOption {
+  return isPerPartReplicationPreferred(partCount) ? "per-part" : "separate"
 }
 
 /**
@@ -1167,7 +1216,7 @@ export function roundDownToNiceRatio(ratio: number): number {
  * mixes a stock tank that concentrated by hand, and even the strongest
  * common commercial doser/proportioner tops out around 1:200 (see
  * `DOSER_PRESET_RATIOS`) — so this doubles as a sensible ceiling for manual
- * A+B / multi-tank setups too, not just doser mode.
+ * hand-mixed multi-tank setups too, not just doser mode.
  *
  * Only caps the *auto-picked* recommendation — a user who explicitly types
  * in a higher custom ratio is still free to do so.
