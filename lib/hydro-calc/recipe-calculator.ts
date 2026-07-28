@@ -667,7 +667,9 @@ export function calculateStockTankRecipe(
   )
 
   // Priority for the remaining N (after MAP's fixed contribution, if any):
-  // KNO₃ → more Ca(NO₃)₂ → NH₄NO₃ → (NH₄)₂SO₄
+  // KNO₃ → Ca(NO₃)₂ (as a Ca(NO₃)₂/NH₄NO₃ double-salt split when Ammonium
+  // Nitrate is ALSO checked — see below) → more Ca(NO₃)₂ alone → NH₄NO₃
+  // alone → (NH₄)₂SO₄
   const remainingNitrogenPpm = Math.max(0, nitrogenTargetAfterMap - nitrogenFromCalciumNitrate)
   if (remainingNitrogenPpm > 0) {
     if (isEnabled("potassiumNitrate")) {
@@ -675,19 +677,70 @@ export function calculateStockTankRecipe(
         "potassiumNitrate",
         saltGramsForTargetPpm(remainingNitrogenPpm, RAW_SALTS.potassiumNitrate.n, stockVolumeLiters, dilutionRatio)
       )
+    } else if (nitrateEnabled && !calciumNitrateSizedFromFeedRate && isEnabled("ammoniumNitrate")) {
+      // Ammonium Nitrate checked ALONGSIDE Calcium Nitrate specifically
+      // means "replicate a Calcium Ammonium Nitrate double-salt product"
+      // (see that checkbox's own disclaimer). Real commercial "Calcium
+      // Nitrate" fertilizer — the common 15.5-0-0 / 19% Ca "Norway
+      // saltpeter" — isn't pure Ca(NO₃)₂ at all; it's manufactured as the
+      // double salt 5 Ca(NO₃)₂·NH₄NO₃·10H₂O, which is why real labels
+      // often split their %N into a small "ammoniacal" fraction alongside
+      // the bulk "nitrate" fraction.
+      //
+      // Before this branch existed, the plain `nitrateEnabled` branch below
+      // always ran instead whenever Calcium Nitrate was checked — routing
+      // 100% of the Nitrogen target to Calcium Nitrate and silently
+      // leaving Ammonium Nitrate at 0 even when the user explicitly
+      // checked it too (the bug this fixes: Calcium Nitrate must not
+      // silently absorb the whole target and zero out Ammonium Nitrate).
+      //
+      // Fix: split `nitrogenTargetAfterMap` between the two salts at that
+      // formula's fixed 5:1 Ca(NO₃)₂:NH₄NO₃ MOLE ratio. Both compounds
+      // carry exactly 2 Nitrogen atoms per mole (Ca(NO₃)₂: 2 nitrate-N;
+      // NH₄NO₃: 1 ammoniacal-N + 1 nitrate-N) — since mass ppm of an
+      // element is always proportional to its mole count regardless of
+      // which compound it came from, that 5:1 MOLE ratio is *also* exactly
+      // the ratio to split elemental Nitrogen ppm between the two salts,
+      // no extra unit conversion needed: 5/6 to Calcium Nitrate, 1/6 to
+      // Ammonium Nitrate. Of Ammonium Nitrate's 1/6 share, only half ends
+      // up as ammoniacal-N (the other half is its own nitrate-N) — landing
+      // close to a real double-salt label's small declared ammoniacal-N%
+      // (e.g. ~0.9% out of ~14% total N).
+      const DOUBLE_SALT_CA_NO3_TO_NH4NO3_MOLE_RATIO = 5
+      const ammoniumNitrateShareOfNitrogen = 1 / (DOUBLE_SALT_CA_NO3_TO_NH4NO3_MOLE_RATIO + 1)
+      const ammoniumNitrateNitrogenPpm = nitrogenTargetAfterMap * ammoniumNitrateShareOfNitrogen
+      const calciumNitrateNitrogenPpm = nitrogenTargetAfterMap - ammoniumNitrateNitrogenPpm
+
+      calciumNitrateGrams = saltGramsForTargetPpm(
+        calciumNitrateNitrogenPpm,
+        RAW_SALTS.calciumNitrate.n,
+        stockVolumeLiters,
+        dilutionRatio
+      )
+      assignToTankA(
+        "ammoniumNitrate",
+        saltGramsForTargetPpm(
+          ammoniumNitrateNitrogenPpm,
+          RAW_SALTS.ammoniumNitrate.n,
+          stockVolumeLiters,
+          dilutionRatio
+        )
+      )
     } else if (nitrateEnabled && !calciumNitrateSizedFromFeedRate) {
-      // No dedicated nitrate-only salt is enabled, but Calcium Nitrate is —
-      // re-size it off the full (MAP-adjusted) Nitrogen target instead of
-      // its Calcium-only share. This grams value is always ≥ the
-      // Calcium-based amount above (it's solving for a requirement that's
-      // at least as large on the same salt), so the Calcium target stays
-      // fully met — with, when Carbonate and/or Chloride are also enabled,
-      // some unavoidable Calcium overshoot on top of their own fixed shares
-      // as the trade-off for hitting Nitrogen. This is exactly the
-      // "generic Calcium Nitrate + a little Calcium Chloride" case: Nitrate
-      // ends up sized for Nitrogen (its primary job here), Chloride keeps
-      // its small top-up share untouched. Carbonate's and Chloride's own
-      // allocations are untouched either way.
+      // No dedicated nitrate-only salt is enabled, and Ammonium Nitrate
+      // isn't checked (the double-salt branch above handles the case where
+      // it is) — re-size Calcium Nitrate off the full (MAP-adjusted)
+      // Nitrogen target instead of its Calcium-only share. This grams
+      // value is always ≥ the Calcium-based amount above (it's solving for
+      // a requirement that's at least as large on the same salt), so the
+      // Calcium target stays fully met — with, when Carbonate and/or
+      // Chloride are also enabled, some unavoidable Calcium overshoot on
+      // top of their own fixed shares as the trade-off for hitting
+      // Nitrogen. This is exactly the "generic Calcium Nitrate + a little
+      // Calcium Chloride" case: Nitrate ends up sized for Nitrogen (its
+      // primary job here), Chloride keeps its small top-up share
+      // untouched. Carbonate's and Chloride's own allocations are
+      // untouched either way.
       //
       // Skipped when `calciumNitrateSizedFromFeedRate` is true: that means
       // the caller gave us Calcium Nitrate's own literal feed-chart dose
