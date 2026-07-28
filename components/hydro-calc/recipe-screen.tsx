@@ -1342,9 +1342,12 @@ export function RecipeScreen({
       {/* Recipe Cards — Separate Nitrogen (chemistry 3-tank) layout */}
       {hasValidData && usesSeparateNitrogenLayout && (
         <>
-          {/* Tank 1 — Calcium Nitrate and/or Calcium Chloride (both soluble).
-              Calcium Carbonate, even when enabled, never lands here — see
-              the direct-add banner above. */}
+          {/* Tank 1 — Calcium Nitrate and/or Calcium Chloride (both soluble),
+              plus Ammonium Nitrate when it's the Ca(NO₃)₂/NH₄NO₃ double-salt
+              share (see `ammoniumNitrateIsCalciumDoubleSalt` in
+              `calculateSeparateCalciumRecipe`) rather than an independent
+              Nitrogen salt. Calcium Carbonate, even when enabled, never
+              lands here — see the direct-add banner above. */}
           <Card className="border-2 border-primary/50 bg-card">
             <CardHeader className="bg-primary/5">
               <CardTitle className="flex items-center gap-2 text-xl text-foreground">
@@ -1358,8 +1361,9 @@ export function RecipeScreen({
                 </span>
               </CardTitle>
               <CardDescription>
-                Just your Calcium source in this stock tank. Keeping it on its own makes it easy
-                to taper down near the end of flower without changing the rest of your recipe.
+                {threeTankRecipe.tank1.ammoniumNitrate > 0
+                  ? "Your Calcium source in this stock tank, plus Ammonium Nitrate as the other half of the Calcium Ammonium Nitrate double salt. Keeping them together makes it easy to taper both down near the end of flower without changing the rest of your recipe."
+                  : "Just your Calcium source in this stock tank. Keeping it on its own makes it easy to taper down near the end of flower without changing the rest of your recipe."}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -1379,6 +1383,15 @@ export function RecipeScreen({
                       : undefined
                   }
                 />
+                {/* Only ever non-zero here when it's the Ca(NO₃)₂/NH₄NO₃
+                    double-salt share — an independently-checked Ammonium
+                    Nitrate still lands in Tank 2 below (see
+                    `calculateSeparateCalciumRecipe`). */}
+                <SaltRow
+                  name={RAW_SALTS.ammoniumNitrate.name}
+                  formula={RAW_SALTS.ammoniumNitrate.formula}
+                  amount={scaledGrams(threeTankRecipe.tank1.ammoniumNitrate)}
+                />
                 <SaltRow
                   name={RAW_SALTS.calciumChloride.name}
                   formula={RAW_SALTS.calciumChloride.formula}
@@ -1397,10 +1410,11 @@ export function RecipeScreen({
               </div>
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
                 <p className="text-sm text-muted-foreground">
-                  <strong className="text-foreground">How to mix:</strong> Fill the stock tank
-                  about halfway with RO water, add the calcium source and stir until it&apos;s fully
-                  dissolved then top it up to {stockTankSize}{" "}
-                  {stockTankUnit === "gallons" ? "gallons" : "liters"} and label it
+                  <strong className="text-foreground">How to mix:</strong>{" "}
+                  {threeTankRecipe.tank1.ammoniumNitrate > 0
+                    ? "Fill the stock tank about halfway with RO water, add the salts listed above and stir until fully dissolved then top it up to"
+                    : "Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved then top it up to"}{" "}
+                  {stockTankSize} {stockTankUnit === "gallons" ? "gallons" : "liters"} and label it
                   &quot;Tank 1&quot;.
                 </p>
               </div>

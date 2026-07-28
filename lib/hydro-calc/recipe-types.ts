@@ -269,6 +269,19 @@ export interface TankRecipe {
   isApproximate?: boolean
   /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into tankA/tankB */
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
+  /**
+   * True when `tankA.ammoniumNitrate` above was sized as this part's share
+   * of a Ca(NO₃)₂/NH₄NO₃ double-salt split (Ammonium Nitrate checked
+   * ALONGSIDE Calcium Nitrate — see `SALT_CHECKBOX_OPTIONS`'s double-salt
+   * disclaimer and the Nitrogen-solving block in `calculateStockTankRecipe`)
+   * rather than as an independently-checked Nitrogen salt. Layouts that
+   * split salts across multiple physical stock tanks — currently only
+   * `calculateSeparateCalciumRecipe`'s Tank 1 / Tank 2 split — use this to
+   * keep Ammonium Nitrate grouped with Calcium Nitrate instead of routing
+   * it to a separate "remaining macros" tank, since it's chemically the
+   * same double-salt product rather than a distinct ingredient.
+   */
+  ammoniumNitrateIsCalciumDoubleSalt?: boolean
 }
 
 export interface ThreeTankRecipe {

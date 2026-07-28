@@ -672,6 +672,14 @@ export function calculateStockTankRecipe(
   // NH₄NO₃ alone → (NH₄)₂SO₄
   const doubleSaltSplitApplies =
     nitrateEnabled && !calciumNitrateSizedFromFeedRate && isEnabled("ammoniumNitrate")
+  // Surfaced in the returned recipe (see `TankRecipe.ammoniumNitrateIsCalciumDoubleSalt`)
+  // so layouts that split salts across multiple physical tanks — currently
+  // only `calculateSeparateCalciumRecipe` — know to keep Ammonium Nitrate
+  // grouped with Calcium Nitrate instead of routing it to a separate
+  // "remaining macros" tank: this Ammonium Nitrate amount isn't an
+  // independent Nitrogen source the user separately checked, it's this
+  // part's own declared double-salt product split into its two components.
+  let ammoniumNitrateIsCalciumDoubleSalt = false
 
   if (doubleSaltSplitApplies && nitrogenTargetAfterMap > 0) {
     // Ammonium Nitrate checked ALONGSIDE Calcium Nitrate specifically
@@ -753,6 +761,7 @@ export function calculateStockTankRecipe(
         dilutionRatio
       )
     )
+    ammoniumNitrateIsCalciumDoubleSalt = true
   } else {
     const remainingNitrogenPpm = Math.max(0, nitrogenTargetAfterMap - nitrogenFromCalciumNitrate)
     if (remainingNitrogenPpm > 0) {
@@ -914,7 +923,14 @@ export function calculateStockTankRecipe(
     saltGramsForTargetPpm(targets.molybdenum, RAW_SALTS.sodiumMolybdate.mo, stockVolumeLiters, dilutionRatio)
   )
 
-  return { tankA, tankB, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate }
+  return {
+    tankA,
+    tankB,
+    warnings,
+    isApproximate: warnings.length > 0,
+    directAddCalciumCarbonate,
+    ammoniumNitrateIsCalciumDoubleSalt,
+  }
 }
 
 /**
@@ -922,6 +938,14 @@ export function calculateStockTankRecipe(
  * tapering.
  *
  *   Tank 1 — Calcium Nitrate only (Ca²⁺ + N). Taper this to drop N at end of flower.
+ *            Ammonium Nitrate joins Tank 1 too, but ONLY when it's this
+ *            recipe's Ca(NO₃)₂/NH₄NO₃ double-salt share (see
+ *            `ammoniumNitrateIsCalciumDoubleSalt` below) — it's the same
+ *            physical double-salt product as the Calcium Nitrate share, so
+ *            splitting the two across tanks would mean tapering only half
+ *            of one compound. Ammonium Nitrate checked as its own
+ *            independent Nitrogen source (not paired with Calcium Nitrate)
+ *            still goes to Tank 2 as before.
  *   Tank 2 — Everything else: remaining macro salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄)
  *            AND the micronutrients (Fe-DTPA, Mn/Zn/Cu-EDTA chelates, boric
  *            acid, sodium molybdate) — always merged together for a clean
@@ -950,6 +974,7 @@ export function calculateSeparateCalciumRecipe(
     warnings = [],
     isApproximate = false,
     directAddCalciumCarbonate,
+    ammoniumNitrateIsCalciumDoubleSalt = false,
   } = calculateStockTankRecipe(
     targets,
     stockVolumeLiters,
@@ -963,15 +988,22 @@ export function calculateSeparateCalciumRecipe(
   const tank1 = emptySaltAmounts()
   const tank2 = emptySaltAmounts()
 
+  // Ammonium Nitrate normally belongs in Tank 2 alongside the other
+  // Nitrogen macros (see `TANK_2_SALTS`) — EXCEPT when it's this recipe's
+  // Ca(NO₃)₂/NH₄NO₃ double-salt share, in which case it moves into Tank 1
+  // with Calcium Nitrate instead (see the function doc comment above).
   const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>([
     "potassiumNitrate",
-    "ammoniumNitrate",
+    ...(ammoniumNitrateIsCalciumDoubleSalt ? [] : (["ammoniumNitrate"] as const)),
     "magnesiumNitrate",
     "urea",
   ])
 
   for (const key of TANK_1_SALTS) {
     tank1[key] = tankA[key]
+  }
+  if (ammoniumNitrateIsCalciumDoubleSalt) {
+    tank1.ammoniumNitrate = tankA.ammoniumNitrate
   }
   for (const key of TANK_2_SALTS) {
     tank2[key] = TANK_A_KEYS_IN_TANK_2.has(key) ? tankA[key] : tankB[key]
