@@ -35,6 +35,7 @@ import {
   TANK_A_SALTS,
   TANK_B_SALTS,
   ureaNitrogenPpmForPart,
+  MICRO_ANCHOR_KEYS,
   MICRO_KEYS,
   MICRO_TO_FE_RATIO,
   type DirectAddCalciumCarbonate,
@@ -168,23 +169,27 @@ const K2O_TO_K = 78.169 / 94.196 // ≈ 0.830
 /**
  * Fill in any missing micronutrient targets (ppm = 0) using standard
  * hydroponic Fe-anchored ratios. If Fe is missing, the first non-zero micro
- * in priority order is used to back-derive an implied Fe ppm and the rest
- * are estimated from that.
+ * in `MICRO_ANCHOR_KEYS` order is used to back-derive an implied Fe ppm and
+ * the rest are estimated from that.
+ *
+ * A label whose only declared micro can't anchor an estimate — Molybdenum,
+ * see `MICRO_ANCHOR_KEYS` for why — keeps that declared value and leaves
+ * every other micro at 0 rather than inventing a whole micro package from
+ * it.
  */
 export function applyMicroEstimates(targets: ElementalTargets): EstimatedTargets {
   const estimated = new Set<MicroKey>()
   const result: ElementalTargets = { ...targets }
 
-  let anchor: MicroKey | null = null
-  for (const key of MICRO_KEYS) {
-    if (targets[key] > 0) {
-      anchor = key
-      break
-    }
-  }
+  const anchor = MICRO_ANCHOR_KEYS.find((key) => targets[key] > 0) ?? null
 
   if (anchor === null) {
-    return { targets: result, estimated, anchor: null }
+    return {
+      targets: result,
+      estimated,
+      anchor: null,
+      unanchoredMicros: MICRO_KEYS.filter((key) => targets[key] > 0),
+    }
   }
 
   // Back-derive an implied Fe ppm from whatever anchor we have, then estimate
@@ -197,7 +202,7 @@ export function applyMicroEstimates(targets: ElementalTargets): EstimatedTargets
     estimated.add(key)
   }
 
-  return { targets: result, estimated, anchor }
+  return { targets: result, estimated, anchor, unanchoredMicros: [] }
 }
 
 /** Grams of salt in a stock tank to deliver target ppm when diluted 1:ratio */

@@ -300,6 +300,7 @@ export function RecipeScreen({
     () => new Set<MicroKey>(calcResult?.estimatedMicros ?? []),
     [calcResult]
   )
+  const unanchoredMicros = calcResult?.unanchoredMicros ?? []
   const estimatedEc = calcResult?.estimatedEc ?? null
   const calciumNitrateEcPpmDelta = calcResult?.calciumNitrateEcPpmDelta ?? { calciumPpmDelta: 0, nitrogenPpmDelta: 0 }
   const saltDerivedSulfurPpm = calcResult?.saltDerivedSulfurPpm ?? 0
@@ -507,6 +508,10 @@ export function RecipeScreen({
 
   const hasAnyMicro = anchor !== null
   const hasEstimates = estimated.size > 0
+  // A label that lists only Molybdenum: real, but useless as an estimate
+  // anchor (see `applyMicroEstimates`), so the rest stay at 0 and the notice
+  // below asks for a usable micro instead of claiming we saw none at all.
+  const hasUnanchoredMicrosOnly = anchor === null && unanchoredMicros.length > 0
 
   const hasValidData = hasValidRecipeInput(partsAnalysis, parts)
 
@@ -1208,9 +1213,22 @@ export function RecipeScreen({
                 <div className="mt-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
                   <p className="text-xs leading-relaxed text-amber-300">
-                    We didn&apos;t see any micronutrients in your label data. Add at least one micro
-                    (Iron is the easiest) back on Step 1 and we&apos;ll fill in the rest for a
-                    complete recipe.
+                    {hasUnanchoredMicrosOnly ? (
+                      <>
+                        Your label only lists{" "}
+                        {unanchoredMicros.map((key) => MICRO_LABELS[key]).join(" and ")}, which is
+                        far too small a share of a micro package to estimate the others from — so
+                        we&apos;ve left them at 0 rather than guess. Add at least one of Iron,
+                        Manganese, Zinc, Boron or Copper (Iron is the easiest) back on Step 1 and
+                        we&apos;ll fill in the rest for a complete recipe.
+                      </>
+                    ) : (
+                      <>
+                        We didn&apos;t see any micronutrients in your label data. Add at least one
+                        micro (Iron is the easiest) back on Step 1 and we&apos;ll fill in the rest
+                        for a complete recipe.
+                      </>
+                    )}
                   </p>
                 </div>
               )}

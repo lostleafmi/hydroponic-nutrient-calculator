@@ -50,6 +50,12 @@ export interface CalculateRecipeResult {
   /** Set is not serializable across the Server Action boundary — sent as an array */
   estimatedMicros: MicroKey[]
   anchor: MicroKey | null
+  /**
+   * Declared micros that can't anchor an estimate (Molybdenum) — non-empty
+   * only when `anchor` is null and therefore nothing was estimated. See
+   * `applyMicroEstimates`.
+   */
+  unanchoredMicros: MicroKey[]
   estimatedEc: number | null
   /**
    * How much of `estimatedEc` above comes from correcting a literally-dosed
@@ -98,7 +104,12 @@ export async function calculateRecipeAction(
   const dilutionRatio = sanitizePositiveNumber(input.dilutionRatio, 100)
 
   const rawTargets = calculateElementalTargets(partsAnalysis, parts)
-  const { targets: targetsBeforeSaltSulfur, estimated, anchor } = applyMicroEstimates(rawTargets)
+  const {
+    targets: targetsBeforeSaltSulfur,
+    estimated,
+    anchor,
+    unanchoredMicros,
+  } = applyMicroEstimates(rawTargets)
 
   // The Separate-Nitrogen and Direct-Mix layouts intentionally recombine
   // nutrients across parts by chemistry rather than by bottle, so they draw
@@ -178,6 +189,7 @@ export async function calculateRecipeAction(
     targets,
     estimatedMicros: Array.from(estimated),
     anchor,
+    unanchoredMicros,
     estimatedEc,
     calciumNitrateEcPpmDelta: calciumNitrateEcDelta,
     saltDerivedSulfurPpm: sulfurFromSulfateSalts,

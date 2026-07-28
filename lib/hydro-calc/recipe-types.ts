@@ -40,7 +40,6 @@ export interface ElementalTargets {
 
 export type MicroKey = "iron" | "manganese" | "zinc" | "boron" | "copper" | "molybdenum"
 
-/** Preferred order for picking an anchor when estimating missing micros */
 export const MICRO_KEYS: MicroKey[] = [
   "iron",
   "manganese",
@@ -49,6 +48,20 @@ export const MICRO_KEYS: MicroKey[] = [
   "copper",
   "molybdenum",
 ]
+
+/**
+ * Micros allowed to anchor an estimate of the missing ones, in preference
+ * order (see `applyMicroEstimates`).
+ *
+ * Molybdenum is deliberately excluded. Estimating from an anchor means
+ * dividing it by its Fe ratio, so the anchor's own rounding error is
+ * multiplied by the inverse of that ratio — and Mo sits at 1/1200 of Fe.
+ * A label declaring "Mo 0.001%" (already at its printed precision) dosed at
+ * 5 g/gal therefore back-derived ~15.9 ppm Fe and ~4.5 ppm Mn out of thin
+ * air. The remaining five micros stay within ~18× of Fe, close enough that
+ * a declared value carries real signal about the rest of the package.
+ */
+export const MICRO_ANCHOR_KEYS: MicroKey[] = ["iron", "manganese", "zinc", "boron", "copper"]
 
 export const MICRO_LABELS: Record<MicroKey, string> = {
   iron: "Iron",
@@ -76,8 +89,19 @@ export const MICRO_TO_FE_RATIO: Record<MicroKey, number> = {
 export interface EstimatedTargets {
   targets: ElementalTargets
   estimated: Set<MicroKey>
-  /** Element used to derive the missing micros; null if no micros were provided */
+  /**
+   * Element the missing micros were derived from (see `MICRO_ANCHOR_KEYS`);
+   * null when the label declared no micro usable as an anchor, in which case
+   * nothing was estimated.
+   */
   anchor: MicroKey | null
+  /**
+   * Micros the label did declare but which can't anchor an estimate (i.e.
+   * Molybdenum). Only ever non-empty when `anchor` is null — lets the UI say
+   * "Mo alone isn't enough, give us Iron" instead of the misleading "we saw
+   * no micronutrients at all".
+   */
+  unanchoredMicros: MicroKey[]
 }
 
 export interface SaltAmounts {
