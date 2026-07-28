@@ -18,6 +18,8 @@ import {
   buildDirectAddCalciumCarbonate,
   calciumChlorideElementalCalciumPpm,
   combineDirectAddCalciumCarbonate,
+  ELEMENT_LABELS,
+  elementalPpmFromSaltAmounts,
   emptyElementalTargets,
   emptySaltAmounts,
   getConcentrateGramsPerLiter,
@@ -25,6 +27,8 @@ import {
   getEnabledSaltKeys,
   gramsFromFeedRatePerGallon,
   isCalciumNitrateSoleDoseSource,
+  isWithinMatchTolerance,
+  matchTolerancePpm,
   parsePositive,
   percentToPpm,
   RAW_SALTS,
@@ -52,6 +56,7 @@ import {
   type SaltGapWarning,
   type SaltKey,
   type TankRecipe,
+  type TargetDeviation,
   type ThreeTankRecipe,
 } from "@/lib/hydro-calc/recipe-types"
 
@@ -298,6 +303,208 @@ function ppmFromSaltInStock(
 }
 
 /**
+ * Macronutrients the amount-refinement pass below balances against each
+ * other. Micronutrients are deliberately excluded: each one is supplied by
+ * exactly one salt, and that salt supplies nothing else, so the sequential
+ * pass already hits every micro target exactly and there is no trade-off to
+ * make.
+ */
+const REFINED_ELEMENTS = [
+  "nitrogen",
+  "phosphorus",
+  "potassium",
+  "calcium",
+  "magnesium",
+  "sulfur",
+] as const satisfies readonly (keyof ElementalTargets)[]
+
+type RefinedElement = (typeof REFINED_ELEMENTS)[number]
+
+/** Which `RAW_SALTS` composition fraction supplies each refined element */
+const REFINED_ELEMENT_FRACTION_FIELD: Record<RefinedElement, string> = {
+  nitrogen: "n",
+  phosphorus: "p",
+  potassium: "k",
+  calcium: "ca",
+  magnesium: "mg",
+  sulfur: "s",
+}
+
+function saltFractionOf(saltKey: SaltKey, element: RefinedElement): number {
+  const composition: Record<string, unknown> = RAW_SALTS[saltKey]
+  const fraction = composition[REFINED_ELEMENT_FRACTION_FIELD[element]]
+  return typeof fraction === "number" && fraction > 0 ? fraction : 0
+}
+
+/**
+ * Strength of the pull back toward the sequential pass's own allocation,
+ * relative to each variable's own fitting weight. Deliberately tiny: it only
+ * breaks ties. When the enabled salts can hit every target exactly there are
+ * often many gram combinations that do (MKP + MAP + KNO₃ is the standard
+ * example — see `mkpShareOfPhosphorus`), and least squares alone has no
+ * opinion about which one to return. Anchoring keeps whichever the
+ * well-established sequential heuristics chose, so this pass changes nothing
+ * for recipes that already matched and only redistributes amounts where they
+ * genuinely didn't.
+ */
+const REFINEMENT_ANCHOR_STRENGTH = 1e-6
+
+const REFINEMENT_MAX_PASSES = 400
+
+/** Stop once a full pass moves every element by less than this many ppm */
+const REFINEMENT_CONVERGENCE_PPM = 1e-9
+
+/**
+ * One adjustable quantity in the refinement below. Usually a single salt
+ * (`gramsPerUnit` 1, so the variable *is* that salt's grams), but salts whose
+ * ratio to each other is fixed by the product being replicated — the
+ * Ca(NO₃)₂/NH₄NO₃ double salt — scale together as one variable so the fit can
+ * resize the product as a whole without breaking up its formula.
+ */
+interface RefinementVariable {
+  components: Array<{ saltKey: SaltKey; gramsPerUnit: number }>
+}
+
+/**
+ * Rebalance the salt amounts the sequential pass produced so the recipe
+ * actually delivers the elemental targets as closely as the enabled salts
+ * allow.
+ *
+ * The sequential pass solves one element at a time in a fixed priority order,
+ * which works whenever each element has a dedicated source but breaks down as
+ * soon as one salt carries two targeted elements. Every macro salt does:
+ * KNO₃ sized for Nitrogen drags Potassium along, MKP sized for Phosphorus
+ * drags Potassium along, MgSO₄ sized for Magnesium drags Sulfur along. Once
+ * an earlier element's salt has already over-supplied a later one, the
+ * sequential pass has no way to walk it back — it only ever tops deficits up.
+ * That's how a grower who checked Potassium Sulfate for both its Potassium
+ * and its Sulfur got a recipe containing none of it: KNO₃ and MKP had already
+ * pushed Potassium past its target, leaving no "remaining Potassium" to
+ * assign, and Sulfur was never a sizing input at all.
+ *
+ * This pass replaces that one-shot ordering with a bounded least-squares fit
+ * over every enabled salt at once. Each element's squared ppm error is weighted
+ * by 1/tolerance² off the shared per-element bands in `matchTolerancePpm`, so
+ * error is minimized in units of how much each element actually cares rather
+ * than in raw ppm, and amounts are constrained to be non-negative. Crucially,
+ * *every* enabled salt is a variable here — even ones the sequential pass left
+ * at zero — which is what lets a checked salt be used whenever it reduces total
+ * error, instead of only when an earlier step happened to leave a gap of
+ * exactly the right shape behind.
+ *
+ * Two properties keep this safe as a refinement rather than a rewrite:
+ *
+ *  - When the sequential pass already hits every target, its solution has zero
+ *    residual, which is the global optimum of a non-negative least-squares
+ *    problem — so nothing moves. Only recipes that were already wrong change.
+ *  - Amounts the grower physically declared (a literal feed-chart dose, a
+ *    label's own % Urea Nitrogen) are not variables at all; they're held fixed
+ *    and their contribution is simply part of what the free salts fit around.
+ *
+ * Mutates `amounts` in place. `targets.sulfur` of 0 means "the label didn't
+ * declare any Sulfur", not "this recipe must contain no Sulfur" — sulfate is
+ * unavoidable whenever MgSO₄ supplies the Magnesium, and Sulfur is often
+ * simply omitted from labels — so Sulfur is left out of the fit entirely in
+ * that case rather than fitted against a target of zero (the caller fills it
+ * in afterward from whatever sulfate the recipe ends up with, see
+ * `saltDerivedSulfurPpm`).
+ */
+function refineSaltAmountsToTargets(
+  amounts: SaltAmounts,
+  variables: RefinementVariable[],
+  targets: ElementalTargets,
+  stockVolumeLiters: number,
+  dilutionRatio: number
+): void {
+  if (variables.length === 0) return
+  const ppmPerGram = 1000 / (stockVolumeLiters * dilutionRatio)
+  if (!Number.isFinite(ppmPerGram) || ppmPerGram <= 0) return
+
+  const fittedElements = REFINED_ELEMENTS.filter(
+    (element) => element !== "sulfur" || targets.sulfur > 0
+  )
+
+  const weights = new Map<RefinedElement, number>()
+  for (const element of fittedElements) {
+    const tolerance = matchTolerancePpm(element, targets[element])
+    weights.set(element, 1 / (tolerance * tolerance))
+  }
+
+  // ppm each variable adds per unit, and the residual it acts on.
+  const coefficients = variables.map((variable) => {
+    const perElement = new Map<RefinedElement, number>()
+    for (const element of fittedElements) {
+      let ppm = 0
+      for (const { saltKey, gramsPerUnit } of variable.components) {
+        ppm += gramsPerUnit * saltFractionOf(saltKey, element) * ppmPerGram
+      }
+      if (ppm > 0) perElement.set(element, ppm)
+    }
+    return perElement
+  })
+
+  const values = variables.map((variable) => {
+    const [reference] = variable.components
+    return reference.gramsPerUnit > 0 ? amounts[reference.saltKey] / reference.gramsPerUnit : 0
+  })
+  const initialValues = [...values]
+
+  // Delivered ppm from *every* salt, including the fixed ones the variables
+  // have to fit around.
+  const delivered = new Map<RefinedElement, number>()
+  for (const element of fittedElements) {
+    let ppm = 0
+    for (const saltKey of Object.keys(RAW_SALTS) as SaltKey[]) {
+      ppm += amounts[saltKey] * saltFractionOf(saltKey, element) * ppmPerGram
+    }
+    delivered.set(element, ppm)
+  }
+
+  // Projected coordinate descent. The objective is convex and each variable's
+  // exact minimizer given the others is a closed form, so this converges
+  // without a step size to tune.
+  for (let pass = 0; pass < REFINEMENT_MAX_PASSES; pass += 1) {
+    let largestMovePpm = 0
+
+    for (let index = 0; index < variables.length; index += 1) {
+      const perElement = coefficients[index]
+      if (perElement.size === 0) continue
+
+      let gradient = 0
+      let curvature = 0
+      for (const [element, ppmPerUnit] of perElement) {
+        const weight = weights.get(element) ?? 0
+        const residual = (delivered.get(element) ?? 0) - targets[element]
+        gradient += weight * residual * ppmPerUnit
+        curvature += weight * ppmPerUnit * ppmPerUnit
+      }
+      if (curvature <= 0) continue
+
+      const anchor = REFINEMENT_ANCHOR_STRENGTH * curvature
+      const step =
+        (gradient + anchor * (values[index] - initialValues[index])) / (curvature + anchor)
+      const next = Math.max(0, values[index] - step)
+      const move = next - values[index]
+      if (move === 0) continue
+
+      values[index] = next
+      for (const [element, ppmPerUnit] of perElement) {
+        delivered.set(element, (delivered.get(element) ?? 0) + ppmPerUnit * move)
+        largestMovePpm = Math.max(largestMovePpm, Math.abs(ppmPerUnit * move))
+      }
+    }
+
+    if (largestMovePpm < REFINEMENT_CONVERGENCE_PPM) break
+  }
+
+  variables.forEach((variable, index) => {
+    for (const { saltKey, gramsPerUnit } of variable.components) {
+      amounts[saltKey] = values[index] * gramsPerUnit
+    }
+  })
+}
+
+/**
  * Build A/B stock tank recipes using a standard hydroponic salt sequence:
  * Tank A — Ca(NO₃)₂, CaCl₂, KNO₃/NH₄NO₃ (remaining N), Mg(NO₃)₂, Urea, Fe-DTPA  (see TANK_A_SALTS)
  * Tank B — MKP/MAP (Phosphorus), MgSO₄, K₂SO₄/(NH₄)₂SO₄ (remaining K), chelated micronutrients (Mn/Zn/Cu-EDTA, boric acid, sodium molybdate)  (see TANK_B_SALTS)
@@ -367,7 +574,15 @@ export function calculateStockTankRecipe(
   const autoAddedSalts: SaltAutoAddNote[] = []
 
   if (stockVolumeLiters <= 0 || dilutionRatio <= 0) {
-    return { tankA, tankB, warnings, isApproximate: false, autoAddedSalts }
+    return {
+      tankA,
+      tankB,
+      warnings,
+      isApproximate: false,
+      autoAddedSalts,
+      delivered: emptyElementalTargets(),
+      deviations: [],
+    }
   }
 
   const enabled = getEnabledSaltKeys(includedSalts)
@@ -917,12 +1132,8 @@ export function calculateStockTankRecipe(
   // remaining-Nitrogen target before this point.
   assignToTankA("magnesiumNitrate", magnesiumNitrateGrams)
   // Calcium Carbonate deliberately does NOT go into tankA (see the function
-  // doc comment) — it's surfaced separately below as a reservoir addition.
-  const directAddCalciumCarbonate = buildDirectAddCalciumCarbonate(
-    calciumCarbonateGrams,
-    stockVolumeLiters,
-    dilutionRatio
-  )
+  // doc comment) — it's surfaced separately below as a reservoir addition,
+  // after the refinement pass has had its say on the Calcium budget.
 
   // Iron — Fe-DTPA is the only chelate we model
   if (targets.iron > 0) {
@@ -965,28 +1176,28 @@ export function calculateStockTankRecipe(
   // "your recipe is only approximate, go check more boxes" message instead
   // of just completing the recipe for them. Salts the user DID check are
   // still tried first — see `potassiumFromMkp`/`potassiumFromPotassiumNitrate`
-  // above — this only fills whatever gap those leave behind, and only adds
-  // the note below when Potassium Sulfate wasn't already one of the user's
-  // checked salts.
+  // above — this only fills whatever gap those leave behind.
+  //
+  // When Potassium Sulfate IS checked this is only a starting amount: the
+  // refinement pass below is free to resize it (and, unlike this gap-filling
+  // step, to reach for it when Potassium is already over-supplied but Sulfur
+  // is short — the case that used to leave a checked K₂SO₄ out of the recipe
+  // entirely). When it ISN'T checked it stays a pure Potassium fallback: the
+  // amount is recomputed from the refined recipe further down and the
+  // grower is told about it, so an unchecked salt is never quietly enlisted
+  // to chase some other element.
   if (remainingPotassiumPpm > 0) {
     assignToTankB(
       "potassiumSulfate",
       saltGramsForTargetPpm(remainingPotassiumPpm, RAW_SALTS.potassiumSulfate.k, stockVolumeLiters, dilutionRatio)
     )
-    if (!isEnabled("potassiumSulfate")) {
-      autoAddedSalts.push({
-        element: "potassium",
-        elementLabel: "Potassium",
-        saltKey: "potassiumSulfate",
-        saltLabel: RAW_SALTS.potassiumSulfate.name,
-      })
-    }
   }
 
-  // Sulfur is supplied as a byproduct of MgSO₄ + K₂SO₄ (+ (NH₄)₂SO₄ when used
-  // for nitrogen). We intentionally do NOT add extra salt just to chase the
-  // sulfur target — that would overshoot other elements. Hydroponic plants
-  // tolerate a wide S range, so any deficit is acceptable and not warned on.
+  // Sulfur needs no dedicated sizing step of its own: it always arrives as a
+  // byproduct of MgSO₄ / K₂SO₄ / (NH₄)₂SO₄, and the refinement pass below
+  // balances how much of each of those the recipe uses against the Sulfur
+  // target alongside every other element — rather than chasing Sulfur with an
+  // extra salt here and overshooting Potassium or Nitrogen to get it.
 
   // Micronutrients — always available; chelated forms (EDTA) are used by
   // default rather than sulfate salts, since the "Chelated Micronutrients"
@@ -1017,15 +1228,167 @@ export function calculateStockTankRecipe(
     saltGramsForTargetPpm(targets.molybdenum, RAW_SALTS.sodiumMolybdate.mo, stockVolumeLiters, dilutionRatio)
   )
 
+  // Everything above sizes one element at a time. Rebalance the whole set so
+  // the recipe actually delivers the targets as closely as the enabled salts
+  // allow — see `refineSaltAmountsToTargets` for why the sequential pass alone
+  // can't, and for which amounts are held fixed rather than fitted.
+  //
+  // Calcium Carbonate is refined alongside everything else even though it
+  // never lands in a tank: its Calcium still dissolves into the reservoir, so
+  // leaving it out would have the fit chase Calcium that the recipe is already
+  // delivering. It's split back out into `directAddCalciumCarbonate` after.
+  const resolved = emptySaltAmounts()
+  for (const key of SALT_DISPLAY_ORDER) resolved[key] = tankA[key] + tankB[key]
+  resolved.calciumCarbonate = calciumCarbonateGrams
+
+  // A salt the grower didn't check is only ever reached for to complete
+  // Potassium (see the fallback above), never fitted — so it's kept out of the
+  // refinement and re-derived from the refined recipe below.
+  const potassiumSulfateIsFallback = !isEnabled("potassiumSulfate")
+  if (potassiumSulfateIsFallback) resolved.potassiumSulfate = 0
+
+  refineSaltAmountsToTargets(
+    resolved,
+    buildRefinementVariables({
+      isEnabled,
+      calciumNitrateSizedFromFeedRate,
+      ammoniumNitrateIsCalciumDoubleSalt,
+      calciumNitrateGrams: resolved.calciumNitrate,
+      ammoniumNitrateGrams: resolved.ammoniumNitrate,
+    }),
+    targets,
+    stockVolumeLiters,
+    dilutionRatio
+  )
+
+  if (potassiumSulfateIsFallback) {
+    const potassiumGapPpm = Math.max(
+      0,
+      targets.potassium - elementalPpmFromSaltAmounts(resolved, stockVolumeLiters, dilutionRatio).potassium
+    )
+    resolved.potassiumSulfate = saltGramsForTargetPpm(
+      potassiumGapPpm,
+      RAW_SALTS.potassiumSulfate.k,
+      stockVolumeLiters,
+      dilutionRatio
+    )
+    if (resolved.potassiumSulfate > 0) {
+      autoAddedSalts.push({
+        element: "potassium",
+        elementLabel: "Potassium",
+        saltKey: "potassiumSulfate",
+        saltLabel: RAW_SALTS.potassiumSulfate.name,
+      })
+    }
+  }
+
+  for (const key of TANK_A_SALTS) tankA[key] = resolved[key]
+  for (const key of TANK_B_SALTS) tankB[key] = resolved[key]
+  // Calcium Carbonate belongs to neither tank (see the function doc comment).
+  tankA.calciumCarbonate = 0
+  const refinedDirectAddCalciumCarbonate = buildDirectAddCalciumCarbonate(
+    resolved.calciumCarbonate,
+    stockVolumeLiters,
+    dilutionRatio
+  )
+
+  const delivered = elementalPpmFromSaltAmounts(resolved, stockVolumeLiters, dilutionRatio)
+  // Sulfur is exempt: an undeclared Sulfur target (0) isn't a real target the
+  // recipe failed to hit — see `refineSaltAmountsToTargets` /
+  // `saltDerivedSulfurPpm`.
+  const deviations: TargetDeviation[] = REFINED_ELEMENTS.filter((element) => {
+    if (element === "sulfur" && targets.sulfur <= 0) return false
+    return !isWithinMatchTolerance(element, delivered[element], targets[element])
+  }).map((element) => ({
+    element,
+    label: ELEMENT_LABELS[element],
+    targetPpm: targets[element],
+    deliveredPpm: delivered[element],
+  }))
+
   return {
     tankA,
     tankB,
     warnings,
-    isApproximate: warnings.length > 0,
-    directAddCalciumCarbonate,
+    isApproximate: warnings.length > 0 || deviations.length > 0,
+    directAddCalciumCarbonate: refinedDirectAddCalciumCarbonate,
     ammoniumNitrateIsCalciumDoubleSalt,
     autoAddedSalts,
+    delivered,
+    deviations,
   }
+}
+
+/**
+ * Which salt amounts the refinement is allowed to adjust.
+ *
+ * Every enabled macro salt is included — including ones the sequential pass
+ * left at zero, which is what lets a checked salt be used whenever it improves
+ * the match instead of only when an earlier sizing step happened to leave a
+ * gap behind.
+ *
+ * Deliberately excluded:
+ *
+ *  - Urea, and any salt sized from a literal feed-chart dose. These are real
+ *    measured amounts the grower declared, not quantities derived from a ppm
+ *    target — refitting them would replace known facts with a guess (see
+ *    `gramsFromFeedRatePerGallon`).
+ *  - Calcium Chloride and Calcium Carbonate. Their amounts come from
+ *    deliberate product-modeling policy rather than from solving a target —
+ *    Chloride's small fixed top-up share, Carbonate's guaranteed equal share
+ *    of the Calcium budget (see the Calcium-solving block). Both exist to
+ *    model how real lines are built, so the fit works around them rather than
+ *    reallocating Calcium away from them.
+ *  - Micronutrient salts. Each is the sole source of its own element and
+ *    supplies nothing else, so they're already exact.
+ *
+ * The Ca(NO₃)₂/NH₄NO₃ double salt is one variable rather than two, so the fit
+ * can resize that product as a whole while preserving its fixed 5:1 formula
+ * ratio (see the Nitrogen-solving block).
+ */
+function buildRefinementVariables({
+  isEnabled,
+  calciumNitrateSizedFromFeedRate,
+  ammoniumNitrateIsCalciumDoubleSalt,
+  calciumNitrateGrams,
+  ammoniumNitrateGrams,
+}: {
+  isEnabled: (key: SaltKey) => boolean
+  calciumNitrateSizedFromFeedRate: boolean
+  ammoniumNitrateIsCalciumDoubleSalt: boolean
+  calciumNitrateGrams: number
+  ammoniumNitrateGrams: number
+}): RefinementVariable[] {
+  const variables: RefinementVariable[] = []
+  const single = (saltKey: SaltKey) => variables.push({ components: [{ saltKey, gramsPerUnit: 1 }] })
+
+  const calciumNitrateIsFitted = isEnabled("calciumNitrate") && !calciumNitrateSizedFromFeedRate
+
+  if (calciumNitrateIsFitted && ammoniumNitrateIsCalciumDoubleSalt && calciumNitrateGrams > 0) {
+    variables.push({
+      components: [
+        { saltKey: "calciumNitrate", gramsPerUnit: 1 },
+        { saltKey: "ammoniumNitrate", gramsPerUnit: ammoniumNitrateGrams / calciumNitrateGrams },
+      ],
+    })
+  } else {
+    if (calciumNitrateIsFitted) single("calciumNitrate")
+    if (isEnabled("ammoniumNitrate")) single("ammoniumNitrate")
+  }
+
+  for (const saltKey of [
+    "potassiumNitrate",
+    "monoPotassiumPhosphate",
+    "monoAmmoniumPhosphate",
+    "magnesiumSulfate",
+    "magnesiumNitrate",
+    "potassiumSulfate",
+    "ammoniumSulfate",
+  ] as const) {
+    if (isEnabled(saltKey)) single(saltKey)
+  }
+
+  return variables
 }
 
 /**
@@ -1071,6 +1434,8 @@ export function calculateSeparateCalciumRecipe(
     directAddCalciumCarbonate,
     ammoniumNitrateIsCalciumDoubleSalt = false,
     autoAddedSalts = [],
+    delivered,
+    deviations,
   } = calculateStockTankRecipe(
     targets,
     stockVolumeLiters,
@@ -1120,6 +1485,8 @@ export function calculateSeparateCalciumRecipe(
     isApproximate,
     directAddCalciumCarbonate,
     autoAddedSalts,
+    delivered,
+    deviations,
   }
 }
 
@@ -1147,6 +1514,34 @@ function combineSaltAmounts(a: SaltAmounts, b: SaltAmounts): SaltAmounts {
     combined[key] = a[key] + b[key]
   }
   return combined
+}
+
+function addElementalPpm(total: ElementalTargets, addition: ElementalTargets): void {
+  for (const key of Object.keys(total) as Array<keyof ElementalTargets>) {
+    total[key] += addition[key]
+  }
+}
+
+/**
+ * Deviations for the per-part layouts. Each part's tank is solved against that
+ * part's own label, so the grower-facing question is whether the parts *added
+ * together* reproduce the combined targets — accumulate both sides across
+ * parts and compare once, rather than reporting the same element several times
+ * over with one part's slice of it each.
+ */
+function deviationsFromTotals(
+  targets: ElementalTargets,
+  delivered: ElementalTargets
+): TargetDeviation[] {
+  return REFINED_ELEMENTS.filter((element) => {
+    if (element === "sulfur" && targets.sulfur <= 0) return false
+    return !isWithinMatchTolerance(element, delivered[element], targets[element])
+  }).map((element) => ({
+    element,
+    label: ELEMENT_LABELS[element],
+    targetPpm: targets[element],
+    deliveredPpm: delivered[element],
+  }))
 }
 
 function saltAmountsHasContent(salts: SaltAmounts): boolean {
@@ -1178,6 +1573,8 @@ export function calculateMultiPartStockTankRecipe(
   const defaultMicroProfilePartId = pickDefaultMicroProfilePartId(partsAnalysis, parts)
   let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
+  const combinedTargets = emptyElementalTargets()
+  const delivered = emptyElementalTargets()
 
   for (const feedingPart of parts) {
     if (parsePositive(feedingPart.dose) === 0) continue
@@ -1197,6 +1594,7 @@ export function calculateMultiPartStockTankRecipe(
       warnings = [],
       directAddCalciumCarbonate: partDirectAdd,
       autoAddedSalts = [],
+      delivered: partDelivered,
     } = calculateStockTankRecipe(
       targets,
       stockVolumeLiters,
@@ -1209,6 +1607,8 @@ export function calculateMultiPartStockTankRecipe(
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
     for (const note of autoAddedSalts) autoAddedByElement.set(note.element, note)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
+    addElementalPpm(combinedTargets, targets)
+    addElementalPpm(delivered, partDelivered)
 
     // Calcium Carbonate never lands in a part's tank (folded into
     // `directAddCalciumCarbonate` above instead), so a part whose only
@@ -1229,7 +1629,16 @@ export function calculateMultiPartStockTankRecipe(
 
   const warnings = Array.from(warningsByElement.values())
   const autoAddedSalts = Array.from(autoAddedByElement.values())
-  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate, autoAddedSalts }
+  const deviations = deviationsFromTotals(combinedTargets, delivered)
+  return {
+    tanks,
+    warnings,
+    isApproximate: warnings.length > 0 || deviations.length > 0,
+    directAddCalciumCarbonate,
+    autoAddedSalts,
+    delivered,
+    deviations,
+  }
 }
 
 /**
@@ -1263,6 +1672,8 @@ export function calculateDoserMultiPartRecipe(
   const defaultMicroProfilePartId = pickDefaultMicroProfilePartId(partsAnalysis, parts)
   let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
+  const combinedTargets = emptyElementalTargets()
+  const delivered = emptyElementalTargets()
 
   const microKeys = new Set<SaltKey>(TANK_3_SALTS)
 
@@ -1284,6 +1695,7 @@ export function calculateDoserMultiPartRecipe(
       warnings = [],
       directAddCalciumCarbonate: partDirectAdd,
       autoAddedSalts = [],
+      delivered: partDelivered,
     } = calculateStockTankRecipe(
       targets,
       stockVolumeLiters,
@@ -1296,6 +1708,8 @@ export function calculateDoserMultiPartRecipe(
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
     for (const note of autoAddedSalts) autoAddedByElement.set(note.element, note)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
+    addElementalPpm(combinedTargets, targets)
+    addElementalPpm(delivered, partDelivered)
     const allSalts = combineSaltAmounts(tankA, tankB)
 
     const macroSalts = emptySaltAmounts()
@@ -1335,7 +1749,16 @@ export function calculateDoserMultiPartRecipe(
 
   const warnings = Array.from(warningsByElement.values())
   const autoAddedSalts = Array.from(autoAddedByElement.values())
-  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate, autoAddedSalts }
+  const deviations = deviationsFromTotals(combinedTargets, delivered)
+  return {
+    tanks,
+    warnings,
+    isApproximate: warnings.length > 0 || deviations.length > 0,
+    directAddCalciumCarbonate,
+    autoAddedSalts,
+    delivered,
+    deviations,
+  }
 }
 
 /** Working-strength recipe for direct mixing into a reservoir of `reservoirLiters` litres */
@@ -1371,6 +1794,8 @@ export function calculateDirectMixRecipe(
     isApproximate: stockRecipe.isApproximate ?? false,
     directAddCalciumCarbonate: stockRecipe.directAddCalciumCarbonate,
     autoAddedSalts: stockRecipe.autoAddedSalts ?? [],
+    delivered: stockRecipe.delivered,
+    deviations: stockRecipe.deviations,
   }
 }
 

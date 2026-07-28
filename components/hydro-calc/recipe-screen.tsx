@@ -91,6 +91,7 @@ import {
   type SaltAutoAddNote,
   type SaltGapWarning,
   type SaltKey,
+  type TargetDeviation,
   type ThreeTankRecipe,
 } from "@/lib/hydro-calc/recipe-types"
 
@@ -102,12 +103,22 @@ const EMPTY_THREE_TANK_RECIPE: ThreeTankRecipe = {
   hasMicronutrients: false,
   warnings: [],
   isApproximate: false,
+  delivered: emptyElementalTargets(),
+  deviations: [],
 }
-const EMPTY_MULTI_PART_RECIPE: MultiPartTankRecipe = { tanks: [], warnings: [], isApproximate: false }
+const EMPTY_MULTI_PART_RECIPE: MultiPartTankRecipe = {
+  tanks: [],
+  warnings: [],
+  isApproximate: false,
+  delivered: emptyElementalTargets(),
+  deviations: [],
+}
 const EMPTY_DIRECT_RECIPE: DirectMixRecipe = {
   salts: emptySaltAmounts(),
   warnings: [],
   isApproximate: false,
+  delivered: emptyElementalTargets(),
+  deviations: [],
 }
 
 /** Debounce for recalculating via the server action while the user is typing */
@@ -266,10 +277,16 @@ export function RecipeScreen({
     return () => clearTimeout(timer)
   }, [partsAnalysis, parts, stockTankOption, stockVolumeLiters, dilutionRatio])
 
-  const targets = calcResult?.targets ?? EMPTY_TARGETS
+  /**
+   * What the guaranteed-analysis percentages and feed rates asked for. Kept
+   * separate from `targets` below — which is what the recipe actually delivers
+   * — because the two are only equal when the checked salts can hit every
+   * target at once. See `activeDeviations`.
+   */
+  const labelTargets = calcResult?.targets ?? EMPTY_TARGETS
   const anchor = calcResult?.anchor ?? null
 
-  // How much of `targets.calcium` above comes from Calcium Chloride's
+  // How much of the Calcium above comes from Calcium Chloride's
   // optional per-gallon dose (summed across every part that has one) —
   // computed the same way the solver folds it into the target (see
   // `calciumChlorideElementalCalciumPpm` / `calculateElementalTargets`) so
@@ -309,6 +326,55 @@ export function RecipeScreen({
   const threeTankRecipe = calcResult?.threeTankRecipe ?? EMPTY_THREE_TANK_RECIPE
   const multiPartRecipe = calcResult?.multiPartRecipe ?? EMPTY_MULTI_PART_RECIPE
   const directRecipe = calcResult?.directRecipe ?? EMPTY_DIRECT_RECIPE
+
+  /**
+   * The ppm the grower's plants will actually see, reconstructed from the
+   * resolved salt amounts of whichever layout is on screen (see
+   * `TankRecipe.delivered`) rather than from the label percentages.
+   *
+   * These used to be the same value — the panel showed the label-derived
+   * targets while the tank cards below showed grams solved separately — so any
+   * gap between the two was invisible: a recipe whose amounts couldn't hit the
+   * displayed ppm still displayed them as fact. Reading the panel off the same
+   * grams the grower is about to weigh out makes the two agree by
+   * construction, and any residual gap is called out explicitly by
+   * `activeDeviations` below instead of being silently absorbed.
+   *
+   * Layout matters here: per-part tanks are solved against each part's own
+   * label and salt selection, so they can land somewhere slightly different
+   * from the combined layouts.
+   */
+  const targets = useMemo(() => {
+    if (!calcResult) return EMPTY_TARGETS
+    if (stockTankOption === "direct") return directRecipe.delivered
+    if (usesPerPartTanks) return multiPartRecipe.delivered
+    return threeTankRecipe.delivered
+  }, [
+    calcResult,
+    stockTankOption,
+    usesPerPartTanks,
+    directRecipe.delivered,
+    multiPartRecipe.delivered,
+    threeTankRecipe.delivered,
+  ])
+
+  /**
+   * Elements the recipe can't bring within tolerance of the label-derived
+   * target no matter how the amounts are balanced — see `TargetDeviation`.
+   */
+  const activeDeviations: TargetDeviation[] = useMemo(() => {
+    if (!calcResult) return []
+    if (stockTankOption === "direct") return directRecipe.deviations
+    if (usesPerPartTanks) return multiPartRecipe.deviations
+    return threeTankRecipe.deviations
+  }, [
+    calcResult,
+    stockTankOption,
+    usesPerPartTanks,
+    directRecipe.deviations,
+    multiPartRecipe.deviations,
+    threeTankRecipe.deviations,
+  ])
 
   // Unified warning surface — whichever mode is active drives which recipe's
   // gaps get reported to the user.
@@ -1107,7 +1173,8 @@ export function RecipeScreen({
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
                     The amount of each nutrient (in parts per million, or ppm) your plants will see in
-                    the reservoir, based on the label percentages and feed-chart doses you entered.
+                    the reservoir — measured from the exact salt amounts in the recipe below, so what
+                    you weigh out is what these numbers describe.
                   </TooltipContent>
                 </Tooltip>
                 {isCalculating && hasValidData && (
@@ -1252,6 +1319,40 @@ export function RecipeScreen({
               </Fragment>
             ))}
           </p>
+        </div>
+      )}
+
+      {/* Unreachable-ratio notice — the checked salts DO cover every element,
+          but not in the ratio this label asks for, so the ppm above (measured
+          from the real salt amounts) can't land on the label-derived figure.
+          Distinct from the "check more salts" warning below, which is about an
+          element having no source at all. */}
+      {hasValidData && activeDeviations.length > 0 && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-lg border-2 border-amber-500/60 bg-amber-500/10 p-4"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+          <div className="space-y-1.5 text-sm leading-relaxed text-amber-100">
+            <p className="font-semibold">
+              Closest possible match with your selected salts — the ppm above is what this recipe
+              really delivers.
+            </p>
+            <p>
+              Your label&apos;s ratios can&apos;t be built exactly from the salts you checked, because
+              each salt carries more than one nutrient in a fixed proportion. We balanced the recipe
+              to get as close as possible overall:{" "}
+              {activeDeviations.map((deviation, index) => (
+                <Fragment key={deviation.element}>
+                  {index > 0 && ", "}
+                  <strong className="text-amber-50">{deviation.label}</strong>{" "}
+                  {formatPpm(deviation.deliveredPpm)} vs {formatPpm(deviation.targetPpm)} on the label
+                </Fragment>
+              ))}
+              . Checking another salt that supplies just one of these on Step 1 will usually close the
+              gap.
+            </p>
+          </div>
         </div>
       )}
 

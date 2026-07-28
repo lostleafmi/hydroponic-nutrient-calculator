@@ -47,6 +47,15 @@ export interface CalculateRecipeInput {
 }
 
 export interface CalculateRecipeResult {
+  /**
+   * What the guaranteed-analysis percentages and feed rates ask for. This is
+   * the input the salt solving below aims at — NOT necessarily what the
+   * resulting recipe delivers, since every salt carries several elements in a
+   * fixed ratio and a label's own ratios aren't always buildable from the
+   * salts the grower checked. Each recipe layout reports what it actually
+   * delivers as its own `delivered` (see `TankRecipe.delivered`), which is what
+   * the UI shows the grower.
+   */
   targets: ElementalTargets
   /** Set is not serializable across the Server Action boundary — sent as an array */
   estimatedMicros: MicroKey[]

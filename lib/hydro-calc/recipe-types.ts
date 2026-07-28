@@ -153,6 +153,88 @@ export interface SaltGapWarning {
   label: string
 }
 
+export const ELEMENT_LABELS: Record<keyof ElementalTargets, string> = {
+  nitrogen: "Nitrogen",
+  phosphorus: "Phosphorus",
+  potassium: "Potassium",
+  calcium: "Calcium",
+  magnesium: "Magnesium",
+  sulfur: "Sulfur",
+  ...MICRO_LABELS,
+}
+
+/**
+ * An element where the recipe's resolved salt amounts can't quite reproduce
+ * the label-derived target, reported with both numbers so the grower sees the
+ * real gap rather than a target the tanks don't actually deliver.
+ *
+ * Unlike `SaltGapWarning` — "no checked salt supplies this element at all" —
+ * this covers targets that are unreachable *as a set*: every salt carries two
+ * or more elements at a fixed ratio, so a label whose own ratios can't be
+ * built from the checked salts leaves a residue no amount of rebalancing can
+ * remove. A guaranteed analysis listing more Nitrogen per unit Calcium than
+ * Ca(NO₃)₂ itself contains, with no second Nitrogen source checked, is the
+ * common example.
+ */
+export interface TargetDeviation {
+  element: keyof ElementalTargets
+  label: string
+  /** ppm the guaranteed-analysis percentages and feed rates asked for */
+  targetPpm: number
+  /** ppm the resolved salt amounts actually deliver */
+  deliveredPpm: number
+}
+
+/**
+ * How close a delivered ppm has to land to its label-derived target to count
+ * as matched, as a fraction of that target.
+ *
+ * This band does double duty: it decides when the recipe owes the grower a
+ * `TargetDeviation`, and it sets how hard the solver's refinement pass fights
+ * for each element (each weighted by 1/tolerance², so error is minimized in
+ * units of "how much does this element actually care"). Keeping both off one
+ * table means the solver is never told to chase an accuracy the UI wouldn't
+ * have complained about, and never settles for one it would.
+ *
+ * Sulfur's band is deliberately the loose one. Hydroponic plants tolerate a
+ * wide Sulfur range, and Sulfur is never a salt's reason for being in a recipe
+ * — it rides along with the Magnesium in MgSO₄ and the Potassium in K₂SO₄. Held
+ * as tightly as Nitrogen, it would drag Nitrogen, Calcium, and Potassium off
+ * targets those salts *can* hit exactly, just to close a Sulfur gap the plants
+ * won't notice. Wide enough to yield to the other five, still tight enough
+ * that a real shortfall pulls in the sulfate salt the grower checked.
+ */
+const ELEMENT_MATCH_TOLERANCE_FRACTION: Partial<Record<keyof ElementalTargets, number>> = {
+  sulfur: 0.05,
+}
+
+export const DEFAULT_MATCH_TOLERANCE_FRACTION = 0.02
+
+/** Floor on a declared target's tolerance, so trace targets stay reachable */
+export const MATCH_TOLERANCE_FLOOR_PPM = 0.5
+
+/**
+ * Tolerance applied to an element the label declares nothing of. Tighter than
+ * any real target's band: "this product contains no Calcium" should read as a
+ * near-constraint, so the refinement can't quietly add Calcium via Ca(NO₃)₂
+ * because it wanted the Nitrogen.
+ */
+export const ZERO_TARGET_TOLERANCE_PPM = 1
+
+export function matchTolerancePpm(element: keyof ElementalTargets, targetPpm: number): number {
+  if (!(targetPpm > 0)) return ZERO_TARGET_TOLERANCE_PPM
+  const fraction = ELEMENT_MATCH_TOLERANCE_FRACTION[element] ?? DEFAULT_MATCH_TOLERANCE_FRACTION
+  return Math.max(MATCH_TOLERANCE_FLOOR_PPM, targetPpm * fraction)
+}
+
+export function isWithinMatchTolerance(
+  element: keyof ElementalTargets,
+  deliveredPpm: number,
+  targetPpm: number
+): boolean {
+  return Math.abs(deliveredPpm - targetPpm) <= matchTolerancePpm(element, targetPpm)
+}
+
 /**
  * Records when the solver reached for a salt the user didn't check on Step
  * 1 because it was the only practical way to fully match an elemental
@@ -347,6 +429,15 @@ export interface TankRecipe {
   ammoniumNitrateIsCalciumDoubleSalt?: boolean
   /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
   autoAddedSalts?: SaltAutoAddNote[]
+  /**
+   * Elemental ppm `tankA` + `tankB` (+ `directAddCalciumCarbonate`) ACTUALLY
+   * deliver to the reservoir — see `elementalPpmFromSaltAmounts`. This, not the
+   * label-derived target set the solver was handed, is what the grower's plants
+   * will see, so it's what the "What your plants will get" panel displays.
+   */
+  delivered: ElementalTargets
+  /** Elements where `delivered` can't reach the label-derived target — see `TargetDeviation`. */
+  deviations: TargetDeviation[]
 }
 
 export interface ThreeTankRecipe {
@@ -362,6 +453,10 @@ export interface ThreeTankRecipe {
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
   /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
   autoAddedSalts?: SaltAutoAddNote[]
+  /** Elemental ppm this layout's tanks actually deliver — see `TankRecipe.delivered`. */
+  delivered: ElementalTargets
+  /** Elements where `delivered` can't reach the label-derived target — see `TargetDeviation`. */
+  deviations: TargetDeviation[]
 }
 
 export const RAW_SALTS = {
@@ -718,6 +813,16 @@ export interface MultiPartTankRecipe {
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
   /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
   autoAddedSalts?: SaltAutoAddNote[]
+  /**
+   * Elemental ppm every part's tank delivers, summed — see
+   * `TankRecipe.delivered`. Per-part tanks are solved independently against
+   * each part's own label and salt selection, so this can differ from the
+   * combined layouts: a salt checked on one part can't cover another part's
+   * target here, which leaves less room to balance the recipe as a whole.
+   */
+  delivered: ElementalTargets
+  /** Elements where `delivered` can't reach the label-derived target — see `TargetDeviation`. */
+  deviations: TargetDeviation[]
 }
 
 export interface DirectMixRecipe {
@@ -728,6 +833,10 @@ export interface DirectMixRecipe {
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
   /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
   autoAddedSalts?: SaltAutoAddNote[]
+  /** Elemental ppm `salts` actually deliver — see `TankRecipe.delivered`. */
+  delivered: ElementalTargets
+  /** Elements where `delivered` can't reach the label-derived target — see `TargetDeviation`. */
+  deviations: TargetDeviation[]
 }
 
 /**
@@ -1147,6 +1256,76 @@ export function emptyElementalTargets(): ElementalTargets {
 export function parsePositive(value: string | undefined): number {
   const parsed = parseFloat(value ?? "")
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+/**
+ * Which `ElementalTargets` field each `RAW_SALTS` composition fraction feeds.
+ * Chloride is deliberately absent — it isn't a modeled nutrient target (only
+ * the EC estimate accounts for it, see `ecFromSaltAmounts`).
+ */
+const SALT_FRACTION_TO_ELEMENT = {
+  n: "nitrogen",
+  p: "phosphorus",
+  k: "potassium",
+  ca: "calcium",
+  mg: "magnesium",
+  s: "sulfur",
+  fe: "iron",
+  mn: "manganese",
+  zn: "zinc",
+  b: "boron",
+  cu: "copper",
+  mo: "molybdenum",
+} as const satisfies Record<string, keyof ElementalTargets>
+
+/**
+ * Elemental ppm a set of resolved stock-tank salt amounts ACTUALLY delivers
+ * to the working (reservoir) solution once diluted 1:`dilutionRatio`.
+ *
+ * This is the inverse of how the solver sizes each salt
+ * (`saltGramsForTargetPpm`), summed over every salt and every element that
+ * salt carries — so it answers "what will the grower's plants really get from
+ * these grams?" rather than "what did the label-derived targets ask for?".
+ * Those two are NOT the same thing whenever the solver can't hit a target
+ * exactly (an unchecked source salt) or overshoots one as a side effect of
+ * hitting another (Potassium riding along with KNO₃ sized for Nitrogen), which
+ * is exactly the mismatch this function exists to make measurable.
+ *
+ * Pass the union of every tank in a layout (plus any direct-add Calcium
+ * Carbonate — see `DirectAddCalciumCarbonate`, which never lives in a tank but
+ * does dissolve into the reservoir). For a direct-mix recipe use
+ * `stockVolumeLiters = reservoirLiters` and `dilutionRatio = 1`, matching how
+ * `calculateDirectMixRecipe` builds it.
+ */
+export function elementalPpmFromSaltAmounts(
+  salts: SaltAmounts,
+  stockVolumeLiters: number,
+  dilutionRatio: number
+): ElementalTargets {
+  const delivered = emptyElementalTargets()
+  if (!(stockVolumeLiters > 0) || !(dilutionRatio > 0)) return delivered
+
+  for (const saltKey of Object.keys(RAW_SALTS) as SaltKey[]) {
+    const grams = salts[saltKey]
+    if (!(grams > 0)) continue
+    const composition: Record<string, unknown> = RAW_SALTS[saltKey]
+    for (const [fraction, element] of Object.entries(SALT_FRACTION_TO_ELEMENT)) {
+      const elementFraction = composition[fraction]
+      if (typeof elementFraction !== "number" || elementFraction <= 0) continue
+      delivered[element] += ((grams * elementFraction) / stockVolumeLiters) * (1000 / dilutionRatio)
+    }
+  }
+
+  return delivered
+}
+
+/** Sum two salt-amount sets recorded at the same stock volume / dilution ratio. */
+export function sumSaltAmounts(...sets: SaltAmounts[]): SaltAmounts {
+  const total = emptySaltAmounts()
+  for (const set of sets) {
+    for (const key of Object.keys(total) as SaltKey[]) total[key] += set[key]
+  }
+  return total
 }
 
 /**
