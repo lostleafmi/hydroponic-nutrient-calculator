@@ -46,6 +46,7 @@ import {
   type MultiPartTankRecipe,
   type PartStockTank,
   type SaltAmounts,
+  type SaltAutoAddNote,
   type SaltGapWarning,
   type SaltKey,
   type TankRecipe,
@@ -288,9 +289,10 @@ export function calculateStockTankRecipe(
   const tankA = emptySaltAmounts()
   const tankB = emptySaltAmounts()
   const warnings: SaltGapWarning[] = []
+  const autoAddedSalts: SaltAutoAddNote[] = []
 
   if (stockVolumeLiters <= 0 || dilutionRatio <= 0) {
-    return { tankA, tankB, warnings, isApproximate: false }
+    return { tankA, tankB, warnings, isApproximate: false, autoAddedSalts }
   }
 
   const enabled = getEnabledSaltKeys(includedSalts)
@@ -878,14 +880,31 @@ export function calculateStockTankRecipe(
     targets.potassium - potassiumFromMkp - potassiumFromPotassiumNitrate
   )
 
+  // Potassium is treated differently from every other elemental target:
+  // instead of warning the grower to "check more salts" when the currently
+  // checked salts (KNO₃, MKP) don't fully cover it, we fall back to
+  // Potassium Sulfate automatically. K₂SO₄ is a cheap, universally
+  // available salt with no downside side-effect (no extra Nitrogen or
+  // Phosphorus riding along, unlike KNO₃/MKP), so there's no real reason to
+  // ever leave a Potassium target unmet and hand the grower a confusing
+  // "your recipe is only approximate, go check more boxes" message instead
+  // of just completing the recipe for them. Salts the user DID check are
+  // still tried first — see `potassiumFromMkp`/`potassiumFromPotassiumNitrate`
+  // above — this only fills whatever gap those leave behind, and only adds
+  // the note below when Potassium Sulfate wasn't already one of the user's
+  // checked salts.
   if (remainingPotassiumPpm > 0) {
-    if (isEnabled("potassiumSulfate")) {
-      assignToTankB(
-        "potassiumSulfate",
-        saltGramsForTargetPpm(remainingPotassiumPpm, RAW_SALTS.potassiumSulfate.k, stockVolumeLiters, dilutionRatio)
-      )
-    } else {
-      warnings.push({ element: "potassium", label: "Potassium" })
+    assignToTankB(
+      "potassiumSulfate",
+      saltGramsForTargetPpm(remainingPotassiumPpm, RAW_SALTS.potassiumSulfate.k, stockVolumeLiters, dilutionRatio)
+    )
+    if (!isEnabled("potassiumSulfate")) {
+      autoAddedSalts.push({
+        element: "potassium",
+        elementLabel: "Potassium",
+        saltKey: "potassiumSulfate",
+        saltLabel: RAW_SALTS.potassiumSulfate.name,
+      })
     }
   }
 
@@ -930,6 +949,7 @@ export function calculateStockTankRecipe(
     isApproximate: warnings.length > 0,
     directAddCalciumCarbonate,
     ammoniumNitrateIsCalciumDoubleSalt,
+    autoAddedSalts,
   }
 }
 
@@ -975,6 +995,7 @@ export function calculateSeparateCalciumRecipe(
     isApproximate = false,
     directAddCalciumCarbonate,
     ammoniumNitrateIsCalciumDoubleSalt = false,
+    autoAddedSalts = [],
   } = calculateStockTankRecipe(
     targets,
     stockVolumeLiters,
@@ -1023,6 +1044,7 @@ export function calculateSeparateCalciumRecipe(
     warnings,
     isApproximate,
     directAddCalciumCarbonate,
+    autoAddedSalts,
   }
 }
 
@@ -1077,6 +1099,7 @@ export function calculateMultiPartStockTankRecipe(
   const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
   const tanks: PartStockTank[] = []
   const warningsByElement = new Map<string, SaltGapWarning>()
+  const autoAddedByElement = new Map<string, SaltAutoAddNote>()
   let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
 
@@ -1095,6 +1118,7 @@ export function calculateMultiPartStockTankRecipe(
       tankB,
       warnings = [],
       directAddCalciumCarbonate: partDirectAdd,
+      autoAddedSalts = [],
     } = calculateStockTankRecipe(
       targets,
       stockVolumeLiters,
@@ -1105,6 +1129,7 @@ export function calculateMultiPartStockTankRecipe(
       ureaNitrogenPpmForPart(feedingPart, analysis)
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
+    for (const note of autoAddedSalts) autoAddedByElement.set(note.element, note)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
 
     // Calcium Carbonate never lands in a part's tank (folded into
@@ -1125,7 +1150,8 @@ export function calculateMultiPartStockTankRecipe(
   }
 
   const warnings = Array.from(warningsByElement.values())
-  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate }
+  const autoAddedSalts = Array.from(autoAddedByElement.values())
+  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate, autoAddedSalts }
 }
 
 /**
@@ -1155,6 +1181,7 @@ export function calculateDoserMultiPartRecipe(
   const macroTanks: PartStockTank[] = []
   const consolidatedMicros = emptySaltAmounts()
   const warningsByElement = new Map<string, SaltGapWarning>()
+  const autoAddedByElement = new Map<string, SaltAutoAddNote>()
   let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
   let tankIndex = 0
 
@@ -1175,6 +1202,7 @@ export function calculateDoserMultiPartRecipe(
       tankB,
       warnings = [],
       directAddCalciumCarbonate: partDirectAdd,
+      autoAddedSalts = [],
     } = calculateStockTankRecipe(
       targets,
       stockVolumeLiters,
@@ -1185,6 +1213,7 @@ export function calculateDoserMultiPartRecipe(
       ureaNitrogenPpmForPart(feedingPart, analysis)
     )
     for (const warning of warnings) warningsByElement.set(warning.element, warning)
+    for (const note of autoAddedSalts) autoAddedByElement.set(note.element, note)
     directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
     const allSalts = combineSaltAmounts(tankA, tankB)
 
@@ -1224,7 +1253,8 @@ export function calculateDoserMultiPartRecipe(
   }
 
   const warnings = Array.from(warningsByElement.values())
-  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate }
+  const autoAddedSalts = Array.from(autoAddedByElement.values())
+  return { tanks, warnings, isApproximate: warnings.length > 0, directAddCalciumCarbonate, autoAddedSalts }
 }
 
 /** Working-strength recipe for direct mixing into a reservoir of `reservoirLiters` litres */
@@ -1259,6 +1289,7 @@ export function calculateDirectMixRecipe(
     warnings: stockRecipe.warnings ?? [],
     isApproximate: stockRecipe.isApproximate ?? false,
     directAddCalciumCarbonate: stockRecipe.directAddCalciumCarbonate,
+    autoAddedSalts: stockRecipe.autoAddedSalts ?? [],
   }
 }
 

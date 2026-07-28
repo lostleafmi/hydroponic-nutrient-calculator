@@ -108,6 +108,23 @@ export interface SaltGapWarning {
 }
 
 /**
+ * Records when the solver reached for a salt the user didn't check on Step
+ * 1 because it was the only practical way to fully match an elemental
+ * target — see the Potassium fallback in `calculateStockTankRecipe`. Unlike
+ * `SaltGapWarning` (which tells the grower "we couldn't match this, go
+ * check more salts"), this is a user-friendly failsafe: rather than leaving
+ * the target unmet and asking the grower to understand salt chemistry, the
+ * solver quietly completes the recipe with a common, easy-to-source salt
+ * and simply informs them what it did and why.
+ */
+export interface SaltAutoAddNote {
+  element: keyof ElementalTargets
+  elementLabel: string
+  saltKey: SaltKey
+  saltLabel: string
+}
+
+/**
  * Calcium Carbonate (CaCO₃) is essentially insoluble at stock-tank
  * concentrations — see the note in `calculateStockTankRecipe` — so it's
  * never assigned into a stock tank's `SaltAmounts`, even when the user
@@ -282,6 +299,8 @@ export interface TankRecipe {
    * same double-salt product rather than a distinct ingredient.
    */
   ammoniumNitrateIsCalciumDoubleSalt?: boolean
+  /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
+  autoAddedSalts?: SaltAutoAddNote[]
 }
 
 export interface ThreeTankRecipe {
@@ -295,6 +314,8 @@ export interface ThreeTankRecipe {
   isApproximate?: boolean
   /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into Tank 1 */
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
+  /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
+  autoAddedSalts?: SaltAutoAddNote[]
 }
 
 export const RAW_SALTS = {
@@ -649,6 +670,8 @@ export interface MultiPartTankRecipe {
   isApproximate?: boolean
   /** Calcium Carbonate needed across all parts' recipes, consolidated and to be added directly to the reservoir/batch tank rather than into any part's tank */
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
+  /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
+  autoAddedSalts?: SaltAutoAddNote[]
 }
 
 export interface DirectMixRecipe {
@@ -657,6 +680,8 @@ export interface DirectMixRecipe {
   isApproximate: boolean
   /** Calcium Carbonate needed for this recipe, to add directly to the reservoir rather than mixing it in with the rest of the salts */
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
+  /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
+  autoAddedSalts?: SaltAutoAddNote[]
 }
 
 /**

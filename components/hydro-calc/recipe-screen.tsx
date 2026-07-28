@@ -87,6 +87,7 @@ import {
   type MultiPartTankRecipe,
   type MultiTankSolubilityReport,
   type PartStockTank,
+  type SaltAutoAddNote,
   type SaltGapWarning,
   type SaltKey,
   type ThreeTankRecipe,
@@ -323,6 +324,24 @@ export function RecipeScreen({
   ])
 
   const isRecipeApproximate = activeRecipeWarnings.length > 0
+
+  // Salts the solver quietly reached for on the grower's behalf to fully
+  // match a target the checked salts alone couldn't cover — see
+  // `SaltAutoAddNote`. Surfaced as a short, friendly note rather than the
+  // "check more salts" warning above.
+  const activeAutoAddedSalts: SaltAutoAddNote[] = useMemo(() => {
+    if (stockTankOption === "direct") return directRecipe.autoAddedSalts ?? []
+    if (usesSeparateNitrogenLayout) return threeTankRecipe.autoAddedSalts ?? []
+    if (usesPerPartTanks) return multiPartRecipe.autoAddedSalts ?? []
+    return []
+  }, [
+    stockTankOption,
+    usesSeparateNitrogenLayout,
+    usesPerPartTanks,
+    directRecipe.autoAddedSalts,
+    threeTankRecipe.autoAddedSalts,
+    multiPartRecipe.autoAddedSalts,
+  ])
 
   // Calcium Carbonate is never placed into a stock tank (see
   // `calculateStockTankRecipe`) — whichever mode is active drives which
@@ -1199,6 +1218,26 @@ export function RecipeScreen({
           )}
         </CardContent>
       </Card>
+
+      {/* Auto-added salt note — shown when the solver reached for a practical
+          salt the grower didn't check, purely to fully match a target
+          (currently only Potassium — see `SaltAutoAddNote`). This is a
+          user-friendly failsafe, not a warning: the recipe below already
+          matches the label, no action is needed. */}
+      {hasValidData && activeAutoAddedSalts.length > 0 && (
+        <div className="flex items-start gap-3 rounded-lg border-2 border-sky-500/50 bg-sky-500/10 p-4">
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
+          <p className="text-sm leading-relaxed text-sky-100">
+            {activeAutoAddedSalts.map((note, index) => (
+              <Fragment key={note.saltKey}>
+                {index > 0 && " "}
+                <strong className="text-sky-50">{note.saltLabel}</strong> was included so the recipe
+                can match the {note.elementLabel.toLowerCase()} on the label.
+              </Fragment>
+            ))}
+          </p>
+        </div>
+      )}
 
       {/* Salt-selection mismatch warning — shown when the checked salts can't fully cover the targets */}
       {hasValidData && isRecipeApproximate && (
