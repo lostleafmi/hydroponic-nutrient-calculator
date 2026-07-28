@@ -426,7 +426,7 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   {
     id: "ammoniumNitrateOrSulfate",
     label: "Ammonium Nitrate / Ammonium Sulfate",
-    sublabel: "",
+    sublabel: "Select this and Calcium Nitrate for Ammonium calcium nitrate double salt.",
     saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
   },
   { id: "calciumAcetate", label: "Calcium Acetate", sublabel: "", saltKeys: [] },
