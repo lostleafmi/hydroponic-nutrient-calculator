@@ -67,8 +67,8 @@ export function FeedingRatesScreen({
   const prefersPerPartTanks = isPerPartReplicationPreferred(parts.length)
   // From three parts up, Separate Nitrogen is built out of those same
   // per-part solves rather than from the parts pooled together, and it keeps
-  // each part in a tank of its own — so it no longer trades either fidelity or
-  // per-bottle control for tapering. See
+  // each part in a tank of its own without adding one — so it no longer trades
+  // fidelity, per-bottle control or tank count for tapering. See
   // `separateNitrogenSolvesPartsIndependently`.
   const separateNitrogenKeepsPartsIntact = separateNitrogenSolvesPartsIndependently(parts.length)
   const tankCountLabel = `${parts.length} tank${parts.length === 1 ? "" : "s"}`
@@ -93,7 +93,7 @@ export function FeedingRatesScreen({
     const purpose =
       "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor."
     if (separateNitrogenKeepsPartsIntact) {
-      return `${purpose} Each of your ${parts.length} parts is still solved on its own, from only its own label and salts — the same math as one tank per part. The only thing that moves is the Calcium: it's pulled out of every part into one tank of its own, and each part keeps a tank for the rest of its salts. So you can cut Nitrogen back part by part near harvest while your Calcium stays put.`
+      return `${purpose} Still ${tankCountLabel} — each of your ${parts.length} parts solved on its own, from only its own label and salts, the same math as one tank per part. The only thing that moves is the Calcium: it's pulled out of your other parts and gathered into whichever one is your Calcium bottle, so you can cut Nitrogen back part by part near harvest while your Calcium stays put.`
     }
     if (prefersPerPartTanks) {
       return `${purpose} Blends your parts together into 2 tanks by chemistry instead of keeping them separate, so the ppm can drift a little from your original line.`
@@ -113,7 +113,9 @@ export function FeedingRatesScreen({
       safetyTone="safe"
       note="Only for flower recipes"
       accuracyLabel={
-        separateNitrogenKeepsPartsIntact ? "Ca separated · parts kept distinct" : undefined
+        separateNitrogenKeepsPartsIntact
+          ? `Ca separated · still ${tankCountLabel}`
+          : undefined
       }
     />
   )

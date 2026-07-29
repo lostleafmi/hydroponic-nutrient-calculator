@@ -431,9 +431,12 @@ export interface TankRecipe {
  * What a Separate Nitrogen tank is for, which is what decides its label, its
  * mixing note, and whether it can be tapered.
  *
- *  - `"calcium"` — the Calcium salts, pooled across every part into the one
- *    tank that must stay clear of phosphate and sulfate at stock strength
- *    (see `TANK_1_SALTS`). Calcium Nitrate's own Nitrogen rides along in here.
+ *  - `"calcium"` — every part's Calcium salts, pooled into the one tank that
+ *    must stay clear of phosphate and sulfate at stock strength (see
+ *    `TANK_1_SALTS`). Calcium Nitrate's own Nitrogen rides along in here. On a
+ *    multi-part line this is the line's own Calcium bottle, so it may also
+ *    hold that bottle's other salts (see
+ *    `calculateSeparateNitrogenMultiPartRecipe`).
  *  - `"non-calcium"` — everything else (see `TANK_2_SALTS` / `TANK_3_SALTS`),
  *    which is where the Nitrogen a grower can cut without touching Calcium
  *    lives.
@@ -446,13 +449,15 @@ export interface SeparateNitrogenTank {
   name: string
   role: SeparateNitrogenTankRole
   /**
-   * The original nutrient part this tank was solved from — set only on the
-   * `"non-calcium"` tanks of a line whose parts are kept apart (see
-   * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). The Calcium tank never
-   * carries one: it deliberately pools every part's Calcium so there's a
-   * single tank to taper. Below the per-part threshold the parts are pooled
-   * and re-solved as one, so there's no single part to attribute the
-   * non-Calcium salts to either.
+   * The original nutrient part this tank stands in for, set on the tanks of a
+   * line whose parts are kept apart (see
+   * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). The Calcium tank carries
+   * one when it's the line's Calcium bottle — i.e. when that bottle's own
+   * non-Calcium salts went in alongside the pooled Calcium — and carries none
+   * when it came out holding nothing but Calcium, since then it stands for the
+   * Calcium of every part rather than for one bottle. Below the per-part
+   * threshold the parts are pooled and re-solved as one, so no tank has a part
+   * to name.
    */
   partName?: string
   partId?: string
@@ -466,8 +471,10 @@ export interface SeparateNitrogenRecipe {
    * The physical tanks, in mixing order, with the Calcium tank first. Tanks
    * that came out empty are never included, so a part that's pure Calcium
    * Nitrate doesn't leave a blank tank behind — which means `index`/`name`
-   * count the tanks the grower actually mixes rather than the parts they
-   * came from.
+   * count the tanks the grower actually mixes rather than the parts they came
+   * from. On a multi-part line that count never exceeds the number of parts:
+   * moving the Calcium never buys an extra tank (see
+   * `calculateSeparateNitrogenMultiPartRecipe`).
    */
   tanks: SeparateNitrogenTank[]
   warnings?: SaltGapWarning[]
@@ -795,13 +802,13 @@ export function sumCalciumChlorideGramsPerGallon(parts: PartAnalysis[]): number 
 /**
  * From this many parts up, the Separate Nitrogen layout solves every part on
  * its own — exactly like the per-part tanks — and keeps them apart afterwards
- * too: the Calcium is pulled out into one shared tank, and each part's
- * remaining salts get a tank of their own (see
- * `calculateSeparateNitrogenMultiPartRecipe`). So the grams are the ones the
- * grower's own parts called for rather than a fresh recipe solved from every
- * part's salts pooled together, which is what used to pull a 3-part line away
- * from the feed it was replicating — and the parts stay individually
- * adjustable, which merging them into one tank took away.
+ * too: it pools every part's Calcium into the line's own Calcium bottle and
+ * leaves every other part a tank of its own, so a three-part line still mixes
+ * three tanks (see `calculateSeparateNitrogenMultiPartRecipe`). So the grams
+ * are the ones the grower's own parts called for rather than a fresh recipe
+ * solved from every part's salts pooled together, which is what used to pull a
+ * 3-part line away from the feed it was replicating — and the parts stay
+ * individually adjustable, which merging them into one tank took away.
  *
  * Below this count the layout keeps the pooled solve and the single merged
  * non-Calcium tank that goes with it (see `calculateSeparateCalciumRecipe`
@@ -1020,24 +1027,26 @@ export const TANK_B_SALTS = [
  * ion completely isolated, which is what lets Nitrogen be moved at the end of
  * flower without rebalancing the rest of the recipe.
  *
- * Calcium side (`TANK_1_SALTS`) — Calcium source only: Calcium Nitrate, and/or
+ * Calcium side (`TANK_1_SALTS`) — the Calcium sources: Calcium Nitrate, and/or
  *          Calcium Chloride or Calcium Carbonate when used instead of (or
- *          alongside) it as a nitrogen-free calcium source. Always exactly one
- *          physical tank, pooled across every part, so there's a single tank
- *          to hold steady — or to taper, when Calcium Nitrate is the source
- *          and the grower wants Calcium to come down with the Nitrogen.
+ *          alongside) it as a nitrogen-free calcium source. All of it lands in
+ *          one physical tank, pooled across every part, so there's a single
+ *          tank to hold steady — or to taper, when Calcium Nitrate is the
+ *          source and the grower wants Calcium to come down with the Nitrogen.
  * Non-calcium side (`TANK_2_SALTS` + `TANK_3_SALTS`) — everything else:
  *          remaining macros (KNO₃, Mg(NO₃)₂, MKP/MAP, MgSO₄, K₂SO₄, Urea)
  *          plus the micronutrients (Fe-DTPA, Mn/Zn/Cu EDTA chelates, boric
  *          acid, sodium molybdate), which are merged in alongside them rather
  *          than split into a micros tank of their own.
  *
- * How many physical tanks the non-calcium side becomes is a layout decision
- * rather than a chemical one — one merged tank when the parts were pooled and
- * re-solved as one, or one tank per part when they weren't (see
- * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). Both are safe: the salts on
- * this side can share a tank with each other, they just can't share one with
- * concentrated Calcium.
+ * How the two sides become physical tanks is a layout decision rather than a
+ * chemical one — one merged non-Calcium tank when the parts were pooled and
+ * re-solved as one, one tank per part when they weren't (see
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). The only chemical constraint
+ * is the narrow one in `CALCIUM_INCOMPATIBLE_SALTS`: the salts on this side can
+ * all share a tank with each other, and all but the phosphates and sulfates can
+ * share the Calcium tank too, which is what lets the per-part layout hold to one
+ * tank per bottle.
  */
 export const TANK_1_SALTS = [
   "calciumNitrate",
@@ -1074,6 +1083,26 @@ export const TANK_3_SALTS = [
 ] as const satisfies readonly SaltKey[]
 
 /**
+ * The only salts that genuinely can't share a stock tank with concentrated
+ * Calcium: the phosphate and sulfate carriers, which drop out as dicalcium
+ * phosphate or gypsum at stock strength.
+ *
+ * The rest of the non-Calcium side is safe beside Calcium Nitrate — the
+ * nitrates, Urea and the chelated micronutrients are exactly what a
+ * conventional "Tank A" holds alongside it (see `TANK_A_SALTS`). That's what
+ * lets the Separate Nitrogen layout pour a Calcium bottle's own leftovers back
+ * into the Calcium tank rather than spending a whole extra tank on them (see
+ * `calculateSeparateNitrogenMultiPartRecipe`).
+ */
+export const CALCIUM_INCOMPATIBLE_SALTS = [
+  "monoPotassiumPhosphate",
+  "monoAmmoniumPhosphate",
+  "magnesiumSulfate",
+  "potassiumSulfate",
+  "ammoniumSulfate",
+] as const satisfies readonly SaltKey[]
+
+/**
  * Compile-time + runtime guarantee that no salt ends up in incompatible
  * tanks. Each layout relies on this invariant to keep calcium apart from
  * phosphate / sulfate at concentrated storage strength.
@@ -1097,6 +1126,21 @@ function assertTanksAreDisjoint(): void {
       }
       seen.add(key)
     }
+  }
+
+  // A new phosphate or sulfate salt added to the Tank-B side has to show up in
+  // `CALCIUM_INCOMPATIBLE_SALTS` too, or the Separate Nitrogen layout would
+  // happily fold it in beside pooled Calcium. Chelated micronutrients are the
+  // documented exception: they're grouped with Tank B but safe either side.
+  const microKeys = new Set<string>(TANK_3_SALTS)
+  const unguarded = TANK_B_SALTS.filter(
+    (key) => !microKeys.has(key) && !(CALCIUM_INCOMPATIBLE_SALTS as readonly string[]).includes(key)
+  )
+  if (unguarded.length > 0) {
+    throw new Error(
+      "Salts could be folded in beside concentrated Calcium — add them to " +
+        `CALCIUM_INCOMPATIBLE_SALTS: ${unguarded.join(", ")}`
+    )
   }
 }
 

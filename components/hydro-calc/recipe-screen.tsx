@@ -327,6 +327,11 @@ export function RecipeScreen({
   const separateNitrogenKeepsPartsDistinct = separateNitrogenRecipe.tanks.some(
     (tank) => tank.partName !== undefined
   )
+  // Set when the pooled Calcium went into one of the line's own bottles rather
+  // than into a tank of its own, which is what keeps the tank count down to the
+  // number of parts (see `calculateSeparateNitrogenMultiPartRecipe`).
+  const separateNitrogenCalciumTankPartName =
+    separateNitrogenRecipe.tanks.find((tank) => tank.role === "calcium")?.partName ?? null
 
   /**
    * The ppm the grower's plants will actually see, reconstructed from the
@@ -453,7 +458,8 @@ export function RecipeScreen({
    * straight from a literal feed-chart dose rather than from a ppm target (see
    * `feedRateGramsTooltip`). The Separate Nitrogen layout pools every part's
    * Calcium into one tank, so these are the combined doses — unlike
-   * `PerPartStockTankCards`, there's no single part left to attribute them to.
+   * `PerPartStockTankCards`, there's no single part to attribute them to even
+   * when that tank is one of the line's own bottles.
    */
   const calciumFeedRateTooltips = useMemo(() => {
     const tooltips: Partial<Record<SaltKey, React.ReactNode>> = {}
@@ -485,7 +491,7 @@ export function RecipeScreen({
     if (usesSeparateNitrogenLayout) {
       return checkRecipeSolubility(
         separateNitrogenRecipe.tanks.map((tank) => ({
-          name: separateNitrogenTankSolubilityLabel(tank),
+          name: separateNitrogenTankLabel(tank),
           salts: tank.salts,
         })),
         solubilityBasisVolumeLiters,
@@ -739,13 +745,10 @@ export function RecipeScreen({
 
   const stockTankUsageLabels = useMemo(() => {
     if (stockTankOption === "direct") return []
-    // Name the part on the tanks that stand for one, same as the per-part
-    // layout below — the Calcium tank is shared across every part, so there's
-    // nothing to name it after.
+    // Named exactly as the tank cards and the solubility report name them, so a
+    // grower reading a rate here knows which card it belongs to.
     if (usesSeparateNitrogenLayout) {
-      return separateNitrogenRecipe.tanks.map((tank) =>
-        tank.partName ? `${tank.name} (${tank.partName})` : tank.name
-      )
+      return separateNitrogenRecipe.tanks.map(separateNitrogenTankLabel)
     }
     // Name the part alongside the tank — the whole point of this layout is
     // that each tank stands in for one bottle of the original line, and the
@@ -1181,7 +1184,7 @@ export function RecipeScreen({
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {doserLayout === "separate-ca"
                   ? separateNitrogenKeepsPartsDistinct
-                    ? "Ca(NO₃)₂ gets a suction line of its own, making it easy to taper nitrogen at the end of flower. Every part keeps its own line for the rest of its salts."
+                    ? "All your Ca(NO₃)₂ is gathered onto one suction line, making it easy to taper nitrogen at the end of flower — still one line per part, same as your feed chart."
                     : "Ca(NO₃)₂ gets its own suction line, making it easy to taper nitrogen at the end of flower."
                   : "One suction line per part in your feed chart — standard doser setup."}
               </p>
@@ -1488,6 +1491,7 @@ export function RecipeScreen({
               : multiPartRecipe.tanks.length
           }
           keepsPartsDistinct={separateNitrogenKeepsPartsDistinct}
+          calciumTankPartName={separateNitrogenCalciumTankPartName}
         />
       )}
 
@@ -1531,8 +1535,8 @@ export function RecipeScreen({
           </>
         )}
 
-      {/* Recipe Cards — Separate Nitrogen layout (Calcium on its own, then
-          either one merged tank or one tank per part) */}
+      {/* Recipe Cards — Separate Nitrogen layout (all the Calcium in one tank,
+          then either one merged tank or one per remaining part) */}
       {hasValidData && usesSeparateNitrogenLayout && (
         <SeparateNitrogenTankCards
           tanks={separateNitrogenRecipe.tanks}
@@ -2145,17 +2149,22 @@ const TANK_CARD_STYLES = [
 ] as const
 
 /**
- * How a Separate Nitrogen tank is named in the solubility report, where the
- * grower has to recognise which physical tank is the one sitting at its limit.
+ * How a Separate Nitrogen tank is named everywhere it's referred to rather than
+ * shown — the solubility report and the "how to use" rates — where the grower
+ * has to recognise which physical tank is being talked about.
  */
-function separateNitrogenTankSolubilityLabel(tank: SeparateNitrogenTank): string {
-  if (tank.role === "calcium") return `${tank.name} (Calcium)`
+function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
+  if (tank.role === "calcium") {
+    return tank.partName ? `${tank.name} (${tank.partName} — Calcium)` : `${tank.name} (Calcium)`
+  }
   if (tank.partName) return `${tank.name} (${tank.partName})`
   return `${tank.name} (Macros)`
 }
 
 function separateNitrogenTankBadge(tank: SeparateNitrogenTank): string {
-  if (tank.role === "calcium") return "Nitrogen + Calcium"
+  if (tank.role === "calcium") {
+    return tank.partName ? `${tank.partName} + all Calcium` : "Nitrogen + Calcium"
+  }
   if (tank.partName) return tank.partName
   return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
 }
@@ -2165,6 +2174,12 @@ function separateNitrogenTankDescription(
   calciumTankName: string | null
 ): string {
   if (tank.role === "calcium") {
+    // Named after a part means this is that bottle's own tank, with the rest of
+    // the line's Calcium moved into it rather than into a tank of its own (see
+    // `calculateSeparateNitrogenMultiPartRecipe`).
+    if (tank.partName) {
+      return `Your ${tank.partName}, holding all the Calcium in your recipe — its own plus whatever came out of your other parts. Nothing phosphate- or sulfate-bearing goes in here, so it stays safe at stock strength. Gathering the Calcium in one place is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together.`
+    }
     return "Just your Calcium source in this stock tank. Keeping it on its own is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together."
   }
 
@@ -2186,8 +2201,9 @@ function separateNitrogenTankDescription(
 
 /**
  * The Separate Nitrogen tank cards, drawn from whatever tanks the layout came
- * back with: the shared Calcium tank first, then either one merged non-Calcium
- * tank or one per part (see `calculateSeparateNitrogenMultiPartRecipe`).
+ * back with: the Calcium tank first, then either one merged non-Calcium tank or
+ * the line's remaining parts, one apiece (see
+ * `calculateSeparateNitrogenMultiPartRecipe`).
  */
 function SeparateNitrogenTankCards({
   tanks,
@@ -2471,6 +2487,7 @@ function MixingSafetyBanner({
   tankCount,
   separateCaLayout = false,
   keepsPartsDistinct = false,
+  calciumTankPartName = null,
 }: {
   option: StockTankOption
   /** How many stock tanks the active layout came back with */
@@ -2481,6 +2498,12 @@ function MixingSafetyBanner({
    * rather than merging them (see `separateNitrogenKeepsPartsDistinct`).
    */
   keepsPartsDistinct?: boolean
+  /**
+   * The part whose tank holds the pooled Calcium, when the Calcium went into one
+   * of the line's own bottles rather than into a tank of its own (see
+   * `SeparateNitrogenTank.partName`).
+   */
+  calciumTankPartName?: string | null
 }) {
   if (option === "separate") {
     const otherTankCount = Math.max(tankCount - 1, 0)
@@ -2490,12 +2513,12 @@ function MixingSafetyBanner({
         <div className="space-y-1 text-sm leading-relaxed text-emerald-100">
           <p className="font-semibold">Safest setup</p>
           <p>
-            Your Calcium — and the Nitrogen that comes with it — sits alone in a stock tank of its
-            own, so it&apos;s easy to move Nitrogen at the end of flower without rebalancing
-            anything else.
+            {calciumTankPartName
+              ? `All your Calcium — and the Nitrogen that comes with it — is gathered into one stock tank, your ${calciumTankPartName}, so it's easy to move Nitrogen at the end of flower without rebalancing anything else.`
+              : "Your Calcium — and the Nitrogen that comes with it — sits alone in a stock tank of its own, so it's easy to move Nitrogen at the end of flower without rebalancing anything else."}
             {otherTankCount > 0 &&
               (keepsPartsDistinct
-                ? ` The rest of your recipe stays split across ${otherTankCount} more stock tank${otherTankCount === 1 ? "" : "s"}, one per part of your feed chart, so each one still doses like the bottle it replaces.`
+                ? ` The rest of your recipe stays split across ${otherTankCount} more stock tank${otherTankCount === 1 ? "" : "s"}, one per remaining part of your feed chart, so each one still doses like the bottle it replaces — and you mix no more tanks than your line has parts.`
                 : ` The rest of your recipe goes into ${otherTankCount} more stock tank${otherTankCount === 1 ? "" : "s"} that's safe to combine.`)}
           </p>
         </div>
@@ -2514,8 +2537,10 @@ function MixingSafetyBanner({
           <p className="font-semibold">Doser / Injector setup — check your hardware first</p>
           <p>
             {separateCaLayout
-              ? `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} with Calcium Nitrate isolated in its own suction line for easy nitrogen tapering${
-                  keepsPartsDistinct ? ", and one line per part for the rest of their salts" : ""
+              ? `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} with all your Calcium Nitrate on ${
+                  keepsPartsDistinct
+                    ? "one suction line for easy nitrogen tapering, and one line per part of your feed chart"
+                    : "its own suction line for easy nitrogen tapering"
                 }.`
               : `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} (one per part in your feed chart) for a standard doser ratio.`}{" "}
             <strong>Confirm the ratio printed on your injector</strong> matches the one we picked

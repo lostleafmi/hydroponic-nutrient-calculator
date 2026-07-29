@@ -87,16 +87,19 @@ function buildDirectAddCalciumCarbonateExport(
 /**
  * What a Separate Nitrogen tank is called in the exported formulation.
  *
- * The Calcium tank is named for what's in it, since it's the one tank that
- * exists for a chemical reason rather than as a stand-in for a bottle. A
- * non-Calcium tank that belongs to one part is named after that part — the
- * same way the per-part export names its tanks — so an imported formulation
- * still reads as the grower's own feed chart. Only when the parts were pooled
- * and re-solved as one (see `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`) is
- * there no part to name it after.
+ * A tank that belongs to one part is named after that part — the same way the
+ * per-part export names its tanks — so an imported formulation still reads as
+ * the grower's own feed chart. The Calcium tank is named that way too when it's
+ * one of the line's own bottles holding the pooled Calcium, and named for its
+ * contents when it holds nothing but Calcium, since then it stands for no single
+ * bottle. Only when the parts were pooled and re-solved as one (see
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`) is there no part to name any
+ * tank after.
  */
 function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
-  if (tank.role === "calcium") return "Nitrogen + Calcium"
+  if (tank.role === "calcium") {
+    return tank.partName ? `${tank.partName} + Calcium` : "Nitrogen + Calcium"
+  }
   if (tank.partName) return tank.partName
   return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
 }
@@ -106,7 +109,9 @@ function separateNitrogenMixInstructions(
   sizeNum: number,
   unitLabel: string
 ): string {
-  if (tank.role === "calcium") {
+  // A Calcium tank with a part to its name holds that bottle's other salts too,
+  // so it needs the same salt-by-salt order as any other tank.
+  if (tank.role === "calcium" && !tank.partName) {
     return `Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved, then top up to ${sizeNum} ${unitLabel} and label it "${tank.name}".`
   }
   return `Fill the stock tank about halfway with RO water, then add the salts in the order listed above${
@@ -174,7 +179,8 @@ export function buildFormulationTanksData({
 
     // However many tanks the layout came back with — one merged non-Calcium
     // tank when the parts were pooled, one per part when they weren't (see
-    // `calculateSeparateNitrogenMultiPartRecipe`).
+    // `calculateSeparateNitrogenMultiPartRecipe`, which never returns more
+    // tanks than the line has parts).
     const tanks: FormulationTank[] = separateNitrogenRecipe.tanks
       .map((tank) => {
         const id = `tank${tank.index}`

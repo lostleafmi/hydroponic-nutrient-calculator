@@ -16,6 +16,7 @@ import type { PartAnalysis } from "@/components/hydro-calc/guaranteed-analysis-s
 import type { NutrientPart } from "@/components/hydro-calc/feeding-rates-screen"
 import {
   buildDirectAddCalciumCarbonate,
+  CALCIUM_INCOMPATIBLE_SALTS,
   calciumChlorideElementalCalciumPpm,
   combineDirectAddCalciumCarbonate,
   ELEMENT_LABELS,
@@ -1414,7 +1415,7 @@ function buildSeparateNitrogenTanks(drafts: SeparateNitrogenTankDraft[]): Separa
  * separate identities by the time the tanks are filled. That's why this path
  * is only used for one- and two-part lines; from three parts up,
  * `calculateSeparateNitrogenMultiPartRecipe` solves each part on its own and
- * gives each one a tank of its own to match (see
+ * keeps one tank per part (see
  * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`).
  */
 export function calculateSeparateCalciumRecipe(
@@ -1487,6 +1488,12 @@ function combineSaltAmounts(a: SaltAmounts, b: SaltAmounts): SaltAmounts {
     combined[key] = a[key] + b[key]
   }
   return combined
+}
+
+function addSaltAmounts(target: SaltAmounts, addition: SaltAmounts): void {
+  for (const key of SALT_DISPLAY_ORDER) {
+    target[key] += addition[key]
+  }
 }
 
 function addElementalPpm(total: ElementalTargets, addition: ElementalTargets): void {
@@ -1664,32 +1671,85 @@ export function calculateMultiPartStockTankRecipe(
   }
 }
 
+/** One solved part, split along the Calcium line but not yet assigned a tank. */
+interface PartCalciumSplit {
+  feedingPart: NutrientPart
+  calcium: SaltAmounts
+  nonCalcium: SaltAmounts
+}
+
+function calciumGrams(salts: SaltAmounts): number {
+  return TANK_1_SALTS.reduce((total, key) => total + salts[key], 0)
+}
+
+/** True when `salts` can sit beside concentrated Calcium — see `CALCIUM_INCOMPATIBLE_SALTS`. */
+function isSafeBesideCalcium(salts: SaltAmounts): boolean {
+  return !CALCIUM_INCOMPATIBLE_SALTS.some((key) => salts[key] > 0)
+}
+
 /**
- * The Separate Nitrogen layout for a multi-part line: the Calcium pulled out
- * into one shared tank, and each part's remaining salts left in a tank of
- * their own.
+ * Which part's tank becomes the Calcium tank — the bottle whose Calcium the
+ * rest of the line's Calcium joins, rather than a fresh tank added beside them
+ * all.
+ *
+ * Only a bottle whose own remaining salts are safe beside Calcium can host
+ * (`isSafeBesideCalcium`); among those, the one contributing the most Calcium
+ * wins, because that's the line's Calcium bottle — a Cal-Mag topping up a
+ * base's Calcium should pour into the base, not the other way round.
+ *
+ * Returns `undefined` when nothing can host, which is either of two things.
+ * Usually it's an all-Carbonate line with no Calcium in a tank at all, since
+ * Carbonate is a direct reservoir addition (see `calculateStockTankRecipe`).
+ * Otherwise it's the one line shape that genuinely can't be compressed: a
+ * Calcium bottle that declares sulfate or phosphate as well, so its Calcium
+ * can't share a tank with its own leftovers. The Calcium then keeps a tank of
+ * its own and that bottle keeps its remainder — which does cost a tank, but no
+ * arrangement saves it without either pouring sulfate onto Calcium or merging
+ * two of the grower's bottles together.
+ */
+function pickCalciumHost(splits: PartCalciumSplit[]): PartCalciumSplit | undefined {
+  const candidates = splits.filter(
+    (split) => calciumGrams(split.calcium) > 0 && isSafeBesideCalcium(split.nonCalcium)
+  )
+  if (candidates.length === 0) return undefined
+
+  return candidates.reduce((best, split) =>
+    calciumGrams(split.calcium) > calciumGrams(best.calcium) ? split : best
+  )
+}
+
+/**
+ * The Separate Nitrogen layout for a multi-part line: every part's Calcium
+ * pooled into the line's own Calcium bottle, and every other part left in a
+ * tank of its own.
  *
  * Every part is solved on its own against its own label, dose and checked
- * salts (see `solveEachPartIndependently`), so the grams here are the same
- * ones the per-part tanks would call for. What this layout changes is only
- * where those grams are stored — and it changes as little as it can: exactly
- * one thing is taken out of each part, its Calcium, and everything else stays
- * with the part it came from.
+ * salts (see `solveEachPartIndependently`), so the grams here are the same ones
+ * the per-part tanks would call for. What this layout changes is only where
+ * those grams are stored, and it changes as little as it can: the Calcium moves
+ * out of the other bottles and nothing else moves at all.
  *
- * Merging the leftovers into one shared tank instead would move no grams
- * either, but it would cost the grower the thing a multi-part line is for:
- * with one tank per part they can still dial a single bottle up or down the
- * way the original feed chart intends, and a tank still corresponds to
- * something they recognise. Merging replaces that with a single macro+micro
- * bucket that can only be moved as a whole.
+ * Crucially it moves Calcium *into an existing tank* rather than into a new
+ * one. Giving the pooled Calcium a tank of its own and then still giving every
+ * part a tank for its leftovers costs a three-part line a fourth tank — and
+ * that fourth tank is the thinnest one, since the bottle the Calcium came out
+ * of is mostly Calcium to begin with. The grower ends up weighing the same
+ * salts into two tanks apiece for no gain, when what they asked for was their
+ * three-part line back. Hosting the Calcium in the bottle it mostly came from
+ * (see `pickCalciumHost`) keeps the tank count at or below the number of parts,
+ * and empty leftovers drop out entirely (see `buildSeparateNitrogenTanks`). The
+ * only line that still costs an extra tank is one whose Calcium bottle declares
+ * sulfate or phosphate too, where no bottle can host — see `pickCalciumHost`
+ * for why nothing better exists there.
  *
- * Pooling every part's Calcium into one shared tank stays safe because that
- * split is chemical, not per-bottle: the Calcium tank only ever receives
- * Calcium salts, so no part's phosphate or sulfate can meet another part's
- * Calcium at concentrated strength (see `TANK_1_SALTS` / `TANK_2_SALTS`). It's
- * also what makes the layout worth choosing — Calcium Nitrate's Nitrogen is
- * confined to that one tank, so the Nitrogen in every other tank can be cut
- * back at the end of flower without touching the Calcium supply.
+ * Pooling several parts' Calcium into one tank stays safe because the split is
+ * chemical, not per-bottle: nothing phosphate- or sulfate-bearing is ever
+ * folded in beside it (see `CALCIUM_INCOMPATIBLE_SALTS`), which is also why the
+ * host's own leftovers can go back in — nitrates, Urea and chelated
+ * micronutrients are what sits beside Calcium Nitrate in any conventional
+ * Tank A. And it's what makes the layout worth choosing: Calcium Nitrate's
+ * Nitrogen is confined to that one tank, so the Nitrogen in every other tank
+ * can be cut back at the end of flower without touching the Calcium supply.
  */
 export function calculateSeparateNitrogenMultiPartRecipe(
   partsAnalysis: PartAnalysis[],
@@ -1697,8 +1757,7 @@ export function calculateSeparateNitrogenMultiPartRecipe(
   stockVolumeLiters: number,
   dilutionRatio: number
 ): SeparateNitrogenRecipe {
-  const calciumTank = emptySaltAmounts()
-  const nonCalciumTanksByPart: SeparateNitrogenTankDraft[] = []
+  const splits: PartCalciumSplit[] = []
 
   const totals = solveEachPartIndependently(
     partsAnalysis,
@@ -1706,28 +1765,50 @@ export function calculateSeparateNitrogenMultiPartRecipe(
     stockVolumeLiters,
     dilutionRatio,
     (feedingPart, recipe) => {
-      addCalciumSalts(calciumTank, recipe)
-
-      const nonCalciumSalts = emptySaltAmounts()
-      addNonCalciumSalts(nonCalciumSalts, recipe)
-      nonCalciumTanksByPart.push({
-        role: "non-calcium",
-        salts: nonCalciumSalts,
-        partName: feedingPart.name,
-        partId: feedingPart.id,
-      })
+      const calcium = emptySaltAmounts()
+      const nonCalcium = emptySaltAmounts()
+      addCalciumSalts(calcium, recipe)
+      addNonCalciumSalts(nonCalcium, recipe)
+      splits.push({ feedingPart, calcium, nonCalcium })
     }
   )
 
+  const host = pickCalciumHost(splits)
+  const calciumTank = emptySaltAmounts()
+  for (const split of splits) addSaltAmounts(calciumTank, split.calcium)
+  if (host) addSaltAmounts(calciumTank, host.nonCalcium)
+
+  // The Calcium draft comes first so it lands as Tank 1, then the remaining
+  // parts in feed-chart order. A hosting part isn't among them: its salts are
+  // already in the Calcium tank. An empty Calcium draft — an all-Carbonate line
+  // — drops out in `buildSeparateNitrogenTanks`, as does any part left with
+  // nothing once its Calcium moved.
+  const drafts: SeparateNitrogenTankDraft[] = [
+    {
+      role: "calcium",
+      salts: calciumTank,
+      // Named after the host only when the host's own salts actually went in
+      // beside the Calcium. A tank holding nothing but Calcium stands for every
+      // part's Calcium rather than for one bottle, so naming it after one would
+      // misread (see `SeparateNitrogenTank.partName`).
+      ...(host && saltAmountsHasContent(host.nonCalcium)
+        ? { partName: host.feedingPart.name, partId: host.feedingPart.id }
+        : {}),
+    },
+  ]
+
+  for (const split of splits) {
+    if (split === host) continue
+    drafts.push({
+      role: "non-calcium",
+      salts: split.nonCalcium,
+      partName: split.feedingPart.name,
+      partId: split.feedingPart.id,
+    })
+  }
+
   return {
-    // The Calcium draft goes first so it lands as Tank 1, then the parts in
-    // feed-chart order. Empty drafts drop out here (see
-    // `buildSeparateNitrogenTanks`), which is what keeps a Calcium-only part
-    // from contributing a blank tank of its own.
-    tanks: buildSeparateNitrogenTanks([
-      { role: "calcium", salts: calciumTank },
-      ...nonCalciumTanksByPart,
-    ]),
+    tanks: buildSeparateNitrogenTanks(drafts),
     warnings: totals.warnings,
     isApproximate: totals.warnings.length > 0 || totals.deviations.length > 0,
     directAddCalciumCarbonate: totals.directAddCalciumCarbonate,
