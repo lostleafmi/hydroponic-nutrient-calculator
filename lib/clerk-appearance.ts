@@ -1,7 +1,9 @@
 import { dark } from '@clerk/themes'
-import type { Appearance } from '@clerk/types'
 
-export const clerkAppearance: Appearance = {
+// Deliberately unannotated: the installed Clerk packages don't publish the
+// `Appearance` type under any public entry point, so this is checked against
+// `ClerkProvider`'s own `appearance` prop where it's passed in `app/layout.tsx`.
+export const clerkAppearance = {
   baseTheme: dark,
   variables: {
     colorPrimary: '#10b981',
