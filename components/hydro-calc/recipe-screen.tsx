@@ -76,6 +76,8 @@ import {
   parsePositive,
   pickDoserPresetForRatio,
   pickPracticalAutoDilutionRatio,
+  saltAmountsCarryNitrogen,
+  saltAmountsCarryTaperableNitrogen,
   stockTankMlPerGallon,
   stockTankMlPerLiter,
   SPECIALTY_CALCIUM_SALT_IDS,
@@ -2161,26 +2163,64 @@ function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
   return `${tank.name} (Macros)`
 }
 
+/**
+ * The badge names what's physically in the tank, micronutrients included — a
+ * tank holding the micro package always holds macros too (see
+ * `placeMicronutrients`), so it's never described as a micro tank.
+ */
 function separateNitrogenTankBadge(tank: SeparateNitrogenTank): string {
+  const micros = tank.hasMicronutrients ? " + Micros" : ""
   if (tank.role === "calcium") {
-    return tank.partName ? `${tank.partName} + all Calcium` : "Nitrogen + Calcium"
+    return tank.partName
+      ? `${tank.partName} + all Calcium${micros}`
+      : `Nitrogen + Calcium${micros}`
   }
-  if (tank.partName) return tank.partName
+  if (tank.partName) return `${tank.partName}${micros}`
   return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
+}
+
+/**
+ * Why the micronutrient package sits in this particular tank — the one thing a
+ * grower planning a taper has to know, since everything sharing a tank comes
+ * down by whatever fraction they dial it back by.
+ *
+ * Micros always ride along with macros rather than taking a tank of their own,
+ * and go to a tank a taper won't reach wherever the recipe has one (see
+ * `placeMicronutrients`), so the usual note is the reassuring one. Empty for a
+ * tank holding no micros.
+ */
+function separateNitrogenMicroNote(tank: SeparateNitrogenTank): string {
+  if (!tank.hasMicronutrients) return ""
+
+  if (!saltAmountsCarryNitrogen(tank.salts)) {
+    return " Your micronutrients ride along in here, beside the salts that carry no Nitrogen at all — a taper can't reach them here, and it saves you mixing a micro tank of your own."
+  }
+
+  if (!saltAmountsCarryTaperableNitrogen(tank.salts)) {
+    return ` Your micronutrients ride along in here too. Nothing in this recipe is completely Nitrogen-free, but the Nitrogen in this tank arrives inside ${
+      tank.role === "calcium"
+        ? "your Calcium source"
+        : "salts you're feeding for their Phosphorus or Sulfur"
+    } rather than being the Nitrogen you'd taper — so hold this tank steady and your micro package runs full right through harvest.`
+  }
+
+  return " Your micronutrients are in here as well, because every tank in this recipe carries Nitrogen you might want to taper. Dial this one back and the micros come down with it, so feed them separately if you taper hard."
 }
 
 function separateNitrogenTankDescription(
   tank: SeparateNitrogenTank,
   calciumTankName: string | null
 ): string {
+  const micros = separateNitrogenMicroNote(tank)
+
   if (tank.role === "calcium") {
     // Named after a part means this is that bottle's own tank, with the rest of
     // the line's Calcium moved into it rather than into a tank of its own (see
     // `calculateSeparateNitrogenMultiPartRecipe`).
     if (tank.partName) {
-      return `Your ${tank.partName}, holding all the Calcium in your recipe — its own plus whatever came out of your other parts. Nothing phosphate- or sulfate-bearing goes in here, so it stays safe at stock strength. Gathering the Calcium in one place is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together.`
+      return `Your ${tank.partName}, holding all the Calcium in your recipe — its own plus whatever came out of your other parts. Nothing phosphate- or sulfate-bearing goes in here, so it stays safe at stock strength. Gathering the Calcium in one place is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together.${micros}`
     }
-    return "Just your Calcium source in this stock tank. Keeping it on its own is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together."
+    return `Just your Calcium source in this stock tank. Keeping it on its own is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together.${micros}`
   }
 
   // Only worth saying when the Calcium actually went into a tank of its own —
@@ -2191,12 +2231,10 @@ function separateNitrogenTankDescription(
     : ""
 
   if (tank.partName) {
-    return `Everything except the Calcium from your ${tank.partName}, built from only that part's own label, dose and checked salts — so this tank still stands in for that bottle, and you can dial it up or down on its own the way your feed chart intends.${safety}`
+    return `Everything except the Calcium from your ${tank.partName}, built from only that part's own label, dose and checked salts — so this tank still stands in for that bottle, and you can dial it up or down on its own the way your feed chart intends.${micros}${safety}`
   }
 
-  return tank.hasMicronutrients
-    ? `The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank.${safety}`
-    : `The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄).${safety}`
+  return `The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄), combined into one clean tank — this is the one to cut back when you want to bring Nitrogen down.${micros}${safety}`
 }
 
 /**
@@ -2296,8 +2334,11 @@ function SeparateNitrogenTankCards({
                       <strong className="text-foreground">How to mix:</strong> Fill the stock tank
                       about halfway with RO water, add the{" "}
                       {macroEntries.length > 1 ? "calcium sources" : "calcium source"} and stir
-                      until fully dissolved then top it up to {stockTankSize} {unitLabel} and label
-                      it &quot;{tank.name}&quot;.
+                      until fully dissolved
+                      {tank.hasMicronutrients
+                        ? ", then add your micronutrients one at a time, Iron DTPA first. Top up"
+                        : " then top it up"}{" "}
+                      to {stockTankSize} {unitLabel} and label it &quot;{tank.name}&quot;.
                     </>
                   ) : (
                     <>
@@ -2515,7 +2556,7 @@ function MixingSafetyBanner({
           <p>
             {calciumTankPartName
               ? `All your Calcium — and the Nitrogen that comes with it — is gathered into one stock tank, your ${calciumTankPartName}, so it's easy to move Nitrogen at the end of flower without rebalancing anything else.`
-              : "Your Calcium — and the Nitrogen that comes with it — sits alone in a stock tank of its own, so it's easy to move Nitrogen at the end of flower without rebalancing anything else."}
+              : "Your Calcium — and the Nitrogen that comes with it — is kept in a stock tank of its own, clear of every phosphate and sulfate, so it's easy to move Nitrogen at the end of flower without rebalancing anything else."}
             {otherTankCount > 0 &&
               (keepsPartsDistinct
                 ? ` The rest of your recipe stays split across ${otherTankCount} more stock tank${otherTankCount === 1 ? "" : "s"}, one per remaining part of your feed chart, so each one still doses like the bottle it replaces — and you mix no more tanks than your line has parts.`

@@ -25,7 +25,10 @@ import {
   isWithinMatchTolerance,
   RAW_SALTS,
   SALT_DISPLAY_ORDER,
+  saltAmountsCarryTaperableNitrogen,
+  saltFitsOneTank,
   sumSaltAmounts,
+  TAPERABLE_NITROGEN_SALTS,
   TANK_1_SALTS,
   TANK_3_SALTS,
   type ElementalTargets,
@@ -67,9 +70,11 @@ const TANK_1_SALT_KEYS = new Set<SaltKey>(TANK_1_SALTS)
 
 /**
  * What Tank 1 must never hold besides the Calcium: the phosphate and sulfate
- * salts that precipitate it. Everything else the host bottle declared is fair
- * game — Ammonium Nitrate included, now that `RAW_SALTS.calciumNitrate` models
- * the Ca(NO₃)₂/NH₄NO₃ double salt itself rather than being built from two salts.
+ * salts that precipitate it. Every other MACRO salt the host bottle declared is
+ * fair game — Ammonium Nitrate included, now that `RAW_SALTS.calciumNitrate`
+ * models the Ca(NO₃)₂/NH₄NO₃ double salt itself rather than being built from two
+ * salts. Whether the micros may share it is a separate question that has nothing
+ * to do with precipitation — see `reportSeparateNitrogenTaperability`.
  */
 const CALCIUM_INCOMPATIBLE_SALT_KEYS = new Set<SaltKey>(CALCIUM_INCOMPATIBLE_SALTS)
 
@@ -606,6 +611,94 @@ const CALCIUM_BOTTLE_CARRIES_SULFATE: Scenario = {
 }
 
 /**
+ * A three-part line where no bottle's non-Calcium salts are Nitrogen-free, so
+ * the micronutrients have no Nitrogen-free macro tank to ride in — the case that
+ * exercises the fallback, and the one that used to buy a fourth tank.
+ *
+ * Part A is the Calcium bottle (Ca(NO₃)₂ + KNO₃) and carries the micro package.
+ * Part B is a P/K/Mg bottle that also lists KNO₃, so it absorbs Part A's KNO₃
+ * when the Nitrogen is gathered and still carries Nitrogen afterwards. Part C is
+ * a MAP-only phosphate booster, whose Nitrogen is ammoniacal and rides along
+ * with the Phosphorus it was bought for — the kind of Nitrogen
+ * `TAPERABLE_NITROGEN_SALTS` deliberately leaves where it is.
+ *
+ * The micros go to the Calcium tank. Gathering the KNO₃ into Part B leaves that
+ * tank holding nothing but Ca(NO₃)₂, whose Nitrogen isn't what a grower reaches
+ * for when tapering — cutting it means giving up Calcium, the thing this layout
+ * exists to protect. So the micros sit in a tank that's held steady, in the
+ * conventional Tank A arrangement, and the line still comes back as three tanks
+ * for three parts.
+ */
+const EVERY_BOTTLE_CARRIES_NITROGEN: Scenario = {
+  name: "3-part line where no bottle is N-free (micros fall back to the Calcium tank)",
+  partsAnalysis: [
+    {
+      id: "a",
+      name: "Part A",
+      nitrogen: "14",
+      phosphate: "",
+      potash: "8",
+      calcium: "14",
+      magnesium: "",
+      sulfur: "",
+      iron: "0.35",
+      manganese: "0.1",
+      zinc: "0.05",
+      boron: "0.05",
+      copper: "0.05",
+      molybdenum: "0.003",
+      includedSalts: salts("calciumNitrate", "potassiumNitrate", "chelatedMicronutrients"),
+    },
+    {
+      id: "b",
+      name: "Part B",
+      nitrogen: "2",
+      phosphate: "13",
+      potash: "17",
+      calcium: "",
+      magnesium: "5",
+      sulfur: "7",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts(
+        "magnesiumSulfate",
+        "monoPotassiumPhosphate",
+        "potassiumNitrate",
+        "potassiumSulfate"
+      ),
+    },
+    {
+      id: "c",
+      // 100% MAP: P 26.9% → 61.7% P₂O₅, N 12.2%.
+      name: "P Booster",
+      nitrogen: "12.2",
+      phosphate: "61.7",
+      potash: "",
+      calcium: "",
+      magnesium: "",
+      sulfur: "",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("monoAmmoniumPhosphate"),
+    },
+  ],
+  parts: [
+    { id: "a", name: "Part A", dose: "4.9", unit: "g_per_gallon" },
+    { id: "b", name: "Part B", dose: "3.3", unit: "g_per_gallon" },
+    { id: "c", name: "P Booster", dose: "1.5", unit: "g_per_gallon" },
+  ],
+  stockTankOption: "separate",
+}
+
+/**
  * Three parts whose salt lists share nothing, run through the per-part layout:
  * a Calcium bottle, a P/K bottle and a Mg/S bottle. Every element has exactly
  * one part that can legally supply it, so any cross-bottle borrowing shows up
@@ -732,6 +825,109 @@ function reportPerPartSaltContainment(
 }
 
 /**
+ * The three things that decide whether the taper tool actually works, checked on
+ * every scenario regardless of part count or layout.
+ *
+ * 1. No micronutrient-only tank. There's no such product and no reason to mix
+ *    one: a grower buys chelates inside a bottle that carries macros too, and an
+ *    extra tank to weigh a few grams into is pure overhead. Micros belong beside
+ *    the recipe's Nitrogen-free macros — MKP, MgSO₄, K₂SO₄ and the like — or, if
+ *    there are none, in the Calcium tank (see `placeMicronutrients`).
+ *
+ * 2. No tank holds micronutrients beside Nitrogen the grower would taper (see
+ *    `TAPERABLE_NITROGEN_SALTS`). Tapering means dialling a tank back, and every
+ *    gram in it comes down by the same fraction — so micros sharing a tank with
+ *    the KNO₃ turn "cut Nitrogen before harvest" into "cut Nitrogen and the
+ *    whole micro package". Nitrogen that arrives inside a Calcium or Phosphorus
+ *    source is a different matter: nobody cuts their Ca(NO₃)₂ to move Nitrogen
+ *    without meaning to move Calcium too, so micros beside it are fine, and
+ *    that's what keeps the layout from spending a tank on them. A recipe with no
+ *    tank free of taperable Nitrogen anywhere has no better option, so that's
+ *    reported as intentional rather than failed.
+ *
+ * 3. No taperable Nitrogen salt is spread over two tanks when one tank could
+ *    hold the lot. Solving each part on its own leaves the same KNO₃ in two
+ *    places, and the grower then has to cut both in step to move Nitrogen once.
+ *    Solubility is the one good reason to keep the split — so when the combined
+ *    amount genuinely wouldn't dissolve, that's reported as intentional rather
+ *    than failed (see `saltFitsOneTank` / `consolidateTaperableNitrogen`).
+ */
+function reportSeparateNitrogenTaperability(
+  result: CalculateRecipeResult,
+  stockVolumeLiters: number
+): boolean {
+  const tanks = result.separateNitrogenRecipe.tanks
+  let allPass = true
+
+  // Whether the recipe has anywhere for the micros to go that a taper won't
+  // reach. Without one, sharing with taperable Nitrogen is the least bad answer
+  // available, and a tank of their own still isn't on the table.
+  const somewhereOffTaperPath = tanks.some(
+    (tank) => !saltAmountsCarryTaperableNitrogen(tank.salts)
+  )
+
+  for (const tank of tanks) {
+    const micros = TANK_3_SALTS.filter((key) => tank.salts[key] > 0)
+    if (micros.length === 0) continue
+
+    const macros = SALT_DISPLAY_ORDER.filter(
+      (key) => tank.salts[key] > 0 && !MICRO_SALT_KEYS.has(key)
+    )
+    if (macros.length === 0) {
+      console.log(
+        `\n    ${tank.name} (${tank.role}) holds nothing but micronutrients — there is no ` +
+          "micros-only product to stand in for, so they belong beside this recipe's " +
+          "Nitrogen-free macros or in the Calcium tank"
+      )
+      allPass = false
+      continue
+    }
+
+    const taperable = TAPERABLE_NITROGEN_SALTS.filter((key) => tank.salts[key] > 0)
+    if (taperable.length === 0) continue
+
+    const complaint =
+      `${tank.name} (${tank.role}) holds micronutrients beside Nitrogen a grower would ` +
+      `taper — dialling it back would cut ${micros.map((key) => RAW_SALTS[key].name).join(", ")} ` +
+      `along with the ${taperable.map((key) => RAW_SALTS[key].name).join(", ")}`
+
+    if (!somewhereOffTaperPath) {
+      console.log(`\n    ${complaint}, but no tank in this recipe is free of it`)
+      continue
+    }
+
+    console.log(`\n    ${complaint}`)
+    allPass = false
+  }
+
+  for (const saltKey of TAPERABLE_NITROGEN_SALTS) {
+    const holding = tanks.filter((tank) => tank.salts[saltKey] > 0)
+    if (holding.length < 2) continue
+
+    const total = holding.reduce((grams, tank) => grams + tank.salts[saltKey], 0)
+    const where = holding
+      .map((tank) => `${tank.name} ${tank.salts[saltKey].toFixed(3)} g`)
+      .join(", ")
+
+    if (!saltFitsOneTank(saltKey, total, stockVolumeLiters)) {
+      console.log(
+        `\n    ${RAW_SALTS[saltKey].name} stays split (${where}) — ${total.toFixed(3)} g in ` +
+          `${stockVolumeLiters} L exceeds its safe solubility, so the split is intentional`
+      )
+      continue
+    }
+
+    console.log(
+      `\n    ${RAW_SALTS[saltKey].name} is split across tanks (${where}) even though all ` +
+        `${total.toFixed(3)} g would dissolve in one`
+    )
+    allPass = false
+  }
+
+  return allPass
+}
+
+/**
  * From three parts up, Separate Nitrogen is only a regrouping of the per-part
  * tanks: the same parts are solved the same independent way, and the only thing
  * that moves is the Calcium, which pools into whichever tank is the line's
@@ -745,19 +941,22 @@ function reportPerPartSaltContainment(
  *
  *  - Moving the Calcium never buys an extra tank. A three-part line gets three
  *    tanks, not a fourth thin one holding what was left of the Calcium bottle.
- *    This is the check that pins the layout to the shape of the original line.
+ *    This is the check that pins the layout to the shape of the original line,
+ *    and it covers the micronutrients too: they ride along in an existing tank
+ *    rather than taking one (see `reportSeparateNitrogenTaperability`).
  *  - All the Calcium is in one tank, and nothing phosphate- or sulfate-bearing
  *    shares it. Pooling several parts' Calcium is only safe as long as no
  *    part's phosphate or sulfate can land beside another part's Calcium at
  *    stock strength. What may share it is the host bottle's own nitrates, Urea
- *    and chelated micros — that's a conventional Tank A, and it's what keeps
- *    the tank count down.
- *  - Every tank stands for exactly one original part, and holds only salts that
- *    part declared — the same containment the per-part tanks are held to below,
- *    applied to the Calcium tank as well for everything except the pooled
+ *    and — when there was nowhere else for them — the chelated micros: that's a
+ *    conventional Tank A, and it's what keeps the tank count down.
+ *  - Every tank stands for exactly one original part, and holds only macro salts
+ *    that part declared — the same containment the per-part tanks are held to
+ *    below, applied to the Calcium tank as well for everything except the pooled
  *    Calcium itself. A tank that merged two bottles, or borrowed a neighbour's
  *    salt, would still deliver a plausible total, so this is invisible in the
- *    ppm table.
+ *    ppm table. The Calcium tank when it holds nothing but Calcium is the one
+ *    that legitimately belongs to no part.
  *  - No tank is empty. A part that's pure Calcium Nitrate has nothing left once
  *    its Calcium is pooled, and must not leave a blank tank behind.
  *
@@ -858,8 +1057,9 @@ function reportSeparateNitrogenMatchesPerPartTanks(
   const macroKeys = SALT_DISPLAY_ORDER.filter((key) => !MICRO_SALT_KEYS.has(key))
 
   for (const tank of tanks) {
-    // The Calcium tank is unnamed when it holds nothing but Calcium, which is
-    // the one tank that legitimately draws on every part at once.
+    // The Calcium tank is unnamed when it holds nothing but Calcium (plus, when
+    // there was nowhere else for them, the micros), which is the one tank that
+    // legitimately draws on every part at once.
     if (!tank.partId) {
       if (tank.role === "calcium") continue
       console.log(`\n    ${tank.name} merges the parts together instead of standing for one of them`)
@@ -1120,6 +1320,10 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
     allPass = false
   }
 
+  if (!reportSeparateNitrogenTaperability(result, result.stockVolumeLiters)) {
+    allPass = false
+  }
+
   if (!reportPerPartSaltContainment(result, scenario)) {
     allPass = false
   }
@@ -1167,6 +1371,7 @@ async function main(): Promise<void> {
     PER_PART_ISOLATION,
     FOUR_PART_SEPARATE_NITROGEN,
     CALCIUM_BOTTLE_CARRIES_SULFATE,
+    EVERY_BOTTLE_CARRIES_NITROGEN,
   ]
   const results: boolean[] = []
   for (const scenario of scenarios) {

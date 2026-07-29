@@ -95,12 +95,17 @@ function buildDirectAddCalciumCarbonateExport(
  * bottle. Only when the parts were pooled and re-solved as one (see
  * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`) is there no part to name any
  * tank after.
+ *
+ * Whichever tank ended up with the micronutrients says so, since that's never a
+ * tank of its own — the package always rides along with macros (see
+ * `placeMicronutrients`).
  */
 function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
+  const micros = tank.hasMicronutrients ? " + Micros" : ""
   if (tank.role === "calcium") {
-    return tank.partName ? `${tank.partName} + Calcium` : "Nitrogen + Calcium"
+    return tank.partName ? `${tank.partName} + Calcium${micros}` : `Nitrogen + Calcium${micros}`
   }
-  if (tank.partName) return tank.partName
+  if (tank.partName) return `${tank.partName}${micros}`
   return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
 }
 
@@ -110,8 +115,9 @@ function separateNitrogenMixInstructions(
   unitLabel: string
 ): string {
   // A Calcium tank with a part to its name holds that bottle's other salts too,
-  // so it needs the same salt-by-salt order as any other tank.
-  if (tank.role === "calcium" && !tank.partName) {
+  // so it needs the same salt-by-salt order as any other tank. So does one that
+  // took on the micronutrients.
+  if (tank.role === "calcium" && !tank.partName && !tank.hasMicronutrients) {
     return `Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved, then top up to ${sizeNum} ${unitLabel} and label it "${tank.name}".`
   }
   return `Fill the stock tank about halfway with RO water, then add the salts in the order listed above${

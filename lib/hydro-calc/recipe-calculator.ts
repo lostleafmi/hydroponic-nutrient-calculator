@@ -34,6 +34,10 @@ import {
   percentToPpm,
   RAW_SALTS,
   SALT_DISPLAY_ORDER,
+  saltAmountsCarryNitrogen,
+  saltAmountsCarryTaperableNitrogen,
+  saltFitsOneTank,
+  TAPERABLE_NITROGEN_SALTS,
   TANK_1_SALTS,
   TANK_2_SALTS,
   TANK_3_SALTS,
@@ -1334,25 +1338,31 @@ function addCalciumSalts(target: SaltAmounts, recipe: TankRecipe): void {
 }
 
 /**
- * Fold one solved A/B pair's non-Calcium salts into `target`, adding to
+ * Fold one solved A/B pair's non-Calcium MACRO salts into `target`, adding to
  * whatever it already holds.
  *
  * Which side of the A/B pair each salt is read from is pure precipitation
- * chemistry (see `TANK_1_SALTS` / `TANK_2_SALTS` / `TANK_3_SALTS`). Whether
- * `target` is one merged tank or a single part's own tank is the caller's
- * choice, and doesn't move a gram either way — the grams were fixed by the
- * solve that produced `recipe`.
+ * chemistry (see `TANK_1_SALTS` / `TANK_2_SALTS`). Whether `target` is one
+ * merged tank or a single part's own tank is the caller's choice, and doesn't
+ * move a gram either way — the grams were fixed by the solve that produced
+ * `recipe`.
+ *
+ * Micronutrients are deliberately not included; they're collected separately by
+ * `addMicronutrientSalts` so they can be steered to whichever tank is clear of
+ * the Nitrogen a grower tapers (see `placeMicronutrients`).
  */
-function addNonCalciumSalts(target: SaltAmounts, recipe: TankRecipe): void {
+function addNonCalciumMacroSalts(target: SaltAmounts, recipe: TankRecipe): void {
   const { tankA, tankB } = recipe
 
   for (const key of TANK_2_SALTS) {
     target[key] += TANK_A_KEYS_ON_NON_CALCIUM_SIDE.has(key) ? tankA[key] : tankB[key]
   }
-  // Micronutrients fold in alongside the rest of the non-Calcium salts —
-  // there is no separate micros tank in this layout.
+}
+
+/** Fold one solved A/B pair's micronutrient salts into `target`. */
+function addMicronutrientSalts(target: SaltAmounts, recipe: TankRecipe): void {
   for (const key of TANK_3_SALTS) {
-    target[key] += key === "ironDTPA" ? tankA[key] : tankB[key]
+    target[key] += key === "ironDTPA" ? recipe.tankA[key] : recipe.tankB[key]
   }
 }
 
@@ -1391,6 +1401,76 @@ function buildSeparateNitrogenTanks(drafts: SeparateNitrogenTankDraft[]): Separa
 }
 
 /**
+ * Pour the micronutrient package into whichever drafted tank can hold it
+ * without ending up on the wrong end of a Nitrogen taper. Mutates that draft's
+ * salts; adds no tank of its own.
+ *
+ * A micros-only stock tank is never the answer. It's an extra tank to mix and
+ * label for a handful of grams, and it isn't a product a grower has any
+ * counterpart for — every commercial line ships its chelates inside a bottle
+ * that carries macros too. So the package always rides along with something,
+ * and the only question is what.
+ *
+ * The thing to avoid is a tank the grower will dial back to move Nitrogen: every
+ * gram in it comes down by the same fraction, so tapering Nitrogen would quietly
+ * cut Iron, Manganese, Zinc, Boron, Copper and Molybdenum at the point in flower
+ * a plant can least afford it. In order of preference:
+ *
+ *  1. A macro tank carrying no Nitrogen at all — the MKP/MgSO₄/K₂SO₄ end of the
+ *     recipe. Nothing about a taper reaches it, and micros beside Nitrogen-free
+ *     macros is exactly where a grower expects to find them. Preference within
+ *     that goes to the part that supplied the package, keeping the tank as close
+ *     to the bottle it stands for as it can be.
+ *  2. The Calcium tank, as long as no taperable Nitrogen sits in it. Its
+ *     Ca(NO₃)₂ does carry Nitrogen, but that tank is the one held steady while
+ *     the others come down — cutting it means giving up Calcium, which is the
+ *     move this whole layout exists to let the grower avoid. Chemically it's a
+ *     conventional Tank A: chelates beside concentrated Calcium Nitrate is how
+ *     every two-part line is mixed.
+ *  3. A macro tank whose only Nitrogen is untaperable — a MAP phosphate booster,
+ *     say. Nobody cuts their P bottle to move Nitrogen (see
+ *     `TAPERABLE_NITROGEN_SALTS`).
+ *  4. Failing all that, the Calcium tank regardless, then any macro tank at all.
+ *     Reaching here needs every tank in the recipe to hold taperable Nitrogen,
+ *     and even then riding along beats a tank of their own.
+ */
+function placeMicronutrients(
+  calciumDraft: SeparateNitrogenTankDraft,
+  macroDrafts: SeparateNitrogenTankDraft[],
+  micros: SaltAmounts,
+  preferredHostPartId?: string
+): void {
+  if (!saltAmountsHasContent(micros)) return
+
+  // An empty draft never becomes a tank (see `buildSeparateNitrogenTanks`), so
+  // pouring the micros into one would conjure up the micros-only tank this
+  // function exists to avoid. The Calcium draft comes back empty on an
+  // all-Carbonate line, where the Calcium is a direct reservoir addition.
+  const macroHosts = macroDrafts.filter((draft) => saltAmountsHasContent(draft.salts))
+  const calciumHost = saltAmountsHasContent(calciumDraft.salts) ? calciumDraft : undefined
+
+  const preferred = (drafts: SeparateNitrogenTankDraft[]) =>
+    (preferredHostPartId === undefined
+      ? undefined
+      : drafts.find((draft) => draft.partId === preferredHostPartId)) ?? drafts[0]
+
+  const host =
+    preferred(macroHosts.filter((draft) => !saltAmountsCarryNitrogen(draft.salts))) ??
+    (calciumHost && !saltAmountsCarryTaperableNitrogen(calciumHost.salts)
+      ? calciumHost
+      : undefined) ??
+    preferred(macroHosts.filter((draft) => !saltAmountsCarryTaperableNitrogen(draft.salts))) ??
+    calciumHost ??
+    preferred(macroHosts) ??
+    // Nothing but micros in the entire recipe — a label declaring micros and no
+    // macros at all. They take the one tank there is to take.
+    macroDrafts[0] ??
+    calciumDraft
+
+  addSaltAmounts(host.salts, micros)
+}
+
+/**
  * Build a two-tank stock recipe with Calcium isolated, so Nitrogen can be
  * moved at the end of flower without rebalancing anything else.
  *
@@ -1399,10 +1479,15 @@ function buildSeparateNitrogenTanks(drafts: SeparateNitrogenTankDraft[]): Separa
  *            models the commercial double salt). Ammonium Nitrate is a
  *            supplemental Nitrogen source rather than half of that product, so
  *            it goes to Tank 2 with the other Calcium-free Nitrogen salts.
- *   Tank 2 — Everything else: remaining macro salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄)
- *            AND the micronutrients (Fe-DTPA, Mn/Zn/Cu-EDTA chelates, boric
- *            acid, sodium molybdate), merged together for a clean 2-tank
- *            system.
+ *   Tank 2 — The remaining macro salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄) merged into
+ *            one tank. This is the taper tank: its Nitrogen is what comes down
+ *            at the end of flower.
+ *
+ * The micronutrients (Fe-DTPA, Mn/Zn/Cu-EDTA chelates, boric acid, sodium
+ * molybdate) join whichever of those two is out of the taper's way rather than
+ * taking a third tank: Tank 2 when the pooled macros turn out Nitrogen-free,
+ * Tank 1 otherwise, which is the conventional Tank A arrangement anyway (see
+ * `placeMicronutrients`).
  *
  * Calcium Carbonate, if enabled, never lands in Tank 1 (or anywhere else) —
  * see `calculateStockTankRecipe` — and comes back as `directAddCalciumCarbonate`
@@ -1410,7 +1495,7 @@ function buildSeparateNitrogenTanks(drafts: SeparateNitrogenTankDraft[]): Separa
  *
  * `targets` here is ONE set of elemental targets, solved in a single pass —
  * so for a multi-part line it's the parts pooled together, drawing on the
- * union of their salt selections. Merging the non-Calcium salts into a single
+ * union of their salt selections. Merging the non-Calcium macros into a single
  * Tank 2 costs nothing once that's happened: the parts have already lost their
  * separate identities by the time the tanks are filled. That's why this path
  * is only used for one- and two-part lines; from three parts up,
@@ -1445,16 +1530,20 @@ export function calculateSeparateCalciumRecipe(
     deviations,
   } = recipe
 
-  const calciumTank = emptySaltAmounts()
-  const nonCalciumTank = emptySaltAmounts()
-  addCalciumSalts(calciumTank, recipe)
-  addNonCalciumSalts(nonCalciumTank, recipe)
+  const calciumDraft: SeparateNitrogenTankDraft = { role: "calcium", salts: emptySaltAmounts() }
+  const macroDraft: SeparateNitrogenTankDraft = { role: "non-calcium", salts: emptySaltAmounts() }
+  const micros = emptySaltAmounts()
+  addCalciumSalts(calciumDraft.salts, recipe)
+  addNonCalciumMacroSalts(macroDraft.salts, recipe)
+  addMicronutrientSalts(micros, recipe)
+
+  // One pooled solve means every salt already sits in exactly one place, so
+  // there's no Nitrogen to gather here the way there is across per-part solves
+  // (see `consolidateTaperableNitrogen`).
+  placeMicronutrients(calciumDraft, [macroDraft], micros)
 
   return {
-    tanks: buildSeparateNitrogenTanks([
-      { role: "calcium", salts: calciumTank },
-      { role: "non-calcium", salts: nonCalciumTank },
-    ]),
+    tanks: buildSeparateNitrogenTanks([calciumDraft, macroDraft]),
     warnings,
     isApproximate,
     directAddCalciumCarbonate,
@@ -1671,11 +1760,18 @@ export function calculateMultiPartStockTankRecipe(
   }
 }
 
-/** One solved part, split along the Calcium line but not yet assigned a tank. */
+/**
+ * One solved part, split three ways but not yet assigned a tank: its Calcium,
+ * its other macro salts, and its share of the micronutrient package. Micros are
+ * held apart from `macros` from the start because where they end up is decided
+ * by the taper rule rather than by which bottle they came from (see
+ * `placeMicronutrients`).
+ */
 interface PartCalciumSplit {
   feedingPart: NutrientPart
   calcium: SaltAmounts
-  nonCalcium: SaltAmounts
+  macros: SaltAmounts
+  micros: SaltAmounts
 }
 
 function calciumGrams(salts: SaltAmounts): number {
@@ -1692,10 +1788,16 @@ function isSafeBesideCalcium(salts: SaltAmounts): boolean {
  * rest of the line's Calcium joins, rather than a fresh tank added beside them
  * all.
  *
- * Only a bottle whose own remaining salts are safe beside Calcium can host
- * (`isSafeBesideCalcium`); among those, the one contributing the most Calcium
- * wins, because that's the line's Calcium bottle — a Cal-Mag topping up a
- * base's Calcium should pour into the base, not the other way round.
+ * Only a bottle whose own remaining MACRO salts are safe beside Calcium can
+ * host (`isSafeBesideCalcium`); among those, the one contributing the most
+ * Calcium wins, because that's the line's Calcium bottle — a Cal-Mag topping up
+ * a base's Calcium should pour into the base, not the other way round.
+ *
+ * Micronutrients play no part in the choice. Where the package ends up is
+ * decided afterwards on taper grounds rather than on which bottle declared it
+ * (see `placeMicronutrients`), so a Calcium bottle carrying the line's micros
+ * can still host — its macros go in beside the pooled Calcium either way, and
+ * its micros may or may not follow.
  *
  * Returns `undefined` when nothing can host, which is either of two things.
  * Usually it's an all-Carbonate line with no Calcium in a tank at all, since
@@ -1709,13 +1811,89 @@ function isSafeBesideCalcium(salts: SaltAmounts): boolean {
  */
 function pickCalciumHost(splits: PartCalciumSplit[]): PartCalciumSplit | undefined {
   const candidates = splits.filter(
-    (split) => calciumGrams(split.calcium) > 0 && isSafeBesideCalcium(split.nonCalcium)
+    (split) => calciumGrams(split.calcium) > 0 && isSafeBesideCalcium(split.macros)
   )
   if (candidates.length === 0) return undefined
 
   return candidates.reduce((best, split) =>
     calciumGrams(split.calcium) > calciumGrams(best.calcium) ? split : best
   )
+}
+
+/**
+ * Gather each taperable Nitrogen salt (see `TAPERABLE_NITROGEN_SALTS`) into a
+ * single part's tank, so the grower has one amount to turn down instead of the
+ * same salt spread over two tanks that have to be cut in step.
+ *
+ * Solving every part on its own is what leaves the same salt in several places:
+ * a Ca(NO₃)₂/KNO₃ base and a P/K bottle that also lists KNO₃ each get their own
+ * share, and hosting the Calcium then pulls one of those shares into the Calcium
+ * tank — the tank this mode exists to hold steady. That split was never a
+ * chemical requirement, only a side effect of where the grams were solved, and
+ * it leaves a grower tapering Nitrogen chasing it across tanks.
+ *
+ * Two conditions keep the move safe:
+ *
+ *  - The destination already holds some of that salt. So no new pair of salts
+ *    is ever created, and nothing can precipitate that wasn't already
+ *    coexisting — and the tank stays buildable from its own part's label, since
+ *    that part clearly declared the salt. It's also why Mg(NO₃)₂ can't drift
+ *    into a phosphate bottle here: a tank that never had any won't take any.
+ *  - The combined amount still dissolves in one tank at the recipe's own stock
+ *    volume, at the same margin the solubility report holds every tank to (see
+ *    `saltFitsOneTank`). When it doesn't, the split stands as-is — that's a real
+ *    physical limit rather than a layout choice.
+ *
+ * The Calcium host is never the destination, for the same reason the split is
+ * worth undoing at all: Nitrogen the grower means to taper doesn't belong in
+ * the Calcium tank. When the host is the *only* part holding the salt there's
+ * nothing to gather and it stays where the solve put it.
+ *
+ * Mutates each split's `macros` in place.
+ */
+function consolidateTaperableNitrogen(
+  splits: PartCalciumSplit[],
+  calciumHost: PartCalciumSplit | undefined,
+  stockVolumeLiters: number
+): void {
+  for (const saltKey of TAPERABLE_NITROGEN_SALTS) {
+    const holders = splits.filter((split) => split.macros[saltKey] > 0)
+    if (holders.length < 2) continue
+
+    const destination = holders
+      .filter((split) => split !== calciumHost)
+      .reduce<PartCalciumSplit | undefined>(
+        (best, split) => (best && best.macros[saltKey] >= split.macros[saltKey] ? best : split),
+        undefined
+      )
+    if (!destination) continue
+
+    const total = holders.reduce((grams, split) => grams + split.macros[saltKey], 0)
+    if (!saltFitsOneTank(saltKey, total, stockVolumeLiters)) continue
+
+    for (const split of holders) split.macros[saltKey] = 0
+    destination.macros[saltKey] = total
+  }
+}
+
+/**
+ * The part that supplied most of the micronutrient package, by weight — the
+ * bottle the micros have the strongest claim to belong to, and so the first
+ * choice of home when one is available (see `placeMicronutrients`).
+ */
+function microPackageOwnerPartId(splits: PartCalciumSplit[]): string | undefined {
+  let owner: PartCalciumSplit | undefined
+  let mostGrams = 0
+
+  for (const split of splits) {
+    const grams = TANK_3_SALTS.reduce((total, key) => total + split.micros[key], 0)
+    if (grams > mostGrams) {
+      mostGrams = grams
+      owner = split
+    }
+  }
+
+  return owner?.feedingPart.id
 }
 
 /**
@@ -1742,10 +1920,22 @@ function pickCalciumHost(splits: PartCalciumSplit[]): PartCalciumSplit | undefin
  * sulfate or phosphate too, where no bottle can host — see `pickCalciumHost`
  * for why nothing better exists there.
  *
+ * Two things then move on top of the Calcium, both in service of the tapering
+ * this layout is chosen for, and neither adding a tank:
+ *
+ *  - Each taperable Nitrogen salt is gathered into one tank rather than left
+ *    wherever the per-part solves happened to put it, so there's a single
+ *    amount to turn down (see `consolidateTaperableNitrogen`). This is usually
+ *    what empties the Calcium bottle's leftovers out entirely, since a base
+ *    bottle's non-Calcium remainder is typically just its KNO₃.
+ *  - The micronutrients go to whichever tank a Nitrogen taper won't reach —
+ *    normally the line's Nitrogen-free macro bottle, and the Calcium tank when
+ *    there isn't one (see `placeMicronutrients`).
+ *
  * Pooling several parts' Calcium into one tank stays safe because the split is
  * chemical, not per-bottle: nothing phosphate- or sulfate-bearing is ever
  * folded in beside it (see `CALCIUM_INCOMPATIBLE_SALTS`), which is also why the
- * host's own leftovers can go back in — nitrates, Urea and chelated
+ * host's own leftover macros can go back in — nitrates, Urea and chelated
  * micronutrients are what sits beside Calcium Nitrate in any conventional
  * Tank A. And it's what makes the layout worth choosing: Calcium Nitrate's
  * Nitrogen is confined to that one tank, so the Nitrogen in every other tank
@@ -1766,49 +1956,60 @@ export function calculateSeparateNitrogenMultiPartRecipe(
     dilutionRatio,
     (feedingPart, recipe) => {
       const calcium = emptySaltAmounts()
-      const nonCalcium = emptySaltAmounts()
+      const macros = emptySaltAmounts()
+      const micros = emptySaltAmounts()
       addCalciumSalts(calcium, recipe)
-      addNonCalciumSalts(nonCalcium, recipe)
-      splits.push({ feedingPart, calcium, nonCalcium })
+      addNonCalciumMacroSalts(macros, recipe)
+      addMicronutrientSalts(micros, recipe)
+      splits.push({ feedingPart, calcium, macros, micros })
     }
   )
 
+  // Host first, then gather the Nitrogen: which bottle hosts the Calcium
+  // doesn't depend on where the Nitrogen ends up (KNO₃ and friends are safe
+  // beside Calcium either way), but the gathering has to know which bottle's
+  // leftovers are headed for the Calcium tank so it can route the Nitrogen
+  // somewhere else.
   const host = pickCalciumHost(splits)
+  consolidateTaperableNitrogen(splits, host, stockVolumeLiters)
+
   const calciumTank = emptySaltAmounts()
   for (const split of splits) addSaltAmounts(calciumTank, split.calcium)
-  if (host) addSaltAmounts(calciumTank, host.nonCalcium)
+  if (host) addSaltAmounts(calciumTank, host.macros)
 
-  // The Calcium draft comes first so it lands as Tank 1, then the remaining
-  // parts in feed-chart order. A hosting part isn't among them: its salts are
-  // already in the Calcium tank. An empty Calcium draft — an all-Carbonate line
-  // — drops out in `buildSeparateNitrogenTanks`, as does any part left with
-  // nothing once its Calcium moved.
-  const drafts: SeparateNitrogenTankDraft[] = [
-    {
-      role: "calcium",
-      salts: calciumTank,
-      // Named after the host only when the host's own salts actually went in
-      // beside the Calcium. A tank holding nothing but Calcium stands for every
-      // part's Calcium rather than for one bottle, so naming it after one would
-      // misread (see `SeparateNitrogenTank.partName`).
-      ...(host && saltAmountsHasContent(host.nonCalcium)
-        ? { partName: host.feedingPart.name, partId: host.feedingPart.id }
-        : {}),
-    },
-  ]
+  const micros = emptySaltAmounts()
+  for (const split of splits) addSaltAmounts(micros, split.micros)
 
-  for (const split of splits) {
-    if (split === host) continue
-    drafts.push({
-      role: "non-calcium",
-      salts: split.nonCalcium,
-      partName: split.feedingPart.name,
-      partId: split.feedingPart.id,
-    })
+  const calciumDraft: SeparateNitrogenTankDraft = {
+    role: "calcium",
+    salts: calciumTank,
+    // Named after the host only when the host's own macros actually went in
+    // beside the Calcium. A tank holding nothing but Calcium stands for every
+    // part's Calcium rather than for one bottle, so naming it after one would
+    // misread (see `SeparateNitrogenTank.partName`).
+    ...(host && saltAmountsHasContent(host.macros)
+      ? { partName: host.feedingPart.name, partId: host.feedingPart.id }
+      : {}),
   }
 
+  // Every part except the host keeps a draft for its own macros, in feed-chart
+  // order. The host's are already in the Calcium tank.
+  const macroDrafts: SeparateNitrogenTankDraft[] = splits
+    .filter((split) => split !== host)
+    .map((split) => ({
+      role: "non-calcium",
+      salts: split.macros,
+      partName: split.feedingPart.name,
+      partId: split.feedingPart.id,
+    }))
+
+  placeMicronutrients(calciumDraft, macroDrafts, micros, microPackageOwnerPartId(splits))
+
+  // The Calcium draft comes first so it lands as Tank 1. An empty Calcium draft
+  // — an all-Carbonate line — drops out in `buildSeparateNitrogenTanks`, as does
+  // any part left with nothing once its Calcium and Nitrogen moved.
   return {
-    tanks: buildSeparateNitrogenTanks(drafts),
+    tanks: buildSeparateNitrogenTanks([calciumDraft, ...macroDrafts]),
     warnings: totals.warnings,
     isApproximate: totals.warnings.length > 0 || totals.deviations.length > 0,
     directAddCalciumCarbonate: totals.directAddCalciumCarbonate,
