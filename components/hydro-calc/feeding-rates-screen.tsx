@@ -66,8 +66,9 @@ export function FeedingRatesScreen({
   // `isPerPartReplicationPreferred`.
   const prefersPerPartTanks = isPerPartReplicationPreferred(parts.length)
   // From three parts up, Separate Nitrogen is built out of those same
-  // per-part solves rather than from the parts pooled together, so it no
-  // longer trades fidelity for tapering. See
+  // per-part solves rather than from the parts pooled together, and it keeps
+  // each part in a tank of its own — so it no longer trades either fidelity or
+  // per-bottle control for tapering. See
   // `separateNitrogenSolvesPartsIndependently`.
   const separateNitrogenKeepsPartsIntact = separateNitrogenSolvesPartsIndependently(parts.length)
   const tankCountLabel = `${parts.length} tank${parts.length === 1 ? "" : "s"}`
@@ -92,7 +93,7 @@ export function FeedingRatesScreen({
     const purpose =
       "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor."
     if (separateNitrogenKeepsPartsIntact) {
-      return `${purpose} Each of your ${parts.length} parts is still solved on its own, from only its own label and salts — the same math as one tank per part — and the salts are then grouped into 2 tanks: your Calcium and its Nitrogen in Tank 1, everything else in Tank 2. Taper Tank 1 near harvest and the rest of the recipe stays put.`
+      return `${purpose} Each of your ${parts.length} parts is still solved on its own, from only its own label and salts — the same math as one tank per part. The only thing that moves is the Calcium: it's pulled out of every part into one tank of its own, and each part keeps a tank for the rest of its salts. So you can cut Nitrogen back part by part near harvest while your Calcium stays put.`
     }
     if (prefersPerPartTanks) {
       return `${purpose} Blends your parts together into 2 tanks by chemistry instead of keeping them separate, so the ppm can drift a little from your original line.`
@@ -111,7 +112,9 @@ export function FeedingRatesScreen({
       safetyLabel="Safest"
       safetyTone="safe"
       note="Only for flower recipes"
-      accuracyLabel={separateNitrogenKeepsPartsIntact ? "Matches per-part amounts" : undefined}
+      accuracyLabel={
+        separateNitrogenKeepsPartsIntact ? "Ca separated · parts kept distinct" : undefined
+      }
     />
   )
 
@@ -238,7 +241,7 @@ export function FeedingRatesScreen({
               part, so Part A stays Part A instead of having nutrients shuffled into it from the
               other bottles.
               {separateNitrogenKeepsPartsIntact &&
-                ` Separate Nitrogen weighs out those same per-part amounts, so tapering Nitrogen before harvest costs you nothing here — it just pours them into 2 tanks instead of ${parts.length}.`}
+                ` Separate Nitrogen weighs out those same per-part amounts and keeps your parts in tanks of their own, so tapering Nitrogen before harvest costs you nothing here — it only lifts the Calcium out into a tank you can hold steady while you cut the rest back.`}
             </p>
           )}
 

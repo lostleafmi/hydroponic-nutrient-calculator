@@ -55,9 +55,11 @@ import {
   type SaltAutoAddNote,
   type SaltGapWarning,
   type SaltKey,
+  type SeparateNitrogenRecipe,
+  type SeparateNitrogenTank,
+  type SeparateNitrogenTankRole,
   type TankRecipe,
   type TargetDeviation,
-  type ThreeTankRecipe,
 } from "@/lib/hydro-calc/recipe-types"
 
 /** Per-part elemental contribution, summed across all dosed parts */
@@ -1299,16 +1301,16 @@ function buildRefinementVariables({
 }
 
 /**
- * The Tank-A-side salts (see `TANK_A_SALTS`) that still belong in the
- * Separate Nitrogen layout's Tank 2: they carry no Calcium, so there's
- * nothing to keep out of the phosphate/sulfate tank, and nothing to taper
- * with Tank 1.
+ * The Tank-A-side salts (see `TANK_A_SALTS`) that still belong on the
+ * Separate Nitrogen layout's non-Calcium side: they carry no Calcium, so
+ * there's nothing to keep out of the phosphate/sulfate tank, and nothing to
+ * keep beside the Calcium.
  *
  * Ammonium Nitrate is always one of them: it is a supplemental Nitrogen source
  * in its own right now that Calcium Nitrate models the whole double salt, so
  * there is no longer a case where part of it belongs with the Calcium.
  */
-const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>([
+const TANK_A_KEYS_ON_NON_CALCIUM_SIDE = new Set<SaltKey>([
   "potassiumNitrate",
   "ammoniumNitrate",
   "magnesiumNitrate",
@@ -1316,60 +1318,103 @@ const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>([
 ])
 
 /**
- * Fold one solved A/B pair into the Separate Nitrogen layout's two physical
- * tanks, adding to whatever they already hold.
+ * Fold one solved A/B pair's Calcium salts into the shared Calcium tank,
+ * adding to whatever it already holds.
  *
  * Accumulating rather than assigning is what lets the multi-part layout below
- * pour several independently solved parts into the same pair of tanks. Which
- * tank each salt lands in is pure precipitation chemistry (see `TANK_1_SALTS`
- * / `TANK_2_SALTS` / `TANK_3_SALTS`), so it holds however many parts
- * contributed.
+ * pour every part's Calcium into a single tank — which is the point of this
+ * layout: one tank holding the ion that can't sit beside concentrated
+ * phosphate or sulfate, and one tank to reach for when Calcium needs to move.
  */
-function addToSeparateNitrogenTanks(tank1: SaltAmounts, tank2: SaltAmounts, recipe: TankRecipe): void {
-  const { tankA, tankB } = recipe
-
+function addCalciumSalts(target: SaltAmounts, recipe: TankRecipe): void {
   for (const key of TANK_1_SALTS) {
-    tank1[key] += tankA[key]
-  }
-  for (const key of TANK_2_SALTS) {
-    tank2[key] += TANK_A_KEYS_IN_TANK_2.has(key) ? tankA[key] : tankB[key]
-  }
-  // Micronutrients always fold into Tank 2 alongside the rest of the
-  // non-nitrogen components — there is no separate micros tank in this layout.
-  for (const key of TANK_3_SALTS) {
-    tank2[key] += key === "ironDTPA" ? tankA[key] : tankB[key]
+    target[key] += recipe.tankA[key]
   }
 }
 
 /**
- * Build a stock tank recipe with Nitrogen + Calcium isolated for end-of-flower
- * tapering.
+ * Fold one solved A/B pair's non-Calcium salts into `target`, adding to
+ * whatever it already holds.
  *
- *   Tank 1 — Calcium Nitrate only (Ca²⁺ + N). Taper this to drop N at end of flower.
- *            Its ammoniacal-N share rides along inside the salt itself, since
- *            `RAW_SALTS.calciumNitrate` models the commercial double salt.
- *            Ammonium Nitrate is a supplemental Nitrogen source rather than
- *            half of that product, so it goes to Tank 2 with the other
- *            Calcium-free Nitrogen salts.
+ * Which side of the A/B pair each salt is read from is pure precipitation
+ * chemistry (see `TANK_1_SALTS` / `TANK_2_SALTS` / `TANK_3_SALTS`). Whether
+ * `target` is one merged tank or a single part's own tank is the caller's
+ * choice, and doesn't move a gram either way — the grams were fixed by the
+ * solve that produced `recipe`.
+ */
+function addNonCalciumSalts(target: SaltAmounts, recipe: TankRecipe): void {
+  const { tankA, tankB } = recipe
+
+  for (const key of TANK_2_SALTS) {
+    target[key] += TANK_A_KEYS_ON_NON_CALCIUM_SIDE.has(key) ? tankA[key] : tankB[key]
+  }
+  // Micronutrients fold in alongside the rest of the non-Calcium salts —
+  // there is no separate micros tank in this layout.
+  for (const key of TANK_3_SALTS) {
+    target[key] += key === "ironDTPA" ? tankA[key] : tankB[key]
+  }
+}
+
+interface SeparateNitrogenTankDraft {
+  role: SeparateNitrogenTankRole
+  salts: SaltAmounts
+  partName?: string
+  partId?: string
+}
+
+/**
+ * Turn drafted tanks into the numbered, grower-facing list, dropping any that
+ * came out empty.
+ *
+ * Numbering follows the tanks that survive rather than the drafts that went in,
+ * so a part holding nothing but Calcium Nitrate — its non-Calcium draft empty —
+ * doesn't leave a blank card or a gap in the numbering behind. Callers pass the
+ * Calcium draft first, which is what makes it Tank 1 whenever the recipe uses
+ * any Calcium at all.
+ */
+function buildSeparateNitrogenTanks(drafts: SeparateNitrogenTankDraft[]): SeparateNitrogenTank[] {
+  return drafts
+    .filter((draft) => saltAmountsHasContent(draft.salts))
+    .map((draft, position) => {
+      const index = position + 1
+      return {
+        index,
+        name: `Tank ${index}`,
+        role: draft.role,
+        partName: draft.partName,
+        partId: draft.partId,
+        salts: draft.salts,
+        hasMicronutrients: TANK_3_SALTS.some((key) => draft.salts[key] > 0),
+      }
+    })
+}
+
+/**
+ * Build a two-tank stock recipe with Calcium isolated, so Nitrogen can be
+ * moved at the end of flower without rebalancing anything else.
+ *
+ *   Tank 1 — the Calcium source (Ca²⁺, plus the Nitrogen that rides along
+ *            inside Calcium Nitrate itself, since `RAW_SALTS.calciumNitrate`
+ *            models the commercial double salt). Ammonium Nitrate is a
+ *            supplemental Nitrogen source rather than half of that product, so
+ *            it goes to Tank 2 with the other Calcium-free Nitrogen salts.
  *   Tank 2 — Everything else: remaining macro salts (KNO₃, MKP/MAP, MgSO₄, K₂SO₄)
  *            AND the micronutrients (Fe-DTPA, Mn/Zn/Cu-EDTA chelates, boric
- *            acid, sodium molybdate) — always merged together for a clean
- *            2-tank system.
+ *            acid, sodium molybdate), merged together for a clean 2-tank
+ *            system.
  *
  * Calcium Carbonate, if enabled, never lands in Tank 1 (or anywhere else) —
  * see `calculateStockTankRecipe` — and comes back as `directAddCalciumCarbonate`
  * instead.
  *
- * `hasMicronutrients` tells callers whether the recipe has any micros at all
- * — use this to decide whether to render a "Micronutrients" sub-section
- * inside Tank 2.
- *
  * `targets` here is ONE set of elemental targets, solved in a single pass —
  * so for a multi-part line it's the parts pooled together, drawing on the
- * union of their salt selections. That's only used for one- and two-part
- * lines now; from three parts up,
- * `calculateSeparateNitrogenMultiPartRecipe` builds the same two tanks out of
- * per-part solves instead (see
+ * union of their salt selections. Merging the non-Calcium salts into a single
+ * Tank 2 costs nothing once that's happened: the parts have already lost their
+ * separate identities by the time the tanks are filled. That's why this path
+ * is only used for one- and two-part lines; from three parts up,
+ * `calculateSeparateNitrogenMultiPartRecipe` solves each part on its own and
+ * gives each one a tank of its own to match (see
  * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`).
  */
 export function calculateSeparateCalciumRecipe(
@@ -1380,7 +1425,7 @@ export function calculateSeparateCalciumRecipe(
   calciumChlorideGramsPerGallon: number = 0,
   calciumNitrateGramsPerGallon: number = 0,
   ureaNitrogenPpm: number = 0
-): ThreeTankRecipe {
+): SeparateNitrogenRecipe {
   const recipe = calculateStockTankRecipe(
     targets,
     stockVolumeLiters,
@@ -1399,16 +1444,16 @@ export function calculateSeparateCalciumRecipe(
     deviations,
   } = recipe
 
-  const tank1 = emptySaltAmounts()
-  const tank2 = emptySaltAmounts()
-  addToSeparateNitrogenTanks(tank1, tank2, recipe)
-
-  const hasMicronutrients = TANK_3_SALTS.some((key) => tank2[key] > 0)
+  const calciumTank = emptySaltAmounts()
+  const nonCalciumTank = emptySaltAmounts()
+  addCalciumSalts(calciumTank, recipe)
+  addNonCalciumSalts(nonCalciumTank, recipe)
 
   return {
-    tank1,
-    tank2,
-    hasMicronutrients,
+    tanks: buildSeparateNitrogenTanks([
+      { role: "calcium", salts: calciumTank },
+      { role: "non-calcium", salts: nonCalciumTank },
+    ]),
     warnings,
     isApproximate,
     directAddCalciumCarbonate,
@@ -1620,48 +1665,69 @@ export function calculateMultiPartStockTankRecipe(
 }
 
 /**
- * The Separate Nitrogen layout for a multi-part line — same two physical
- * tanks as `calculateSeparateCalciumRecipe`, but built from per-part solves.
+ * The Separate Nitrogen layout for a multi-part line: the Calcium pulled out
+ * into one shared tank, and each part's remaining salts left in a tank of
+ * their own.
  *
  * Every part is solved on its own against its own label, dose and checked
  * salts (see `solveEachPartIndependently`), so the grams here are the same
- * ones the per-part tanks would call for — this layout only differs in how
- * those grams are grouped into physical tanks: each part's Calcium source
- * pours into the shared Tank 1, everything else into the shared Tank 2. That
- * means end-of-flower tapering (drop Tank 1, drop Nitrogen) costs nothing in
- * fidelity to the line being replicated, which is the whole problem with
- * pooling the parts and re-solving them as one: that hands the solver freedom
- * to cover one bottle's target out of another bottle's salts, and the further
- * a line is split across bottles the further the result drifts from it.
+ * ones the per-part tanks would call for. What this layout changes is only
+ * where those grams are stored — and it changes as little as it can: exactly
+ * one thing is taken out of each part, its Calcium, and everything else stays
+ * with the part it came from.
  *
- * Pooling parts into a shared tank stays safe because the split is chemical,
- * not per-bottle: Tank 1 only ever receives Calcium salts, so no part's
- * phosphate or sulfate can ever meet another part's Calcium at concentrated
- * strength (see `TANK_1_SALTS` / `TANK_2_SALTS`).
+ * Merging the leftovers into one shared tank instead would move no grams
+ * either, but it would cost the grower the thing a multi-part line is for:
+ * with one tank per part they can still dial a single bottle up or down the
+ * way the original feed chart intends, and a tank still corresponds to
+ * something they recognise. Merging replaces that with a single macro+micro
+ * bucket that can only be moved as a whole.
+ *
+ * Pooling every part's Calcium into one shared tank stays safe because that
+ * split is chemical, not per-bottle: the Calcium tank only ever receives
+ * Calcium salts, so no part's phosphate or sulfate can meet another part's
+ * Calcium at concentrated strength (see `TANK_1_SALTS` / `TANK_2_SALTS`). It's
+ * also what makes the layout worth choosing — Calcium Nitrate's Nitrogen is
+ * confined to that one tank, so the Nitrogen in every other tank can be cut
+ * back at the end of flower without touching the Calcium supply.
  */
 export function calculateSeparateNitrogenMultiPartRecipe(
   partsAnalysis: PartAnalysis[],
   parts: NutrientPart[],
   stockVolumeLiters: number,
   dilutionRatio: number
-): ThreeTankRecipe {
-  const tank1 = emptySaltAmounts()
-  const tank2 = emptySaltAmounts()
+): SeparateNitrogenRecipe {
+  const calciumTank = emptySaltAmounts()
+  const nonCalciumTanksByPart: SeparateNitrogenTankDraft[] = []
 
   const totals = solveEachPartIndependently(
     partsAnalysis,
     parts,
     stockVolumeLiters,
     dilutionRatio,
-    (_feedingPart, recipe) => {
-      addToSeparateNitrogenTanks(tank1, tank2, recipe)
+    (feedingPart, recipe) => {
+      addCalciumSalts(calciumTank, recipe)
+
+      const nonCalciumSalts = emptySaltAmounts()
+      addNonCalciumSalts(nonCalciumSalts, recipe)
+      nonCalciumTanksByPart.push({
+        role: "non-calcium",
+        salts: nonCalciumSalts,
+        partName: feedingPart.name,
+        partId: feedingPart.id,
+      })
     }
   )
 
   return {
-    tank1,
-    tank2,
-    hasMicronutrients: TANK_3_SALTS.some((key) => tank2[key] > 0),
+    // The Calcium draft goes first so it lands as Tank 1, then the parts in
+    // feed-chart order. Empty drafts drop out here (see
+    // `buildSeparateNitrogenTanks`), which is what keeps a Calcium-only part
+    // from contributing a blank tank of its own.
+    tanks: buildSeparateNitrogenTanks([
+      { role: "calcium", salts: calciumTank },
+      ...nonCalciumTanksByPart,
+    ]),
     warnings: totals.warnings,
     isApproximate: totals.warnings.length > 0 || totals.deviations.length > 0,
     directAddCalciumCarbonate: totals.directAddCalciumCarbonate,

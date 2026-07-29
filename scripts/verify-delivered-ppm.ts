@@ -485,11 +485,12 @@ const DECLARED_DOSES_HELD_FIXED: Scenario = {
 /**
  * The reported 3-part line with a fourth Cal-Mag bottle added, on Separate
  * Nitrogen. Past three parts this layout used to be refused outright, so this
- * covers both that it builds at all and that pouring four independently solved
- * parts into two shared tanks still adds up (see
+ * covers both that it builds at all and that splitting four independently
+ * solved parts into a shared Calcium tank plus a tank each still adds up (see
  * `calculateSeparateNitrogenMultiPartRecipe`) — including a second part
- * contributing Calcium to Tank 1 and Magnesium Nitrate landing in Tank 2
- * rather than beside the phosphate it would precipitate with.
+ * contributing Calcium to the shared tank, and Magnesium Nitrate staying with
+ * its own part rather than landing beside the phosphate it would precipitate
+ * with.
  */
 const FOUR_PART_SEPARATE_NITROGEN: Scenario = {
   name: "4-part line on Separate Nitrogen (two Calcium bottles pooling into Tank 1)",
@@ -648,17 +649,27 @@ function reportPerPartSaltContainment(
 
 /**
  * From three parts up, Separate Nitrogen is only a regrouping of the per-part
- * tanks: the same parts are solved the same independent way, and the resulting
- * salts are poured into two shared tanks by chemistry instead of one tank per
- * bottle (see `calculateSeparateNitrogenMultiPartRecipe`). So the two layouts
- * must weigh out the same grams of every salt, to the gram. Any difference
- * means the layout re-solved something behind the grower's back — which is
- * exactly the drift away from the original line that splitting them per part
- * is meant to avoid.
+ * tanks: the same parts are solved the same independent way, and the only thing
+ * taken out of each one is its Calcium, which pools into a shared tank (see
+ * `calculateSeparateNitrogenMultiPartRecipe`). So the two layouts must weigh
+ * out the same grams of every salt, to the gram. Any difference means the
+ * layout re-solved something behind the grower's back — which is exactly the
+ * drift away from the original line that solving them per part is meant to
+ * avoid.
  *
- * Also holds Tank 1 to Calcium salts only: pooling several parts into shared
- * tanks is only safe as long as nothing acidic-, phosphate- or sulfate-bearing
- * from one part can land beside another part's Calcium at stock strength.
+ * On top of that, three things about the tanks themselves:
+ *
+ *  - The Calcium tank holds Calcium salts and nothing else, and no other tank
+ *    holds any Calcium at all. Pooling several parts is only safe as long as
+ *    nothing phosphate- or sulfate-bearing from one part can land beside
+ *    another part's Calcium at stock strength.
+ *  - Every non-Calcium tank stands for exactly one original part, and holds
+ *    only salts that part declared — the same containment the per-part tanks
+ *    are held to below. A tank that merged two bottles, or borrowed a
+ *    neighbour's salt, would still deliver a plausible total, so this is
+ *    invisible in the ppm table.
+ *  - No tank is empty. A part that's pure Calcium Nitrate has nothing left
+ *    once its Calcium is pulled out, and must not leave a blank tank behind.
  *
  * The three-part threshold is spelled out here rather than imported from
  * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`: reading the same knob this
@@ -676,7 +687,8 @@ function reportSeparateNitrogenMatchesPerPartTanks(
   // per-part totals aren't the ones this layout is built from.
   if (scenario.stockTankOption === "doser") return true
 
-  const separateNitrogen = sumSaltAmounts(result.threeTankRecipe.tank1, result.threeTankRecipe.tank2)
+  const tanks = result.separateNitrogenRecipe.tanks
+  const separateNitrogen = sumSaltAmounts(...tanks.map((tank) => tank.salts))
   const perPart = sumSaltAmounts(...result.multiPartRecipe.tanks.map((tank) => tank.salts))
   const drifted = SALT_DISPLAY_ORDER.filter(
     (key) => Math.abs(separateNitrogen[key] - perPart[key]) > 1e-9
@@ -696,13 +708,57 @@ function reportSeparateNitrogenMatchesPerPartTanks(
     allPass = false
   }
 
-  const misplaced = SALT_DISPLAY_ORDER.filter(
-    (key) => result.threeTankRecipe.tank1[key] > 0 && !TANK_1_SALT_KEYS.has(key)
-  )
-  if (misplaced.length > 0) {
+  for (const tank of tanks) {
+    const misplaced = SALT_DISPLAY_ORDER.filter((key) => {
+      if (tank.salts[key] <= 0) return false
+      return tank.role === "calcium" ? !TANK_1_SALT_KEYS.has(key) : TANK_1_SALT_KEYS.has(key)
+    })
+    if (misplaced.length === 0) continue
+
     console.log(
-      "\n    Tank 1 holds salts that don't belong beside concentrated Calcium: " +
+      `\n    ${tank.name} (${tank.role}) is on the wrong side of the Calcium split: ` +
         misplaced.map((key) => RAW_SALTS[key].name).join(", ")
+    )
+    allPass = false
+  }
+
+  const analysisById = new Map(scenario.partsAnalysis.map((part) => [part.id, part]))
+  const autoAdded = new Set(
+    (result.separateNitrogenRecipe.autoAddedSalts ?? []).map((note) => note.saltKey)
+  )
+  // Scoped to macros for the same reason `reportPerPartSaltContainment` is:
+  // micronutrients are deliberately not part-faithful.
+  const macroKeys = SALT_DISPLAY_ORDER.filter((key) => !MICRO_SALT_KEYS.has(key))
+
+  for (const tank of tanks) {
+    if (tank.role !== "non-calcium") continue
+
+    if (!tank.partId) {
+      console.log(`\n    ${tank.name} merges the parts together instead of standing for one of them`)
+      allPass = false
+      continue
+    }
+
+    const analysis = analysisById.get(tank.partId)
+    if (!analysis) continue
+
+    const allowed = getEnabledSaltKeys(analysis.includedSalts)
+    const foreign = macroKeys.filter(
+      (key) => tank.salts[key] > 0 && !allowed.has(key) && !autoAdded.has(key)
+    )
+    if (foreign.length === 0) continue
+
+    console.log(
+      `\n    ${tank.name} (${tank.partName}) holds macro salts not checked on that part: ` +
+        foreign.map((key) => `${RAW_SALTS[key].name} ${tank.salts[key].toFixed(3)} g`).join(", ")
+    )
+    allPass = false
+  }
+
+  const empty = tanks.filter((tank) => !SALT_DISPLAY_ORDER.some((key) => tank.salts[key] > 0))
+  if (empty.length > 0) {
+    console.log(
+      `\n    Separate Nitrogen emitted empty tanks: ${empty.map((tank) => tank.name).join(", ")}`
     )
     allPass = false
   }
@@ -727,16 +783,16 @@ function resolvedLayouts(result: CalculateRecipeResult): ResolvedLayout[] {
     return set
   }
 
+  const separateNitrogenTanks = result.separateNitrogenRecipe.tanks
   return [
     {
-      label: "Separate Nitrogen (Tank 1 + Tank 2)",
+      label: `Separate Nitrogen (${separateNitrogenTanks.length} tank${separateNitrogenTanks.length === 1 ? "" : "s"})`,
       salts: sumSaltAmounts(
-        result.threeTankRecipe.tank1,
-        result.threeTankRecipe.tank2,
-        carbonate(result.threeTankRecipe.directAddCalciumCarbonate?.grams)
+        ...separateNitrogenTanks.map((tank) => tank.salts),
+        carbonate(result.separateNitrogenRecipe.directAddCalciumCarbonate?.grams)
       ),
       dilutionRatio: result.dilutionRatio,
-      reported: result.threeTankRecipe.delivered,
+      reported: result.separateNitrogenRecipe.delivered,
     },
     {
       label: "One tank per part",
@@ -873,7 +929,9 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
   }
 
   const layouts = resolvedLayouts(result)
-  reportSalts("Separate Nitrogen salt amounts", layouts[0].salts)
+  for (const tank of result.separateNitrogenRecipe.tanks) {
+    reportSalts(`Separate Nitrogen ${tank.name} (${tank.partName ?? tank.role})`, tank.salts)
+  }
   for (const tank of result.multiPartRecipe.tanks) {
     reportSalts(`Per-part ${tank.name} (${tank.partName})`, tank.salts)
   }
@@ -904,7 +962,7 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
   }
 
   const deviationsByLayout = [
-    result.threeTankRecipe.deviations,
+    result.separateNitrogenRecipe.deviations,
     result.multiPartRecipe.deviations,
     result.directRecipe.deviations,
   ]
@@ -916,11 +974,11 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
     }
   })
 
-  const warnings = result.threeTankRecipe.warnings ?? []
+  const warnings = result.separateNitrogenRecipe.warnings ?? []
   if (warnings.length > 0) {
     console.log(`\n    no checked salt supplies: ${warnings.map((warning) => warning.label).join(", ")}`)
   }
-  for (const note of result.threeTankRecipe.autoAddedSalts ?? []) {
+  for (const note of result.separateNitrogenRecipe.autoAddedSalts ?? []) {
     console.log(`    auto-added ${note.saltLabel} for ${note.elementLabel}`)
   }
   if (k2so4Checked && k2so4Needed && !k2so4Used) {

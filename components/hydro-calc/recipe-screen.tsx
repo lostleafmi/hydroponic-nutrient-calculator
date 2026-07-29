@@ -91,16 +91,15 @@ import {
   type SaltAutoAddNote,
   type SaltGapWarning,
   type SaltKey,
+  type SeparateNitrogenRecipe,
+  type SeparateNitrogenTank,
   type TargetDeviation,
-  type ThreeTankRecipe,
 } from "@/lib/hydro-calc/recipe-types"
 
 /** Rendered before the first Server Action response arrives */
 const EMPTY_TARGETS = emptyElementalTargets()
-const EMPTY_THREE_TANK_RECIPE: ThreeTankRecipe = {
-  tank1: emptySaltAmounts(),
-  tank2: emptySaltAmounts(),
-  hasMicronutrients: false,
+const EMPTY_SEPARATE_NITROGEN_RECIPE: SeparateNitrogenRecipe = {
+  tanks: [],
   warnings: [],
   isApproximate: false,
   delivered: emptyElementalTargets(),
@@ -293,9 +292,9 @@ export function RecipeScreen({
   // `sumCalciumNitrateGramsPerGallon`) — only non-zero for parts where
   // Calcium Nitrate is paired with an explicit Calcium Chloride dose (see
   // `isCalciumNitrateSoleDoseSource`). Used for the same calculation-path
-  // tooltips as the Chloride dose above, on the combined-recipe layouts
-  // (Separate Nitrogen Tank 1, Direct Mix) that don't otherwise expose a
-  // per-part dose.
+  // tooltips as the Chloride dose above, on the layouts that pool the parts
+  // and so can't expose a per-part dose (the Separate Nitrogen Calcium tank,
+  // Direct Mix).
   const calciumNitrateGramsPerGallonCombined = useMemo(
     () => sumCalciumNitrateGramsPerGallon(partsAnalysis, parts),
     [partsAnalysis, parts]
@@ -316,9 +315,18 @@ export function RecipeScreen({
   const estimatedEc = calcResult?.estimatedEc ?? null
   const calciumNitrateEcPpmDelta = calcResult?.calciumNitrateEcPpmDelta ?? { calciumPpmDelta: 0, nitrogenPpmDelta: 0 }
   const saltDerivedSulfurPpm = calcResult?.saltDerivedSulfurPpm ?? 0
-  const threeTankRecipe = calcResult?.threeTankRecipe ?? EMPTY_THREE_TANK_RECIPE
+  const separateNitrogenRecipe = calcResult?.separateNitrogenRecipe ?? EMPTY_SEPARATE_NITROGEN_RECIPE
   const multiPartRecipe = calcResult?.multiPartRecipe ?? EMPTY_MULTI_PART_RECIPE
   const directRecipe = calcResult?.directRecipe ?? EMPTY_DIRECT_RECIPE
+
+  // True when the Separate Nitrogen layout gave each part a tank of its own
+  // instead of merging every part's non-Calcium salts into one (see
+  // `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). Read off the tanks
+  // themselves rather than the part count so the copy can't claim a structure
+  // the recipe doesn't have.
+  const separateNitrogenKeepsPartsDistinct = separateNitrogenRecipe.tanks.some(
+    (tank) => tank.partName !== undefined
+  )
 
   /**
    * The ppm the grower's plants will actually see, reconstructed from the
@@ -341,14 +349,14 @@ export function RecipeScreen({
     if (!calcResult) return EMPTY_TARGETS
     if (stockTankOption === "direct") return directRecipe.delivered
     if (usesPerPartTanks) return multiPartRecipe.delivered
-    return threeTankRecipe.delivered
+    return separateNitrogenRecipe.delivered
   }, [
     calcResult,
     stockTankOption,
     usesPerPartTanks,
     directRecipe.delivered,
     multiPartRecipe.delivered,
-    threeTankRecipe.delivered,
+    separateNitrogenRecipe.delivered,
   ])
 
   /**
@@ -359,21 +367,21 @@ export function RecipeScreen({
     if (!calcResult) return []
     if (stockTankOption === "direct") return directRecipe.deviations
     if (usesPerPartTanks) return multiPartRecipe.deviations
-    return threeTankRecipe.deviations
+    return separateNitrogenRecipe.deviations
   }, [
     calcResult,
     stockTankOption,
     usesPerPartTanks,
     directRecipe.deviations,
     multiPartRecipe.deviations,
-    threeTankRecipe.deviations,
+    separateNitrogenRecipe.deviations,
   ])
 
   // Unified warning surface — whichever mode is active drives which recipe's
   // gaps get reported to the user.
   const activeRecipeWarnings: SaltGapWarning[] = useMemo(() => {
     if (stockTankOption === "direct") return directRecipe.warnings
-    if (usesSeparateNitrogenLayout) return threeTankRecipe.warnings ?? []
+    if (usesSeparateNitrogenLayout) return separateNitrogenRecipe.warnings ?? []
     if (usesPerPartTanks) return multiPartRecipe.warnings ?? []
     return []
   }, [
@@ -381,7 +389,7 @@ export function RecipeScreen({
     usesSeparateNitrogenLayout,
     usesPerPartTanks,
     directRecipe.warnings,
-    threeTankRecipe.warnings,
+    separateNitrogenRecipe.warnings,
     multiPartRecipe.warnings,
   ])
 
@@ -393,7 +401,7 @@ export function RecipeScreen({
   // "check more salts" warning above.
   const activeAutoAddedSalts: SaltAutoAddNote[] = useMemo(() => {
     if (stockTankOption === "direct") return directRecipe.autoAddedSalts ?? []
-    if (usesSeparateNitrogenLayout) return threeTankRecipe.autoAddedSalts ?? []
+    if (usesSeparateNitrogenLayout) return separateNitrogenRecipe.autoAddedSalts ?? []
     if (usesPerPartTanks) return multiPartRecipe.autoAddedSalts ?? []
     return []
   }, [
@@ -401,7 +409,7 @@ export function RecipeScreen({
     usesSeparateNitrogenLayout,
     usesPerPartTanks,
     directRecipe.autoAddedSalts,
-    threeTankRecipe.autoAddedSalts,
+    separateNitrogenRecipe.autoAddedSalts,
     multiPartRecipe.autoAddedSalts,
   ])
 
@@ -410,7 +418,7 @@ export function RecipeScreen({
   // recipe's direct-add amount gets surfaced to the user.
   const activeDirectAddCalciumCarbonate = useMemo(() => {
     if (stockTankOption === "direct") return directRecipe.directAddCalciumCarbonate ?? null
-    if (usesSeparateNitrogenLayout) return threeTankRecipe.directAddCalciumCarbonate ?? null
+    if (usesSeparateNitrogenLayout) return separateNitrogenRecipe.directAddCalciumCarbonate ?? null
     if (usesPerPartTanks) return multiPartRecipe.directAddCalciumCarbonate ?? null
     return null
   }, [
@@ -418,7 +426,7 @@ export function RecipeScreen({
     usesSeparateNitrogenLayout,
     usesPerPartTanks,
     directRecipe.directAddCalciumCarbonate,
-    threeTankRecipe.directAddCalciumCarbonate,
+    separateNitrogenRecipe.directAddCalciumCarbonate,
     multiPartRecipe.directAddCalciumCarbonate,
   ])
 
@@ -440,13 +448,49 @@ export function RecipeScreen({
   const solubilityBasisVolumeLiters = calcResult?.stockVolumeLiters ?? stockVolumeLiters
   const solubilityBasisDilutionRatio = calcResult?.dilutionRatio ?? dilutionRatio
 
+  /**
+   * Calculation-path tooltips for the two Calcium salts whose grams can come
+   * straight from a literal feed-chart dose rather than from a ppm target (see
+   * `feedRateGramsTooltip`). The Separate Nitrogen layout pools every part's
+   * Calcium into one tank, so these are the combined doses — unlike
+   * `PerPartStockTankCards`, there's no single part left to attribute them to.
+   */
+  const calciumFeedRateTooltips = useMemo(() => {
+    const tooltips: Partial<Record<SaltKey, React.ReactNode>> = {}
+    if (calciumNitrateGramsPerGallonCombined > 0) {
+      tooltips.calciumNitrate = feedRateGramsTooltip(
+        RAW_SALTS.calciumNitrate.name,
+        calciumNitrateGramsPerGallonCombined,
+        solubilityBasisVolumeLiters,
+        solubilityBasisDilutionRatio
+      )
+    }
+    if (calciumChlorideGramsPerGallonCombined > 0) {
+      tooltips.calciumChloride = feedRateGramsTooltip(
+        RAW_SALTS.calciumChloride.name,
+        calciumChlorideGramsPerGallonCombined,
+        solubilityBasisVolumeLiters,
+        solubilityBasisDilutionRatio
+      )
+    }
+    return tooltips
+  }, [
+    calciumNitrateGramsPerGallonCombined,
+    calciumChlorideGramsPerGallonCombined,
+    solubilityBasisVolumeLiters,
+    solubilityBasisDilutionRatio,
+  ])
+
   const solubilityReport = useMemo(() => {
     if (usesSeparateNitrogenLayout) {
-      const tanks = [
-        { name: "Tank 1 (Calcium)", salts: threeTankRecipe.tank1 },
-        { name: "Tank 2 (Macros)", salts: threeTankRecipe.tank2 },
-      ]
-      return checkRecipeSolubility(tanks, solubilityBasisVolumeLiters, solubilityBasisDilutionRatio)
+      return checkRecipeSolubility(
+        separateNitrogenRecipe.tanks.map((tank) => ({
+          name: separateNitrogenTankSolubilityLabel(tank),
+          salts: tank.salts,
+        })),
+        solubilityBasisVolumeLiters,
+        solubilityBasisDilutionRatio
+      )
     }
     if (usesPerPartTanks) {
       return checkRecipeSolubility(
@@ -462,7 +506,7 @@ export function RecipeScreen({
   }, [
     usesSeparateNitrogenLayout,
     usesPerPartTanks,
-    threeTankRecipe,
+    separateNitrogenRecipe,
     multiPartRecipe,
     solubilityBasisVolumeLiters,
     solubilityBasisDilutionRatio,
@@ -561,12 +605,6 @@ export function RecipeScreen({
   const displayedEc =
     parsedTargetEc > 0 ? parsedTargetEc : (estimatedEc ?? 0)
 
-  // True when Tank 2 in the Separate Nitrogen layout holds micronutrients —
-  // drives the badge/description and the extra "Micronutrients" sub-section
-  // rendered inside that card. Micros are always merged into Tank 2 in this
-  // layout, so this simply mirrors whether the recipe has any micros at all.
-  const tank2IncludesMicros = threeTankRecipe.hasMicronutrients
-
   const hasEstimates = estimated.size > 0
   // No micro on the label can anchor a ratio estimate — either nothing was
   // declared, or only Molybdenum was, which is far too small a share to scale
@@ -584,7 +622,7 @@ export function RecipeScreen({
     } else {
       const combined: Record<string, number> = {}
       const tanks = usesSeparateNitrogenLayout
-        ? [threeTankRecipe.tank1, threeTankRecipe.tank2]
+        ? separateNitrogenRecipe.tanks.map((tank) => tank.salts)
         : usesPerPartTanks
           ? multiPartRecipe.tanks.map((tank) => tank.salts)
           : []
@@ -606,7 +644,7 @@ export function RecipeScreen({
 
     return entries
   }, [
-    threeTankRecipe,
+    separateNitrogenRecipe,
     multiPartRecipe,
     directRecipe,
     stockTankOption,
@@ -701,8 +739,13 @@ export function RecipeScreen({
 
   const stockTankUsageLabels = useMemo(() => {
     if (stockTankOption === "direct") return []
+    // Name the part on the tanks that stand for one, same as the per-part
+    // layout below — the Calcium tank is shared across every part, so there's
+    // nothing to name it after.
     if (usesSeparateNitrogenLayout) {
-      return ["Tank 1", "Tank 2"]
+      return separateNitrogenRecipe.tanks.map((tank) =>
+        tank.partName ? `${tank.name} (${tank.partName})` : tank.name
+      )
     }
     // Name the part alongside the tank — the whole point of this layout is
     // that each tank stands in for one bottle of the original line, and the
@@ -713,14 +756,21 @@ export function RecipeScreen({
     return []
   }, [stockTankOption, usesSeparateNitrogenLayout, usesPerPartTanks, multiPartRecipe.tanks])
 
-  // How many stock tanks the doser safety banner should reference
+  // How many stock tanks the doser safety banner should reference — i.e. how
+  // many suction lines the chosen layout needs.
   const doserTankCount = useMemo(() => {
     if (stockTankOption !== "doser") return 0
     if (canSeparateCalciumInDoser && doserLayout === "separate-ca") {
-      return 2
+      return separateNitrogenRecipe.tanks.length
     }
     return multiPartRecipe.tanks.length
-  }, [stockTankOption, canSeparateCalciumInDoser, doserLayout, multiPartRecipe.tanks.length])
+  }, [
+    stockTankOption,
+    canSeparateCalciumInDoser,
+    doserLayout,
+    separateNitrogenRecipe.tanks.length,
+    multiPartRecipe.tanks.length,
+  ])
 
   const mlPerGallon = stockTankMlPerGallon(dilutionRatio)
   const mlPerLiter = stockTankMlPerLiter(dilutionRatio)
@@ -743,7 +793,7 @@ export function RecipeScreen({
     () =>
       buildFormulationTanksData({
         mode: formulationMode,
-        threeTankRecipe,
+        separateNitrogenRecipe,
         multiPartRecipe,
         directRecipe,
         ecScaleFactor,
@@ -754,7 +804,7 @@ export function RecipeScreen({
       }),
     [
       formulationMode,
-      threeTankRecipe,
+      separateNitrogenRecipe,
       multiPartRecipe,
       directRecipe,
       ecScaleFactor,
@@ -1130,7 +1180,9 @@ export function RecipeScreen({
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {doserLayout === "separate-ca"
-                  ? "Ca(NO₃)₂ gets its own suction line, making it easy to taper nitrogen at the end of flower."
+                  ? separateNitrogenKeepsPartsDistinct
+                    ? "Ca(NO₃)₂ gets a suction line of its own, making it easy to taper nitrogen at the end of flower. Every part keeps its own line for the rest of its salts."
+                    : "Ca(NO₃)₂ gets its own suction line, making it easy to taper nitrogen at the end of flower."
                   : "One suction line per part in your feed chart — standard doser setup."}
               </p>
             </div>
@@ -1155,8 +1207,9 @@ export function RecipeScreen({
       {hasValidData && stockTankOption === "doser" && (
         <MixingSafetyBanner
           option={stockTankOption}
-          partCount={doserTankCount}
+          tankCount={doserTankCount}
           separateCaLayout={doserLayout === "separate-ca"}
+          keepsPartsDistinct={separateNitrogenKeepsPartsDistinct}
         />
       )}
 
@@ -1429,7 +1482,12 @@ export function RecipeScreen({
       {hasValidData && stockTankOption !== "doser" && (
         <MixingSafetyBanner
           option={stockTankOption}
-          partCount={multiPartRecipe.tanks.length}
+          tankCount={
+            usesSeparateNitrogenLayout
+              ? separateNitrogenRecipe.tanks.length
+              : multiPartRecipe.tanks.length
+          }
+          keepsPartsDistinct={separateNitrogenKeepsPartsDistinct}
         />
       )}
 
@@ -1473,210 +1531,19 @@ export function RecipeScreen({
           </>
         )}
 
-      {/* Recipe Cards — Separate Nitrogen (chemistry 3-tank) layout */}
+      {/* Recipe Cards — Separate Nitrogen layout (Calcium on its own, then
+          either one merged tank or one tank per part) */}
       {hasValidData && usesSeparateNitrogenLayout && (
-        <>
-          {/* Tank 1 — Calcium Nitrate and/or Calcium Chloride (both soluble).
-              Ammonium Nitrate is a supplemental Nitrogen salt and lands in
-              Tank 2 (see `calculateSeparateCalciumRecipe`). Calcium Carbonate,
-              even when enabled, never lands here — see the direct-add banner
-              above. */}
-          <Card className="border-2 border-primary/50 bg-card">
-            <CardHeader className="bg-primary/5">
-              <CardTitle className="flex items-center gap-2 text-xl text-foreground">
-                <Beaker className="h-5 w-5 text-primary" />
-                <span>Stock Tank 1 Recipe</span>
-                <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
-                  Nitrogen + Calcium
-                </span>
-                <span className="ml-auto text-sm font-normal text-muted-foreground">
-                  {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
-                </span>
-              </CardTitle>
-              <CardDescription>
-                Just your Calcium source in this stock tank. Keeping it on its own makes it easy to
-                taper down near the end of flower without changing the rest of your recipe.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="space-y-2">
-                <SaltRow
-                  name={RAW_SALTS.calciumNitrate.name}
-                  formula={RAW_SALTS.calciumNitrate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank1.calciumNitrate)}
-                  tooltip={
-                    calciumNitrateGramsPerGallonCombined > 0
-                      ? feedRateGramsTooltip(
-                          RAW_SALTS.calciumNitrate.name,
-                          calciumNitrateGramsPerGallonCombined,
-                          solubilityBasisVolumeLiters,
-                          solubilityBasisDilutionRatio
-                        )
-                      : undefined
-                  }
-                />
-                <SaltRow
-                  name={RAW_SALTS.calciumChloride.name}
-                  formula={RAW_SALTS.calciumChloride.formula}
-                  amount={scaledGrams(threeTankRecipe.tank1.calciumChloride)}
-                  tooltip={
-                    calciumChlorideGramsPerGallonCombined > 0
-                      ? feedRateGramsTooltip(
-                          RAW_SALTS.calciumChloride.name,
-                          calciumChlorideGramsPerGallonCombined,
-                          solubilityBasisVolumeLiters,
-                          solubilityBasisDilutionRatio
-                        )
-                      : undefined
-                  }
-                />
-              </div>
-              <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-sm text-muted-foreground">
-                  <strong className="text-foreground">How to mix:</strong>{" "}
-                  {threeTankRecipe.tank1.ammoniumNitrate > 0
-                    ? "Fill the stock tank about halfway with RO water, add the salts listed above and stir until fully dissolved then top it up to"
-                    : "Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved then top it up to"}{" "}
-                  {stockTankSize} {stockTankUnit === "gallons" ? "gallons" : "liters"} and label it
-                  &quot;Tank 1&quot;.
-                </p>
-              </div>
-              {threeTankRecipe.directAddCalciumCarbonate && threeTankRecipe.directAddCalciumCarbonate.grams > 0 && (
-                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                  This recipe also calls for Calcium Carbonate — see the note above these tank
-                  cards for how much to add directly to your reservoir/batch tank.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Tank 2 — Remaining macros, plus micros by default (2-tank system) */}
-          <Card className="border-2 border-accent/50 bg-card">
-            <CardHeader className="bg-accent/5">
-              <CardTitle className="flex items-center gap-2 text-xl text-foreground">
-                <Beaker className="h-5 w-5 text-accent" />
-                <span>Stock Tank 2 Recipe</span>
-                <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs font-semibold text-accent">
-                  {tank2IncludesMicros ? "Macros + Micros" : "Macros"}
-                </span>
-                <span className="ml-auto text-sm font-normal text-muted-foreground">
-                  {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
-                </span>
-              </CardTitle>
-              <CardDescription>
-                {tank2IncludesMicros
-                  ? "The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank. Safe to combine because calcium stays in Tank 1."
-                  : "The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄). Safe to combine in this stock tank because calcium stays in Tank 1."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="space-y-2">
-                <SaltRow
-                  name={RAW_SALTS.potassiumNitrate.name}
-                  formula={RAW_SALTS.potassiumNitrate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.potassiumNitrate)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.ammoniumNitrate.name}
-                  formula={RAW_SALTS.ammoniumNitrate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.ammoniumNitrate)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.magnesiumNitrate.name}
-                  formula={RAW_SALTS.magnesiumNitrate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.magnesiumNitrate)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.urea.name}
-                  formula={RAW_SALTS.urea.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.urea)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.monoPotassiumPhosphate.name}
-                  formula={RAW_SALTS.monoPotassiumPhosphate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.monoPotassiumPhosphate)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.monoAmmoniumPhosphate.name}
-                  formula={RAW_SALTS.monoAmmoniumPhosphate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.monoAmmoniumPhosphate)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.magnesiumSulfate.name}
-                  formula={RAW_SALTS.magnesiumSulfate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.magnesiumSulfate)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.potassiumSulfate.name}
-                  formula={RAW_SALTS.potassiumSulfate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.potassiumSulfate)}
-                />
-                <SaltRow
-                  name={RAW_SALTS.ammoniumSulfate.name}
-                  formula={RAW_SALTS.ammoniumSulfate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank2.ammoniumSulfate)}
-                />
-              </div>
-              {tank2IncludesMicros && (
-                <div className="mt-3 border-t border-dashed border-muted-foreground/30 pt-2">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Micronutrients
-                  </p>
-                  <div className="space-y-2">
-                    <SaltRow
-                      name={RAW_SALTS.ironDTPA.name}
-                      formula={RAW_SALTS.ironDTPA.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.ironDTPA)}
-                      micro
-                    />
-                    <SaltRow
-                      name={RAW_SALTS.manganeseEDTA.name}
-                      formula={RAW_SALTS.manganeseEDTA.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.manganeseEDTA)}
-                      micro
-                    />
-                    <SaltRow
-                      name={RAW_SALTS.zincEDTA.name}
-                      formula={RAW_SALTS.zincEDTA.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.zincEDTA)}
-                      micro
-                    />
-                    <SaltRow
-                      name={RAW_SALTS.boricAcid.name}
-                      formula={RAW_SALTS.boricAcid.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.boricAcid)}
-                      micro
-                    />
-                    <SaltRow
-                      name={RAW_SALTS.copperEDTA.name}
-                      formula={RAW_SALTS.copperEDTA.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.copperEDTA)}
-                      micro
-                    />
-                    <SaltRow
-                      name={RAW_SALTS.sodiumMolybdate.name}
-                      formula={RAW_SALTS.sodiumMolybdate.formula}
-                      amount={scaledGrams(threeTankRecipe.tank2.sodiumMolybdate)}
-                      micro
-                    />
-                  </div>
-                </div>
-              )}
-              <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-sm text-muted-foreground">
-                  <strong className="text-foreground">How to mix:</strong> Fill the stock tank
-                  about halfway with RO water, then add the salts in the order listed above
-                  {tank2IncludesMicros
-                    ? ", dissolving the Iron DTPA first among the micronutrients"
-                    : ""}
-                  . Wait for each one to fully dissolve before adding the next. Top up to{" "}
-                  {stockTankSize} {stockTankUnit === "gallons" ? "gallons" : "liters"} and label
-                  it &quot;Tank 2&quot;.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </>
+        <SeparateNitrogenTankCards
+          tanks={separateNitrogenRecipe.tanks}
+          hasDirectAddCalciumCarbonate={
+            (separateNitrogenRecipe.directAddCalciumCarbonate?.grams ?? 0) > 0
+          }
+          calciumFeedRateTooltips={calciumFeedRateTooltips}
+          stockTankSize={stockTankSize}
+          stockTankUnit={stockTankUnit}
+          ecScaleFactor={ecScaleFactor}
+        />
       )}
 
       {/* Recipe Cards — one stock tank per nutrient part ("per-part" + doser modes) */}
@@ -2250,6 +2117,199 @@ function SaltRow({
   )
 }
 
+/**
+ * How each stock tank card is coloured, cycling by position so neighbouring
+ * tanks stay easy to tell apart. Shared by both multi-tank layouts, which is
+ * what keeps "Tank 1 is the primary-coloured card" true whichever one is on
+ * screen.
+ */
+const TANK_CARD_STYLES = [
+  {
+    border: "border-primary/50",
+    header: "bg-primary/5",
+    icon: "text-primary",
+    badge: "bg-primary/20 text-primary",
+  },
+  {
+    border: "border-accent/50",
+    header: "bg-accent/5",
+    icon: "text-accent",
+    badge: "bg-accent/20 text-accent",
+  },
+  {
+    border: "border-muted-foreground/40",
+    header: "bg-muted/40",
+    icon: "text-muted-foreground",
+    badge: "bg-muted-foreground/15 text-muted-foreground",
+  },
+] as const
+
+/**
+ * How a Separate Nitrogen tank is named in the solubility report, where the
+ * grower has to recognise which physical tank is the one sitting at its limit.
+ */
+function separateNitrogenTankSolubilityLabel(tank: SeparateNitrogenTank): string {
+  if (tank.role === "calcium") return `${tank.name} (Calcium)`
+  if (tank.partName) return `${tank.name} (${tank.partName})`
+  return `${tank.name} (Macros)`
+}
+
+function separateNitrogenTankBadge(tank: SeparateNitrogenTank): string {
+  if (tank.role === "calcium") return "Nitrogen + Calcium"
+  if (tank.partName) return tank.partName
+  return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
+}
+
+function separateNitrogenTankDescription(
+  tank: SeparateNitrogenTank,
+  calciumTankName: string | null
+): string {
+  if (tank.role === "calcium") {
+    return "Just your Calcium source in this stock tank. Keeping it on its own is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together."
+  }
+
+  // Only worth saying when the Calcium actually went into a tank of its own —
+  // an all-Carbonate recipe has no Calcium tank, since Carbonate is a direct
+  // reservoir addition instead (see `calculateStockTankRecipe`).
+  const safety = calciumTankName
+    ? ` Safe to combine in one stock tank because your Calcium stays in ${calciumTankName}.`
+    : ""
+
+  if (tank.partName) {
+    return `Everything except the Calcium from your ${tank.partName}, built from only that part's own label, dose and checked salts — so this tank still stands in for that bottle, and you can dial it up or down on its own the way your feed chart intends.${safety}`
+  }
+
+  return tank.hasMicronutrients
+    ? `The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄) plus your micronutrients, combined into one clean tank.${safety}`
+    : `The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄).${safety}`
+}
+
+/**
+ * The Separate Nitrogen tank cards, drawn from whatever tanks the layout came
+ * back with: the shared Calcium tank first, then either one merged non-Calcium
+ * tank or one per part (see `calculateSeparateNitrogenMultiPartRecipe`).
+ */
+function SeparateNitrogenTankCards({
+  tanks,
+  hasDirectAddCalciumCarbonate,
+  calciumFeedRateTooltips,
+  stockTankSize,
+  stockTankUnit,
+  ecScaleFactor,
+}: {
+  tanks: SeparateNitrogenTank[]
+  hasDirectAddCalciumCarbonate: boolean
+  /** Keyed by salt — see the memo of the same name for why these are combined across parts. */
+  calciumFeedRateTooltips: Partial<Record<SaltKey, React.ReactNode>>
+  stockTankSize: string
+  stockTankUnit: "gallons" | "liters"
+  ecScaleFactor: number
+}) {
+  const scaledGrams = (g: number) => formatGrams(g * ecScaleFactor)
+  const calciumTankName = tanks.find((tank) => tank.role === "calcium")?.name ?? null
+  const unitLabel = stockTankUnit === "gallons" ? "gallons" : "liters"
+
+  if (tanks.length === 0) {
+    return (
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+        Enter your feed-chart doses on Step 2 to see your stock tank recipes.
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {tanks.map((tank, index) => {
+        const style = TANK_CARD_STYLES[index % TANK_CARD_STYLES.length]
+        const saltEntries = getOrderedSaltEntries(tank.salts)
+        const macroEntries = saltEntries.filter(([key]) => !MICRO_SALT_KEYS.has(key))
+        const microEntries = saltEntries.filter(([key]) => MICRO_SALT_KEYS.has(key))
+        const tooltips = tank.role === "calcium" ? calciumFeedRateTooltips : {}
+
+        return (
+          <Card key={tank.name} className={`border-2 ${style.border} bg-card`}>
+            <CardHeader className={style.header}>
+              <CardTitle className="flex flex-wrap items-center gap-2 text-xl text-foreground">
+                <Beaker className={`h-5 w-5 ${style.icon}`} />
+                <span>Stock {tank.name} Recipe</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${style.badge}`}>
+                  {separateNitrogenTankBadge(tank)}
+                </span>
+                <span className="ml-auto text-sm font-normal text-muted-foreground">
+                  {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
+                </span>
+              </CardTitle>
+              <CardDescription>
+                {separateNitrogenTankDescription(tank, calciumTankName)}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="space-y-2">
+                {macroEntries.map(([key, amount]) => (
+                  <SaltRow
+                    key={key}
+                    name={RAW_SALTS[key].name}
+                    formula={RAW_SALTS[key].formula}
+                    amount={scaledGrams(amount)}
+                    tooltip={tooltips[key]}
+                  />
+                ))}
+                {microEntries.length > 0 && (
+                  <div className="mt-3 border-t border-dashed border-muted-foreground/30 pt-2">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Micronutrients
+                    </p>
+                    <div className="space-y-2">
+                      {microEntries.map(([key, amount]) => (
+                        <SaltRow
+                          key={key}
+                          name={RAW_SALTS[key].name}
+                          formula={RAW_SALTS[key].formula}
+                          amount={scaledGrams(amount)}
+                          micro
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
+                <p className="text-sm text-muted-foreground">
+                  {tank.role === "calcium" ? (
+                    <>
+                      <strong className="text-foreground">How to mix:</strong> Fill the stock tank
+                      about halfway with RO water, add the{" "}
+                      {macroEntries.length > 1 ? "calcium sources" : "calcium source"} and stir
+                      until fully dissolved then top it up to {stockTankSize} {unitLabel} and label
+                      it &quot;{tank.name}&quot;.
+                    </>
+                  ) : (
+                    <>
+                      <strong className="text-foreground">How to mix:</strong> Fill the stock tank
+                      about halfway with RO water, then add the salts in the order listed above
+                      {tank.hasMicronutrients
+                        ? ", dissolving the Iron DTPA first among the micronutrients"
+                        : ""}
+                      . Wait for each one to fully dissolve before adding the next. Top up to{" "}
+                      {stockTankSize} {unitLabel} and label it &quot;{tank.name}&quot;.
+                    </>
+                  )}
+                </p>
+              </div>
+              {tank.role === "calcium" && hasDirectAddCalciumCarbonate && (
+                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                  This recipe also calls for Calcium Carbonate — see the note above these tank
+                  cards for how much to add directly to your reservoir/batch tank.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )
+      })}
+    </>
+  )
+}
+
 function PerPartStockTankCards({
   tanks,
   partsAnalysis,
@@ -2309,27 +2369,6 @@ function PerPartStockTankCards({
     }
     feedRateTooltipsByPartId.set(analysis.id, tooltips)
   }
-  const tankStyles = [
-    {
-      border: "border-primary/50",
-      header: "bg-primary/5",
-      icon: "text-primary",
-      badge: "bg-primary/20 text-primary",
-    },
-    {
-      border: "border-accent/50",
-      header: "bg-accent/5",
-      icon: "text-accent",
-      badge: "bg-accent/20 text-accent",
-    },
-    {
-      border: "border-muted-foreground/40",
-      header: "bg-muted/40",
-      icon: "text-muted-foreground",
-      badge: "bg-muted-foreground/15 text-muted-foreground",
-    },
-  ] as const
-
   if (tanks.length === 0) {
     return (
       <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
@@ -2341,7 +2380,7 @@ function PerPartStockTankCards({
   return (
     <>
       {tanks.map((tank, index) => {
-        const style = tankStyles[index % tankStyles.length]
+        const style = TANK_CARD_STYLES[index % TANK_CARD_STYLES.length]
         const saltEntries = getOrderedSaltEntries(tank.salts)
         const macroEntries = saltEntries.filter(([key]) => !MICRO_SALT_KEYS.has(key))
         const microEntries = saltEntries.filter(([key]) => MICRO_SALT_KEYS.has(key))
@@ -2429,23 +2468,35 @@ function PerPartStockTankCards({
 
 function MixingSafetyBanner({
   option,
-  partCount,
+  tankCount,
   separateCaLayout = false,
+  keepsPartsDistinct = false,
 }: {
   option: StockTankOption
-  partCount: number
+  /** How many stock tanks the active layout came back with */
+  tankCount: number
   separateCaLayout?: boolean
+  /**
+   * True when the Separate Nitrogen layout gave each part a tank of its own
+   * rather than merging them (see `separateNitrogenKeepsPartsDistinct`).
+   */
+  keepsPartsDistinct?: boolean
 }) {
   if (option === "separate") {
+    const otherTankCount = Math.max(tankCount - 1, 0)
     return (
       <div className="flex items-start gap-3 rounded-lg border-2 border-emerald-500/50 bg-emerald-500/10 p-4">
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
         <div className="space-y-1 text-sm leading-relaxed text-emerald-100">
           <p className="font-semibold">Safest setup</p>
           <p>
-            Nitrogen and Calcium sit together in their own stock tank, so it&apos;s easy to taper
-            at the end of flower. The rest of your recipe goes into 1 more stock tank that&apos;s
-            safe to combine.
+            Your Calcium — and the Nitrogen that comes with it — sits alone in a stock tank of its
+            own, so it&apos;s easy to move Nitrogen at the end of flower without rebalancing
+            anything else.
+            {otherTankCount > 0 &&
+              (keepsPartsDistinct
+                ? ` The rest of your recipe stays split across ${otherTankCount} more stock tank${otherTankCount === 1 ? "" : "s"}, one per part of your feed chart, so each one still doses like the bottle it replaces.`
+                : ` The rest of your recipe goes into ${otherTankCount} more stock tank${otherTankCount === 1 ? "" : "s"} that's safe to combine.`)}
           </p>
         </div>
       </div>
@@ -2463,8 +2514,10 @@ function MixingSafetyBanner({
           <p className="font-semibold">Doser / Injector setup — check your hardware first</p>
           <p>
             {separateCaLayout
-              ? `We sized ${partCount} stock tank${partCount === 1 ? "" : "s"} with Calcium Nitrate isolated in its own suction line for easy nitrogen tapering.`
-              : `We sized ${partCount} stock tank${partCount === 1 ? "" : "s"} (one per part in your feed chart) for a standard doser ratio.`}{" "}
+              ? `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} with Calcium Nitrate isolated in its own suction line for easy nitrogen tapering${
+                  keepsPartsDistinct ? ", and one line per part for the rest of their salts" : ""
+                }.`
+              : `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} (one per part in your feed chart) for a standard doser ratio.`}{" "}
             <strong>Confirm the ratio printed on your injector</strong> matches the one we picked
             above — if it doesn&apos;t, change the ratio and the amounts will recalculate. Each
             stock tank needs its own suction line; never tee them together before the injector.
@@ -2486,7 +2539,7 @@ function MixingSafetyBanner({
             One stock tank per part — the closest match to your nutrient line
           </p>
           <p>
-            We solved {partCount} stock tank{partCount === 1 ? "" : "s"} independently, each from
+            We solved {tankCount} stock tank{tankCount === 1 ? "" : "s"} independently, each from
             only its own part&apos;s label, dose and checked salts, so nothing gets shuffled
             between your parts. Measure mL out of each tank by hand — no doser needed.{" "}
             <strong>Don&apos;t pour your stock tanks into each other at full strength.</strong>{" "}

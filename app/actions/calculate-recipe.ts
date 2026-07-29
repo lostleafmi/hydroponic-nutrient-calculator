@@ -36,8 +36,8 @@ import {
   type MicroEstimateSource,
   type MicroKey,
   type MultiPartTankRecipe,
+  type SeparateNitrogenRecipe,
   type StockTankOption,
-  type ThreeTankRecipe,
 } from "@/lib/hydro-calc/recipe-types"
 
 export interface CalculateRecipeInput {
@@ -91,7 +91,7 @@ export interface CalculateRecipeResult {
    * the UI can show this piece of the Sulfur calculation path.
    */
   saltDerivedSulfurPpm: number
-  threeTankRecipe: ThreeTankRecipe
+  separateNitrogenRecipe: SeparateNitrogenRecipe
   multiPartRecipe: MultiPartTankRecipe
   directRecipe: DirectMixRecipe
   /**
@@ -180,10 +180,10 @@ export async function calculateRecipeAction(
 
   // Past a couple of parts, building the Separate Nitrogen tanks out of the
   // pooled solve above moves nutrients between the grower's bottles; solving
-  // each part on its own first and only then grouping the salts into the two
-  // tanks keeps the tapering benefit without that drift. See
+  // each part on its own, then taking nothing but the Calcium out of it, keeps
+  // the tapering benefit without that drift. See
   // `separateNitrogenSolvesPartsIndependently`.
-  const threeTankRecipe = separateNitrogenSolvesPartsIndependently(parts.length)
+  const separateNitrogenRecipe = separateNitrogenSolvesPartsIndependently(parts.length)
     ? calculateSeparateNitrogenMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)
     : calculateSeparateCalciumRecipe(
         targets,
@@ -218,7 +218,7 @@ export async function calculateRecipeAction(
     estimatedEc,
     calciumNitrateEcPpmDelta: calciumNitrateEcDelta,
     saltDerivedSulfurPpm: sulfurFromSulfateSalts,
-    threeTankRecipe,
+    separateNitrogenRecipe,
     multiPartRecipe,
     directRecipe,
     stockVolumeLiters,

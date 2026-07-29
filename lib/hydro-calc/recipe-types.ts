@@ -427,16 +427,52 @@ export interface TankRecipe {
   deviations: TargetDeviation[]
 }
 
-export interface ThreeTankRecipe {
-  tank1: SaltAmounts
-  /** Remaining macros plus the micronutrients — always merged together (see `TANK_2_SALTS`/`TANK_3_SALTS`). */
-  tank2: SaltAmounts
-  /** True when the recipe has any micronutrients at all. Use this to decide
-   *  whether to render a micronutrients sub-section inside Tank 2. */
+/**
+ * What a Separate Nitrogen tank is for, which is what decides its label, its
+ * mixing note, and whether it can be tapered.
+ *
+ *  - `"calcium"` — the Calcium salts, pooled across every part into the one
+ *    tank that must stay clear of phosphate and sulfate at stock strength
+ *    (see `TANK_1_SALTS`). Calcium Nitrate's own Nitrogen rides along in here.
+ *  - `"non-calcium"` — everything else (see `TANK_2_SALTS` / `TANK_3_SALTS`),
+ *    which is where the Nitrogen a grower can cut without touching Calcium
+ *    lives.
+ */
+export type SeparateNitrogenTankRole = "calcium" | "non-calcium"
+
+/** One physical stock tank in the Separate Nitrogen layout. */
+export interface SeparateNitrogenTank {
+  index: number
+  name: string
+  role: SeparateNitrogenTankRole
+  /**
+   * The original nutrient part this tank was solved from — set only on the
+   * `"non-calcium"` tanks of a line whose parts are kept apart (see
+   * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). The Calcium tank never
+   * carries one: it deliberately pools every part's Calcium so there's a
+   * single tank to taper. Below the per-part threshold the parts are pooled
+   * and re-solved as one, so there's no single part to attribute the
+   * non-Calcium salts to either.
+   */
+  partName?: string
+  partId?: string
+  salts: SaltAmounts
+  /** True when this tank holds any of `TANK_3_SALTS` — drives its micronutrient sub-section. */
   hasMicronutrients: boolean
+}
+
+export interface SeparateNitrogenRecipe {
+  /**
+   * The physical tanks, in mixing order, with the Calcium tank first. Tanks
+   * that came out empty are never included, so a part that's pure Calcium
+   * Nitrate doesn't leave a blank tank behind — which means `index`/`name`
+   * count the tanks the grower actually mixes rather than the parts they
+   * came from.
+   */
+  tanks: SeparateNitrogenTank[]
   warnings?: SaltGapWarning[]
   isApproximate?: boolean
-  /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into Tank 1 */
+  /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into the Calcium tank */
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
   /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
   autoAddedSalts?: SaltAutoAddNote[]
@@ -758,20 +794,22 @@ export function sumCalciumChlorideGramsPerGallon(parts: PartAnalysis[]): number 
 
 /**
  * From this many parts up, the Separate Nitrogen layout solves every part on
- * its own — exactly like the per-part tanks — and only *then* groups the
- * resulting salts into its two physical tanks (see
- * `calculateSeparateNitrogenMultiPartRecipe`). Tapering Tank 1 still drops
- * Nitrogen, but the grams being tapered are the ones the grower's own parts
- * called for rather than a fresh recipe solved from every part's salts pooled
- * together, which is what used to pull a 3-part line away from the feed it
- * was replicating.
+ * its own — exactly like the per-part tanks — and keeps them apart afterwards
+ * too: the Calcium is pulled out into one shared tank, and each part's
+ * remaining salts get a tank of their own (see
+ * `calculateSeparateNitrogenMultiPartRecipe`). So the grams are the ones the
+ * grower's own parts called for rather than a fresh recipe solved from every
+ * part's salts pooled together, which is what used to pull a 3-part line away
+ * from the feed it was replicating — and the parts stay individually
+ * adjustable, which merging them into one tank took away.
  *
- * Below this count the layout keeps the pooled solve (see
- * `calculateSeparateCalciumRecipe` and `unionIncludedSalts`). With one part
- * there is nothing to pool in the first place, and with two the pooled solve
- * has enough freedom to land closer to the label's summed ppm than solving
- * each bottle alone does — the drift only becomes the bigger of the two
- * problems once there are three or more bottles to shuffle nutrients between.
+ * Below this count the layout keeps the pooled solve and the single merged
+ * non-Calcium tank that goes with it (see `calculateSeparateCalciumRecipe`
+ * and `unionIncludedSalts`). With one part there is nothing to pool in the
+ * first place, and with two the pooled solve has enough freedom to land closer
+ * to the label's summed ppm than solving each bottle alone does — the drift
+ * only becomes the bigger of the two problems once there are three or more
+ * bottles to shuffle nutrients between.
  */
 export const SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS = 3
 
@@ -978,19 +1016,28 @@ export const TANK_B_SALTS = [
 ] as const satisfies readonly SaltKey[]
 
 /**
- * Two-tank layout for the "Separate Calcium Nitrate" mode. The split keeps
- * the calcium ion completely isolated so it can be tapered down at the end of
+ * The two SIDES of the "Separate Nitrogen" mode. The split keeps the calcium
+ * ion completely isolated, which is what lets Nitrogen be moved at the end of
  * flower without rebalancing the rest of the recipe.
  *
- * Tank 1 — Calcium source only: Calcium Nitrate, and/or Calcium Chloride or
- *          Calcium Carbonate when used instead (or alongside) as a
- *          nitrogen-free calcium source (taper Tank 1 for end-of-flower N
- *          reduction when Calcium Nitrate is the source)
- * Tank 2 — Everything else: remaining macros (KNO₃, Mg(NO₃)₂, MKP/MAP,
- *          MgSO₄, K₂SO₄, Urea) plus the micronutrients (Fe-DTPA, Mn/Zn/Cu
- *          EDTA chelates, boric acid, sodium molybdate) — always merged
- *          together into one clean Tank 2 rather than split into a separate
- *          micros tank.
+ * Calcium side (`TANK_1_SALTS`) — Calcium source only: Calcium Nitrate, and/or
+ *          Calcium Chloride or Calcium Carbonate when used instead of (or
+ *          alongside) it as a nitrogen-free calcium source. Always exactly one
+ *          physical tank, pooled across every part, so there's a single tank
+ *          to hold steady — or to taper, when Calcium Nitrate is the source
+ *          and the grower wants Calcium to come down with the Nitrogen.
+ * Non-calcium side (`TANK_2_SALTS` + `TANK_3_SALTS`) — everything else:
+ *          remaining macros (KNO₃, Mg(NO₃)₂, MKP/MAP, MgSO₄, K₂SO₄, Urea)
+ *          plus the micronutrients (Fe-DTPA, Mn/Zn/Cu EDTA chelates, boric
+ *          acid, sodium molybdate), which are merged in alongside them rather
+ *          than split into a micros tank of their own.
+ *
+ * How many physical tanks the non-calcium side becomes is a layout decision
+ * rather than a chemical one — one merged tank when the parts were pooled and
+ * re-solved as one, or one tank per part when they weren't (see
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). Both are safe: the salts on
+ * this side can share a tank with each other, they just can't share one with
+ * concentrated Calcium.
  */
 export const TANK_1_SALTS = [
   "calciumNitrate",
@@ -1011,11 +1058,11 @@ export const TANK_2_SALTS = [
 ] as const satisfies readonly SaltKey[]
 
 /**
- * The micronutrient salts, grouped for two purposes: (1) merging them into
- * Tank 2 in `calculateSeparateCalciumRecipe` below, and (2) identifying
- * which salts to consolidate into a single "Micros" tank in
- * `calculateDoserMultiPartRecipe` (a separate, per-part-doser feature —
- * see `recipe-calculator.ts`).
+ * The micronutrient salts, grouped for two purposes: (1) merging them into the
+ * non-Calcium side of the Separate Nitrogen layout (see
+ * `calculateSeparateCalciumRecipe`), and (2) identifying which salts to
+ * consolidate into a single "Micros" tank in `calculateDoserMultiPartRecipe`
+ * (a separate, per-part-doser feature — see `recipe-calculator.ts`).
  */
 export const TANK_3_SALTS = [
   "ironDTPA",

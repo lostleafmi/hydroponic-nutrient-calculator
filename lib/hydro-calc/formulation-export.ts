@@ -23,7 +23,8 @@ import {
   type DirectMixRecipe,
   type MultiPartTankRecipe,
   type SaltAmounts,
-  type ThreeTankRecipe,
+  type SeparateNitrogenRecipe,
+  type SeparateNitrogenTank,
 } from "./recipe-types"
 
 export interface FormulationTankInput {
@@ -83,9 +84,39 @@ function buildDirectAddCalciumCarbonateExport(
   return { gramsPerGallon }
 }
 
+/**
+ * What a Separate Nitrogen tank is called in the exported formulation.
+ *
+ * The Calcium tank is named for what's in it, since it's the one tank that
+ * exists for a chemical reason rather than as a stand-in for a bottle. A
+ * non-Calcium tank that belongs to one part is named after that part — the
+ * same way the per-part export names its tanks — so an imported formulation
+ * still reads as the grower's own feed chart. Only when the parts were pooled
+ * and re-solved as one (see `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`) is
+ * there no part to name it after.
+ */
+function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
+  if (tank.role === "calcium") return "Nitrogen + Calcium"
+  if (tank.partName) return tank.partName
+  return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
+}
+
+function separateNitrogenMixInstructions(
+  tank: SeparateNitrogenTank,
+  sizeNum: number,
+  unitLabel: string
+): string {
+  if (tank.role === "calcium") {
+    return `Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved, then top up to ${sizeNum} ${unitLabel} and label it "${tank.name}".`
+  }
+  return `Fill the stock tank about halfway with RO water, then add the salts in the order listed above${
+    tank.hasMicronutrients ? ", dissolving the Iron DTPA first among the micronutrients" : ""
+  }. Wait for each one to fully dissolve before adding the next. Top up to ${sizeNum} ${unitLabel} and label it "${tank.name}".`
+}
+
 export function buildFormulationTanksData({
   mode,
-  threeTankRecipe,
+  separateNitrogenRecipe,
   multiPartRecipe,
   directRecipe,
   ecScaleFactor,
@@ -95,7 +126,7 @@ export function buildFormulationTanksData({
   isDoser,
 }: {
   mode: FormulationTankMode
-  threeTankRecipe: ThreeTankRecipe
+  separateNitrogenRecipe: SeparateNitrogenRecipe
   multiPartRecipe: MultiPartTankRecipe
   directRecipe: DirectMixRecipe
   ecScaleFactor: number
@@ -135,40 +166,30 @@ export function buildFormulationTanksData({
   }
 
   if (mode === "separate-nitrogen") {
-    const tanks: FormulationTank[] = []
     const usageRates: Record<string, number> = {}
     const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
-      threeTankRecipe.directAddCalciumCarbonate,
+      separateNitrogenRecipe.directAddCalciumCarbonate,
       ecScaleFactor
     )
 
-    const tank1Inputs = buildInputs(threeTankRecipe.tank1, ecScaleFactor)
-    if (tank1Inputs.length > 0) {
-      tanks.push({
-        id: "tank1",
-        label: "Nitrogen + Calcium",
-        inputs: tank1Inputs,
-        mixInstructions: `Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved, then top up to ${sizeNum} ${unitLabel} and label it "Tank 1".`,
-      })
-      usageRates.tank1 = mlPerGallon
-    }
+    // However many tanks the layout came back with — one merged non-Calcium
+    // tank when the parts were pooled, one per part when they weren't (see
+    // `calculateSeparateNitrogenMultiPartRecipe`).
+    const tanks: FormulationTank[] = separateNitrogenRecipe.tanks
+      .map((tank) => {
+        const id = `tank${tank.index}`
+        const inputs = buildInputs(tank.salts, ecScaleFactor)
+        if (inputs.length === 0) return null
 
-    // Tank 2 always contains the merged micro amounts (see
-    // `calculateSeparateCalciumRecipe`), so `hasMicronutrients` alone
-    // mirrors the on-screen badge.
-    const tank2IncludesMicros = threeTankRecipe.hasMicronutrients
-    const tank2Inputs = buildInputs(threeTankRecipe.tank2, ecScaleFactor)
-    if (tank2Inputs.length > 0) {
-      tanks.push({
-        id: "tank2",
-        label: tank2IncludesMicros ? "Macros + Micros" : "Macros",
-        inputs: tank2Inputs,
-        mixInstructions: `Fill the stock tank about halfway with RO water, then add the salts in the order listed above${
-          tank2IncludesMicros ? ", dissolving the Iron DTPA first among the micronutrients" : ""
-        }. Wait for each one to fully dissolve before adding the next. Top up to ${sizeNum} ${unitLabel} and label it "Tank 2".`,
+        usageRates[id] = mlPerGallon
+        return {
+          id,
+          label: separateNitrogenTankLabel(tank),
+          inputs,
+          mixInstructions: separateNitrogenMixInstructions(tank, sizeNum, unitLabel),
+        }
       })
-      usageRates.tank2 = mlPerGallon
-    }
+      .filter((tank): tank is FormulationTank => tank !== null)
 
     return { usageRates, defaultStockTankSize, tanks, directAddCalciumCarbonate }
   }
