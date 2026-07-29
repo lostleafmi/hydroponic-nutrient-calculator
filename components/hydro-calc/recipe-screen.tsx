@@ -36,6 +36,7 @@ import {
   Loader2,
   CalendarPlus,
   CalendarCheck2,
+  ExternalLink,
 } from "lucide-react"
 import {
   addFeedingScheduleEntry,
@@ -623,61 +624,77 @@ export function RecipeScreen({
   // note on the Calcium target card below. See `getEnabledSaltKeys`.
   const hasSpecialtyCalciumSource = SPECIALTY_CALCIUM_SALT_IDS.some((id) => combinedIncludedSalts[id])
 
-  const shoppingItems: Array<{ key: SaltKey; name: string; note: string; disclaimer?: string }> = [
+  const shoppingItems: Array<{ key: SaltKey; name: string; buyUrl?: string; disclaimer?: string }> = [
     {
       key: "calciumNitrate",
       name: "Calcium Nitrate",
-      note: "Ca(NO₃)₂·4H₂O - tetrahydrate form",
-      disclaimer:
-        "Make sure you are buying pure Calcium Nitrate (Ca(NO₃)₂). Avoid products that contain added ammoniacal nitrogen or blended fertilizers.",
+      buyUrl: "https://customhydronutrients.com/products/yaraliva-calcinit-calcium-nitrate-50-lb",
     },
     {
       key: "calciumCarbonate",
       name: "Calcium Carbonate",
-      note: "CaCO₃ - limestone/chalk, a nitrogen-free calcium source",
+      buyUrl: customHydroSearchUrl("calcium carbonate"),
       disclaimer:
         "Calcium Carbonate has very low solubility and should not be mixed into a stock tank. Add the required amount directly to your batch tank / reservoir (or pre-mix it separately). See the note above the tank recipes for the exact amount.",
     },
     {
       key: "calciumChloride",
       name: "Calcium Chloride",
-      note: "CaCl₂·2H₂O - dihydrate form, a nitrogen-free calcium source",
+      buyUrl: customHydroSearchUrl("calcium chloride"),
     },
-    { key: "potassiumNitrate", name: "Potassium Nitrate", note: "KNO₃ - also called saltpeter" },
-    { key: "ammoniumNitrate", name: "Ammonium Nitrate", note: "NH₄NO₃" },
     {
-      key: "urea",
-      name: "Urea",
-      note: "CO(NH₂)₂ - a nitrogen-only source; check your label's % Urea Nitrogen",
+      key: "potassiumNitrate",
+      name: "Potassium Nitrate",
+      buyUrl: customHydroSearchUrl("potassium nitrate"),
     },
-    { key: "monoPotassiumPhosphate", name: "Mono Potassium Phosphate", note: "MKP, KH₂PO₄" },
-    { key: "monoAmmoniumPhosphate", name: "Monoammonium Phosphate", note: "MAP, NH₄H₂PO₄" },
-    { key: "magnesiumSulfate", name: "Magnesium Sulfate", note: "Epsom salt, MgSO₄·7H₂O" },
-    { key: "magnesiumNitrate", name: "Magnesium Nitrate", note: "Mg(NO₃)₂·6H₂O - hexahydrate form" },
-    { key: "potassiumSulfate", name: "Potassium Sulfate", note: "K₂SO₄ - sulfate of potash" },
-    { key: "ammoniumSulfate", name: "Ammonium Sulfate", note: "(NH₄)₂SO₄" },
+    // Ammonium Nitrate is a regulated explosive precursor and isn't stocked by
+    // the vendor, so this row intentionally ships without a Buy link.
+    { key: "ammoniumNitrate", name: "Ammonium Nitrate" },
+    { key: "urea", name: "Urea", buyUrl: customHydroSearchUrl("urea 46-0-0") },
     {
-      key: "ironDTPA",
-      name: "Iron DTPA 11%",
-      note: "Fe-DTPA chelate - chelated iron for hydroponics",
+      key: "monoPotassiumPhosphate",
+      name: "Mono Potassium Phosphate",
+      buyUrl: customHydroSearchUrl("monopotassium phosphate"),
     },
+    {
+      key: "monoAmmoniumPhosphate",
+      name: "Monoammonium Phosphate",
+      buyUrl: customHydroSearchUrl("monoammonium phosphate"),
+    },
+    {
+      key: "magnesiumSulfate",
+      name: "Magnesium Sulfate",
+      buyUrl: customHydroSearchUrl("magnesium sulfate epsom"),
+    },
+    {
+      key: "magnesiumNitrate",
+      name: "Magnesium Nitrate",
+      buyUrl: customHydroSearchUrl("magnesium nitrate"),
+    },
+    {
+      key: "potassiumSulfate",
+      name: "Potassium Sulfate",
+      buyUrl: customHydroSearchUrl("potassium sulfate"),
+    },
+    {
+      key: "ammoniumSulfate",
+      name: "Ammonium Sulfate",
+      buyUrl: customHydroSearchUrl("ammonium sulfate"),
+    },
+    { key: "ironDTPA", name: "Iron DTPA 11%", buyUrl: customHydroSearchUrl("iron DTPA") },
     {
       key: "manganeseEDTA",
       name: "Manganese EDTA 13%",
-      note: "Mn-EDTA chelate",
+      buyUrl: customHydroSearchUrl("manganese EDTA"),
     },
+    { key: "zincEDTA", name: "Zinc EDTA 14%", buyUrl: customHydroSearchUrl("zinc EDTA") },
+    { key: "boricAcid", name: "Boric Acid", buyUrl: customHydroSearchUrl("boric acid") },
+    { key: "copperEDTA", name: "Copper EDTA 13%", buyUrl: customHydroSearchUrl("copper EDTA") },
     {
-      key: "zincEDTA",
-      name: "Zinc EDTA 14%",
-      note: "Zn-EDTA chelate",
+      key: "sodiumMolybdate",
+      name: "Sodium Molybdate",
+      buyUrl: customHydroSearchUrl("sodium molybdate"),
     },
-    { key: "boricAcid", name: "Boric Acid", note: "H₃BO₃ - powder form" },
-    {
-      key: "copperEDTA",
-      name: "Copper EDTA 13%",
-      note: "Cu-EDTA chelate",
-    },
-    { key: "sodiumMolybdate", name: "Sodium Molybdate", note: "Na₂MoO₄·2H₂O" },
   ]
 
   const neededSaltKeys = new Set<string>(neededSalts.map(([key]) => key))
@@ -1459,12 +1476,11 @@ export function RecipeScreen({
       {/* Recipe Cards — Separate Nitrogen (chemistry 3-tank) layout */}
       {hasValidData && usesSeparateNitrogenLayout && (
         <>
-          {/* Tank 1 — Calcium Nitrate and/or Calcium Chloride (both soluble),
-              plus Ammonium Nitrate when it's the Ca(NO₃)₂/NH₄NO₃ double-salt
-              share (see `ammoniumNitrateIsCalciumDoubleSalt` in
-              `calculateSeparateCalciumRecipe`) rather than an independent
-              Nitrogen salt. Calcium Carbonate, even when enabled, never
-              lands here — see the direct-add banner above. */}
+          {/* Tank 1 — Calcium Nitrate and/or Calcium Chloride (both soluble).
+              Ammonium Nitrate is a supplemental Nitrogen salt and lands in
+              Tank 2 (see `calculateSeparateCalciumRecipe`). Calcium Carbonate,
+              even when enabled, never lands here — see the direct-add banner
+              above. */}
           <Card className="border-2 border-primary/50 bg-card">
             <CardHeader className="bg-primary/5">
               <CardTitle className="flex items-center gap-2 text-xl text-foreground">
@@ -1478,9 +1494,8 @@ export function RecipeScreen({
                 </span>
               </CardTitle>
               <CardDescription>
-                {threeTankRecipe.tank1.ammoniumNitrate > 0
-                  ? "Your Calcium source in this stock tank, plus Ammonium Nitrate as the other half of the Calcium Ammonium Nitrate double salt. Keeping them together makes it easy to taper both down near the end of flower without changing the rest of your recipe."
-                  : "Just your Calcium source in this stock tank. Keeping it on its own makes it easy to taper down near the end of flower without changing the rest of your recipe."}
+                Just your Calcium source in this stock tank. Keeping it on its own makes it easy to
+                taper down near the end of flower without changing the rest of your recipe.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -1499,15 +1514,6 @@ export function RecipeScreen({
                         )
                       : undefined
                   }
-                />
-                {/* Only ever non-zero here when it's the Ca(NO₃)₂/NH₄NO₃
-                    double-salt share — an independently-checked Ammonium
-                    Nitrate still lands in Tank 2 below (see
-                    `calculateSeparateCalciumRecipe`). */}
-                <SaltRow
-                  name={RAW_SALTS.ammoniumNitrate.name}
-                  formula={RAW_SALTS.ammoniumNitrate.formula}
-                  amount={scaledGrams(threeTankRecipe.tank1.ammoniumNitrate)}
                 />
                 <SaltRow
                   name={RAW_SALTS.calciumChloride.name}
@@ -1770,7 +1776,10 @@ export function RecipeScreen({
                 .filter((item) => neededSaltKeys.has(item.key))
                 .map((item) => (
                   <Fragment key={item.key}>
-                    <ShoppingItem name={item.name} note={item.note} />
+                    <ShoppingItem
+                      name={shoppingItemLabel(item.key, item.name)}
+                      buyUrl={item.buyUrl}
+                    />
                     {item.disclaimer && (
                       <p className="col-span-full rounded border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 text-xs leading-snug text-amber-100">
                         {item.disclaimer}
@@ -2784,7 +2793,54 @@ function StockTankUsageCard({
   )
 }
 
-function ShoppingItem({ name, note }: { name: string; note: string }) {
+/**
+ * Vendor search results, rather than one fixed product page, because every
+ * salt is stocked as several separate products that differ only by pack size
+ * (1 lb jar through 50 lb bag) — the grower picks the size their reservoir
+ * needs.
+ */
+function customHydroSearchUrl(query: string): string {
+  return `https://customhydronutrients.com/search?q=${encodeURIComponent(query)}&type=product`
+}
+
+/**
+ * Elements appended to a Shopping List salt name, in guaranteed-analysis
+ * order. Percentages are read off `RAW_SALTS` rather than written out here so
+ * the composition a grower shops against can't drift from the one the solver
+ * doses with.
+ */
+const SHOPPING_LIST_ELEMENTS = [
+  ["n", "N"],
+  ["p", "P"],
+  ["k", "K"],
+  ["ca", "Ca"],
+  ["mg", "Mg"],
+  ["s", "S"],
+  ["cl", "Cl"],
+  ["fe", "Fe"],
+  ["mn", "Mn"],
+  ["zn", "Zn"],
+  ["b", "B"],
+  ["cu", "Cu"],
+  ["mo", "Mo"],
+] as const
+
+type ShoppingListElementKey = (typeof SHOPPING_LIST_ELEMENTS)[number][0]
+
+function shoppingItemLabel(key: SaltKey, name: string): string {
+  // The micronutrient salts already carry their percentage in the name
+  // (e.g. "Iron DTPA 11%") — don't append a second copy of it.
+  if (name.includes("%")) return name
+
+  const fractions: Partial<Record<ShoppingListElementKey, number>> = RAW_SALTS[key]
+  const composition = SHOPPING_LIST_ELEMENTS.filter(([element]) => (fractions[element] ?? 0) > 0)
+    .map(([element, symbol]) => `${Number(((fractions[element] ?? 0) * 100).toFixed(1))}% ${symbol}`)
+    .join(" · ")
+
+  return composition ? `${name} ${composition}` : name
+}
+
+function ShoppingItem({ name, buyUrl }: { name: string; buyUrl?: string }) {
   return (
     <div className="flex items-start gap-2 rounded border border-border bg-secondary/20 p-2">
       <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 border-primary/50">
@@ -2792,7 +2848,17 @@ function ShoppingItem({ name, note }: { name: string; note: string }) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-foreground">{name}</p>
-        <p className="text-xs text-muted-foreground">{note}</p>
+        {buyUrl && (
+          <a
+            href={buyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+          >
+            Buy at Custom Hydro Nutrients
+            <ExternalLink className="h-3 w-3 shrink-0" />
+          </a>
+        )}
       </div>
     </div>
   )

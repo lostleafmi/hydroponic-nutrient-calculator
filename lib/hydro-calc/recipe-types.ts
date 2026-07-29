@@ -414,19 +414,6 @@ export interface TankRecipe {
   isApproximate?: boolean
   /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into tankA/tankB */
   directAddCalciumCarbonate?: DirectAddCalciumCarbonate
-  /**
-   * True when `tankA.ammoniumNitrate` above was sized as this part's share
-   * of a Ca(NO₃)₂/NH₄NO₃ double-salt split (Ammonium Nitrate checked
-   * ALONGSIDE Calcium Nitrate — see `SALT_CHECKBOX_OPTIONS`'s double-salt
-   * disclaimer and the Nitrogen-solving block in `calculateStockTankRecipe`)
-   * rather than as an independently-checked Nitrogen salt. Layouts that
-   * split salts across multiple physical stock tanks — currently only
-   * `calculateSeparateCalciumRecipe`'s Tank 1 / Tank 2 split — use this to
-   * keep Ammonium Nitrate grouped with Calcium Nitrate instead of routing
-   * it to a separate "remaining macros" tank, since it's chemically the
-   * same double-salt product rather than a distinct ingredient.
-   */
-  ammoniumNitrateIsCalciumDoubleSalt?: boolean
   /** Salts the solver added on the grower's behalf to fully match a target — see `SaltAutoAddNote`. */
   autoAddedSalts?: SaltAutoAddNote[]
   /**
@@ -460,7 +447,13 @@ export interface ThreeTankRecipe {
 }
 
 export const RAW_SALTS = {
-  calciumNitrate: { name: "Calcium Nitrate", formula: "Ca(NO₃)₂·4H₂O", ca: 0.169, n: 0.118 },
+  // Commercial greenhouse/hydroponic grade — YaraLiva CalciNit and equivalents,
+  // labelled 15.5-0-0 + 19% Ca — rather than pure tetrahydrate. That grade is
+  // the calcium ammonium nitrate double salt, which is why it runs richer than
+  // Ca(NO₃)₂·4H₂O's 16.9% Ca / 11.8% N and declares a small ammoniacal-N share
+  // (~1.1% of the 15.5%) alongside its nitrate-N. Total Nitrogen is stored as a
+  // single figure because `ElementalTargets` doesn't model NH₄-N separately.
+  calciumNitrate: { name: "Calcium Nitrate", formula: "5Ca(NO₃)₂·NH₄NO₃·10H₂O", ca: 0.19, n: 0.155 },
   calciumCarbonate: { name: "Calcium Carbonate", formula: "CaCO₃", ca: 0.401 },
   // Dihydrate form (CaCl₂·2H₂O) — the common hydroponic/food-grade form. `cl`
   // isn't part of `ElementalTargets` (chloride isn't a modeled nutrient
@@ -615,7 +608,10 @@ export const SALT_CHECKBOX_OPTIONS: SaltCheckboxOption[] = [
   {
     id: "ammoniumNitrateOrSulfate",
     label: "Ammonium Nitrate / Ammonium Sulfate",
-    sublabel: "Select this and Calcium Nitrate for\nAmmonium calcium nitrate double salt.",
+    // No longer tells growers to pair this with Calcium Nitrate to build the
+    // calcium ammonium nitrate double salt: `RAW_SALTS.calciumNitrate` models
+    // that commercial grade directly, ammoniacal share included.
+    sublabel: "Only if your label declares more ammoniacal\nNitrogen than Calcium Nitrate supplies.",
     centerSublabel: true,
     saltKeys: ["ammoniumNitrate", "ammoniumSulfate"],
   },
@@ -1069,7 +1065,9 @@ assertTanksAreDisjoint()
  * sheets. Values rounded to two significant figures.
  */
 export const SOLUBILITY_LIMITS_G_PER_L: Record<SaltKey, number> = {
-  calciumNitrate: 1290,
+  // 1200 g/L per YaraLiva CalciNit's technical sheet — the commercial grade
+  // modelled in `RAW_SALTS`, slightly below pure tetrahydrate's 1290 g/L.
+  calciumNitrate: 1200,
   // Calcium Carbonate is nearly insoluble in plain water (~0.013 g/L at 20 °C).
   // Kept accurate rather than optimistic so the solubility checker still warns
   // when a recipe leans on it for meaningful Ca — it dissolves far better once

@@ -60,10 +60,12 @@ const MICRO_SALT_KEYS = new Set<SaltKey>(TANK_3_SALTS)
 
 /**
  * Everything the Separate Nitrogen layout's Tank 1 may legally hold: the
- * Calcium salts, plus Ammonium Nitrate when it's the other half of a
- * Ca(NO₃)₂/NH₄NO₃ double salt and so the same physical product being tapered.
+ * Calcium salts and nothing else. Ammonium Nitrate used to be allowed too, as
+ * the other half of a Ca(NO₃)₂/NH₄NO₃ double salt built from pure
+ * tetrahydrate; `RAW_SALTS.calciumNitrate` now models that double salt itself,
+ * so a supplemental Ammonium Nitrate leaking into the taper tank is a bug.
  */
-const TANK_1_SALT_KEYS = new Set<SaltKey>([...TANK_1_SALTS, "ammoniumNitrate"])
+const TANK_1_SALT_KEYS = new Set<SaltKey>(TANK_1_SALTS)
 
 const ELEMENT_SYMBOLS: Record<keyof ElementalTargets, string> = {
   nitrogen: "N",
@@ -243,7 +245,7 @@ const CORE_BLOOM_TWO_PART: Scenario = {
  * The critical no-regression case: a label reverse-engineered from real salt
  * blends, so its ratios are exactly buildable from the salts checked.
  *
- *   Part A — 100% Ca(NO₃)₂            → 16.9% Ca, 11.8% N
+ *   Part A — 100% Calcium Nitrate     → 19% Ca, 15.5% N
  *   Part B — 40% MKP / 30% KNO₃ / 30% MgSO₄
  *            P  0.40 × 0.228 = 9.12%  → 20.90% P₂O₅
  *            K  0.40 × 0.287 + 0.30 × 0.387 = 23.09% → 27.82% K₂O
@@ -261,10 +263,10 @@ const EXACTLY_BUILDABLE_TWO_PART: Scenario = {
     {
       id: "a",
       name: "Part A",
-      nitrogen: "11.8",
+      nitrogen: "15.5",
       phosphate: "",
       potash: "",
-      calcium: "16.9",
+      calcium: "19",
       magnesium: "",
       sulfur: "",
       iron: "0.2",
@@ -305,13 +307,16 @@ const EXACTLY_BUILDABLE_TWO_PART: Scenario = {
 }
 
 /**
- * Ammonium Nitrate checked ALONGSIDE Calcium Nitrate means "replicate a
- * calcium ammonium nitrate double salt", which locks the two into a fixed 5:1
- * mole ratio. The refinement treats the pair as a single variable, so it may
- * resize the product but must never break that ratio.
+ * A CalciNit label — 15.5-0-0 + 19% Ca, exactly `RAW_SALTS.calciumNitrate`'s
+ * own composition — with the ammonium box also checked. Calcium Nitrate alone
+ * hits both targets, and since it already *is* the calcium ammonium nitrate
+ * double salt there is no shortfall left for an ammonium salt to fill. So
+ * neither may appear: adding NH₄NO₃ here would stack a second helping of
+ * ammoniacal N onto a salt that already carries it, which is the bug the old
+ * "replicate the double salt at a 5:1 ratio" split introduced.
  */
 const CALCIUM_AMMONIUM_DOUBLE_SALT: Scenario = {
-  name: "Calcium ammonium nitrate double salt (5:1 ratio must survive refinement)",
+  name: "CalciNit label + ammonium checked (no stacked ammonium salt)",
   partsAnalysis: [
     {
       id: "a",
@@ -333,6 +338,8 @@ const CALCIUM_AMMONIUM_DOUBLE_SALT: Scenario = {
   ],
   parts: [{ id: "a", name: "Part A", dose: "5", unit: "g_per_gallon" }],
   stockTankOption: "separate",
+  expectExactMatch: true,
+  expectAbsent: ["ammoniumNitrate", "ammoniumSulfate"],
 }
 
 /**
@@ -526,10 +533,10 @@ const PER_PART_ISOLATION: Scenario = {
     {
       id: "a",
       name: "Cal Base",
-      nitrogen: "11.8",
+      nitrogen: "15.5",
       phosphate: "",
       potash: "",
-      calcium: "16.9",
+      calcium: "19",
       magnesium: "",
       sulfur: "",
       iron: "",
