@@ -433,16 +433,16 @@ export interface TankRecipe {
  *
  *  - `"calcium"` — every part's Calcium salts, pooled into the one tank that
  *    must stay clear of phosphate and sulfate at stock strength (see
- *    `TANK_1_SALTS`). Calcium Nitrate's own Nitrogen rides along in here. On a
- *    multi-part line this is the line's own Calcium bottle, so it may also
- *    hold that bottle's other macro salts (see
- *    `calculateSeparateNitrogenMultiPartRecipe`), and it's where the
- *    micronutrients land when no Nitrogen-free macro tank can take them (see
- *    `placeMicronutrients`).
- *  - `"non-calcium"` — the remaining macro salts (see `TANK_2_SALTS`), which is
- *    where the Nitrogen a grower can cut without touching Calcium lives. The
- *    micronutrients ride in one of these whenever it carries no Nitrogen —
- *    micros belong beside the Nitrogen-free macros, not in a tank of their own.
+ *    `TANK_1_SALTS`), and with them every Nitrogen salt the grower would taper
+ *    (see `TAPERABLE_NITROGEN_SALTS`). This is the Nitrogen tank: Ca(NO₃)₂'s
+ *    own Nitrogen can't be moved without its Calcium, so gathering the rest of
+ *    the recipe's Nitrogen beside it is what turns a taper into one dial
+ *    instead of several.
+ *  - `"non-calcium"` — the macro salts that can't share a tank with
+ *    concentrated Calcium (see `CALCIUM_INCOMPATIBLE_SALTS`): the phosphates
+ *    and sulfates a grower feeds for their Phosphorus, Potassium, Magnesium and
+ *    Sulfur, which a Nitrogen taper leaves alone. The micronutrients ride in
+ *    one of these, since that's the side of the recipe a taper doesn't reach.
  *
  * There is deliberately no micronutrient role: a micros-only stock tank is
  * never the answer here. See `placeMicronutrients` for the order of preference.
@@ -451,17 +451,20 @@ export type SeparateNitrogenTankRole = "calcium" | "non-calcium"
 
 /**
  * Salts whose only nutrient job in a recipe is Nitrogen, give or take a
- * companion cation that carries no phosphate or sulfate — so gathering them
- * into a single tank gives the grower one dial to turn when tapering, instead
- * of the same salt spread over two tanks at amounts that have to be cut in
- * step (see `consolidateTaperableNitrogen`).
+ * companion cation that carries no phosphate or sulfate — so they can all be
+ * gathered into the tank holding the Calcium Nitrate, giving the grower one
+ * dial to turn when tapering (see `pourTaperableNitrogenIntoCalciumTank`).
  *
- * Calcium Nitrate is deliberately absent: it belongs to the Calcium side by
- * construction (`TANK_1_SALTS`), and the tank holding it is the one this mode
- * exists to hold steady. MAP and Ammonium Sulfate are absent too — their
- * Nitrogen is a side effect of supplying Phosphorus or Sulfur, so moving them
- * would shuffle a grower's phosphate and sulfate bottles around to chase
- * Nitrogen they weren't bought for.
+ * Calcium Nitrate is deliberately absent because it doesn't need moving: it
+ * defines where that tank is (`TANK_1_SALTS`). Its Nitrogen is the one share
+ * that can't be tapered on its own — cutting it means cutting Calcium too —
+ * which is precisely why the rest of the Nitrogen belongs beside it rather than
+ * in a second tank the grower would have to cut in step.
+ *
+ * MAP and Ammonium Sulfate are absent for the opposite reason: their Nitrogen
+ * is a side effect of supplying Phosphorus or Sulfur, so nobody cuts them to
+ * move Nitrogen — and they'd precipitate the Calcium anyway (see
+ * `CALCIUM_INCOMPATIBLE_SALTS`).
  */
 export const TAPERABLE_NITROGEN_SALTS = [
   "potassiumNitrate",
@@ -508,11 +511,11 @@ export function saltAmountsCarryTaperableNitrogen(salts: SaltAmounts): boolean {
  * holds every tank to (see `checkTankSolubility` /
  * `SOLUBILITY_SAFETY_FACTOR`).
  *
- * Used to decide whether a salt spread over two tanks can be gathered into one
- * (see `consolidateTaperableNitrogen`). Note this asks only about the salt
- * being moved: the tank it moves into already contains some of it, so no new
- * pair of salts is ever introduced and nothing else in that tank changes
- * concentration.
+ * Used to decide whether a salt spread over several tanks can be gathered into
+ * one (see `pourTaperableNitrogenIntoCalciumTank`). Note this asks only about
+ * the salt being moved: nothing else in the destination tank changes
+ * concentration, and whether the two salts can coexist at all is a separate,
+ * purely chemical question answered by `CALCIUM_INCOMPATIBLE_SALTS`.
  */
 export function saltFitsOneTank(
   key: SaltKey,
@@ -532,13 +535,15 @@ export interface SeparateNitrogenTank {
   /**
    * The original nutrient part this tank stands in for, set on the tanks of a
    * line whose parts are kept apart (see
-   * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). The Calcium tank carries
-   * one when it's the line's Calcium bottle — i.e. when that bottle's own
-   * non-Calcium salts went in alongside the pooled Calcium — and carries none
-   * when it came out holding nothing but Calcium, since then it stands for the
-   * Calcium of every part rather than for one bottle. Below the per-part
-   * threshold the parts are pooled and re-solved as one, so no tank has a part
-   * to name.
+   * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). Below that threshold the
+   * parts are pooled and re-solved as one, so no tank has a part to name.
+   *
+   * Never set on the Calcium tank: it draws its Calcium from every part and its
+   * Nitrogen from every part, so it stands for the recipe rather than for one
+   * bottle. Nothing else can end up in there to make it one bottle's tank
+   * either — every macro salt that could legally sit beside concentrated
+   * Calcium is itself a taperable Nitrogen salt, and so already pooled (an
+   * invariant `assertTanksAreDisjoint` pins down).
    */
   partName?: string
   partId?: string
@@ -549,16 +554,28 @@ export interface SeparateNitrogenTank {
 
 export interface SeparateNitrogenRecipe {
   /**
-   * The physical tanks, in mixing order, with the Calcium tank first. Tanks
-   * that came out empty are never included, so a part that's pure Calcium
-   * Nitrate doesn't leave a blank tank behind — which means `index`/`name`
-   * count the tanks the grower actually mixes rather than the parts they came
-   * from. On a multi-part line that count never exceeds the number of parts:
-   * neither moving the Calcium nor placing the micronutrients ever buys an
-   * extra tank (see `calculateSeparateNitrogenMultiPartRecipe` /
-   * `placeMicronutrients`).
+   * The physical tanks, in mixing order, with the Nitrogen/Calcium tank first.
+   * Tanks that came out empty are never included, so a part that's pure Calcium
+   * Nitrate and KNO₃ doesn't leave a blank tank behind — which means
+   * `index`/`name` count the tanks the grower actually mixes rather than the
+   * parts they came from. On a multi-part line that count never exceeds the
+   * number of parts: neither gathering the Calcium and Nitrogen nor placing the
+   * micronutrients ever buys an extra tank (see
+   * `calculateSeparateNitrogenMultiPartRecipe` / `placeMicronutrients`).
    */
   tanks: SeparateNitrogenTank[]
+  /**
+   * Taperable Nitrogen salts that had to stay spread over more than one tank
+   * because the combined amount wouldn't stay dissolved in a single tank of the
+   * grower's chosen size (see `saltFitsOneTank`). Empty in the normal case,
+   * where all of it is in the Calcium tank.
+   *
+   * Splitting a salt across two tanks halves its concentration in each, so this
+   * is a real remedy rather than a shortcoming of the layout — but it costs the
+   * grower the single taper dial this mode is chosen for, so it's surfaced
+   * rather than left for them to notice in the tank cards.
+   */
+  nitrogenKeptApart?: SaltKey[]
   warnings?: SaltGapWarning[]
   isApproximate?: boolean
   /** Calcium Carbonate needed for this recipe, to add directly to the reservoir/batch tank instead of into the Calcium tank */
@@ -884,9 +901,9 @@ export function sumCalciumChlorideGramsPerGallon(parts: PartAnalysis[]): number 
 /**
  * From this many parts up, the Separate Nitrogen layout solves every part on
  * its own — exactly like the per-part tanks — and keeps them apart afterwards
- * too: it pools every part's Calcium into the line's own Calcium bottle and
- * leaves every other part a tank of its own, so a three-part line still mixes
- * three tanks (see `calculateSeparateNitrogenMultiPartRecipe`). So the grams
+ * too: it lifts every part's Calcium and taperable Nitrogen into one tank and
+ * leaves each remaining bottle a tank of its own, so a three-part line still
+ * mixes three tanks (see `calculateSeparateNitrogenMultiPartRecipe`). So the grams
  * are the ones the grower's own parts called for rather than a fresh recipe
  * solved from every part's salts pooled together, which is what used to pull a
  * 3-part line away from the feed it was replicating — and the parts stay
@@ -1105,32 +1122,33 @@ export const TANK_B_SALTS = [
 ] as const satisfies readonly SaltKey[]
 
 /**
- * The two SIDES of the "Separate Nitrogen" mode. The split keeps the calcium
- * ion completely isolated, which is what lets Nitrogen be moved at the end of
- * flower without rebalancing the rest of the recipe.
+ * The two SIDES of the "Separate Nitrogen" mode, as the solver reads them off a
+ * solved A/B pair. What matters chemically is only that the calcium ion stays
+ * away from phosphate and sulfate at stock strength; which physical tank each
+ * salt then lands in is decided afterwards, on tapering grounds.
  *
  * Calcium side (`TANK_1_SALTS`) — the Calcium sources: Calcium Nitrate, and/or
  *          Calcium Chloride or Calcium Carbonate when used instead of (or
  *          alongside) it as a nitrogen-free calcium source. All of it lands in
- *          one physical tank, pooled across every part, so there's a single
- *          tank to hold steady — or to taper, when Calcium Nitrate is the
- *          source and the grower wants Calcium to come down with the Nitrogen.
+ *          one physical tank, pooled across every part — and since Ca(NO₃)₂'s
+ *          Nitrogen can't be tapered without its Calcium, that tank is where
+ *          the taperable Nitrogen joins it, making it the recipe's one
+ *          Nitrogen tank (see `pourTaperableNitrogenIntoCalciumTank`).
  * Non-calcium side (`TANK_2_SALTS`) — the remaining macros (KNO₃, Mg(NO₃)₂,
- *          MKP/MAP, MgSO₄, K₂SO₄, Urea). This is the taper path: the Nitrogen
- *          here is what comes down at the end of flower.
+ *          Urea, MKP/MAP, MgSO₄, K₂SO₄). Every one of them is either a
+ *          taperable Nitrogen salt bound for the Calcium tank or a phosphate /
+ *          sulfate that can never go in there, with nothing in between (an
+ *          invariant `assertTanksAreDisjoint` pins down) — so what's left after
+ *          the Nitrogen moves is the part of the recipe a taper doesn't touch.
  * Micronutrients (`TANK_3_SALTS`) — Fe-DTPA, Mn/Zn/Cu EDTA chelates, boric acid
- *          and sodium molybdate, which are grouped with the Nitrogen-free
- *          macros rather than given a tank of their own, so a taper can't drag
- *          them down with it (see `placeMicronutrients`).
+ *          and sodium molybdate, which ride with those Nitrogen-free macros
+ *          rather than taking a tank of their own, so a taper can't drag them
+ *          down with it (see `placeMicronutrients`).
  *
- * How these become physical tanks is a layout decision rather than a chemical
- * one — one merged macro tank when the parts were pooled and re-solved as one,
- * one tank per part when they weren't (see
- * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`). The only chemical constraint
- * is the narrow one in `CALCIUM_INCOMPATIBLE_SALTS`: the macro salts on this
- * side can all share a tank with each other, and all but the phosphates and
- * sulfates can share the Calcium tank too, which is what lets the per-part
- * layout hold to one tank per bottle.
+ * How the non-Calcium side becomes physical tanks is a layout decision: one
+ * merged tank when the parts were pooled and re-solved as one, one tank per
+ * part when they weren't (see
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`).
  */
 export const TANK_1_SALTS = [
   "calciumNitrate",
@@ -1173,10 +1191,10 @@ export const TANK_3_SALTS = [
  *
  * The rest of the non-Calcium side is safe beside Calcium Nitrate — the
  * nitrates and Urea are exactly what a conventional "Tank A" holds alongside it
- * (see `TANK_A_SALTS`). That's what lets the Separate Nitrogen layout pour a
- * Calcium bottle's own leftover macros back into the Calcium tank rather than
- * spending a whole extra tank on them (see
- * `calculateSeparateNitrogenMultiPartRecipe`).
+ * (see `TANK_A_SALTS`). That's what lets the Separate Nitrogen layout pour every
+ * part's taperable Nitrogen into the Calcium tank, at any stock strength a
+ * grower would mix (see `pourTaperableNitrogenIntoCalciumTank`), instead of
+ * leaving a second Nitrogen source in a tank of its own.
  *
  * This list answers "would these precipitate together", and nothing more. The
  * chelated micronutrients are equally safe beside concentrated Calcium — that's
@@ -1229,6 +1247,35 @@ function assertTanksAreDisjoint(): void {
     throw new Error(
       "Salts could be folded in beside concentrated Calcium — add them to " +
         `CALCIUM_INCOMPATIBLE_SALTS: ${unguarded.join(", ")}`
+    )
+  }
+
+  // Separate Nitrogen pours every taperable Nitrogen salt in with the pooled
+  // Calcium, so none of them may be one of the salts that precipitates it.
+  const precipitating = TAPERABLE_NITROGEN_SALTS.filter((key) =>
+    (CALCIUM_INCOMPATIBLE_SALTS as readonly string[]).includes(key)
+  )
+  if (precipitating.length > 0) {
+    throw new Error(
+      "Separate Nitrogen would pour these in beside concentrated Calcium — drop them " +
+        `from TAPERABLE_NITROGEN_SALTS: ${precipitating.join(", ")}`
+    )
+  }
+
+  // And nothing on the non-Calcium side may fall between the two: a macro salt
+  // that neither moves with the Nitrogen nor is barred from the Calcium tank
+  // would be left in a tank of its own for no chemical reason, and would make
+  // the Calcium tank one bottle's tank again (see
+  // `SeparateNitrogenTank.partName`).
+  const taperableKeys = new Set<string>(TAPERABLE_NITROGEN_SALTS)
+  const stranded = TANK_2_SALTS.filter(
+    (key) =>
+      !taperableKeys.has(key) && !(CALCIUM_INCOMPATIBLE_SALTS as readonly string[]).includes(key)
+  )
+  if (stranded.length > 0) {
+    throw new Error(
+      "Non-Calcium macro salts belong either with the tapered Nitrogen or away from the " +
+        `Calcium — classify them: ${stranded.join(", ")}`
     )
   }
 }

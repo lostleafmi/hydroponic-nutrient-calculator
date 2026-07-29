@@ -91,9 +91,9 @@ export function FeedingRatesScreen({
 
   const separateNitrogenDescription = (() => {
     const purpose =
-      "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor."
+      "Gathers every Nitrogen source — your Calcium Nitrate and your Potassium Nitrate together — into one stock tank, so you can taper Nitrogen at the end of flowering with a single dial for better smoothness and flavor."
     if (separateNitrogenKeepsPartsIntact) {
-      return `${purpose} Still ${tankCountLabel} — each of your ${parts.length} parts solved on its own, from only its own label and salts, the same math as one tank per part. The only thing that moves is the Calcium: it's pulled out of your other parts and gathered into whichever one is your Calcium bottle, so you can cut Nitrogen back part by part near harvest while your Calcium stays put.`
+      return `${purpose} No more than ${tankCountLabel} — each of your ${parts.length} parts solved on its own, from only its own label and salts, the same math as one tank per part. Nothing is re-solved; the Calcium and the Nitrogen just move into a tank of their own, and your remaining parts keep tanks of theirs.`
     }
     if (prefersPerPartTanks) {
       return `${purpose} Blends your parts together into 2 tanks by chemistry instead of keeping them separate, so the ppm can drift a little from your original line.`
@@ -114,7 +114,7 @@ export function FeedingRatesScreen({
       note="Only for flower recipes"
       accuracyLabel={
         separateNitrogenKeepsPartsIntact
-          ? `Ca separated · still ${tankCountLabel}`
+          ? `All N in one tank · ${tankCountLabel} or fewer`
           : undefined
       }
     />
@@ -243,7 +243,7 @@ export function FeedingRatesScreen({
               part, so Part A stays Part A instead of having nutrients shuffled into it from the
               other bottles.
               {separateNitrogenKeepsPartsIntact &&
-                ` Separate Nitrogen weighs out those same per-part amounts and keeps your parts in tanks of their own, so tapering Nitrogen before harvest costs you nothing here — it only lifts the Calcium out into a tank you can hold steady while you cut the rest back.`}
+                ` Separate Nitrogen weighs out those same per-part amounts and keeps your parts in tanks of their own, so tapering Nitrogen before harvest costs you nothing here — it only lifts the Calcium and the Nitrogen out into one tank you dial back on its own.`}
             </p>
           )}
 

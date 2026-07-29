@@ -501,8 +501,14 @@ const DECLARED_DOSES_HELD_FIXED: Scenario = {
  * `calculateSeparateNitrogenMultiPartRecipe`) — including a second Calcium
  * bottle pooling into the first, which is the case that decides which bottle
  * hosts the Calcium (Part A carries far more of it than the Cal-Mag topping it
- * up), and Magnesium Nitrate staying with its own part rather than landing
- * beside the phosphate it would precipitate with.
+ * up).
+ *
+ * The Cal-Mag also brings Magnesium Nitrate, which is the second kind of
+ * taperable Nitrogen a line can carry. It joins the Nitrogen tank alongside the
+ * Ca(NO₃)₂ and KNO₃ — safe there, since it carries no phosphate or sulfate —
+ * rather than holding a fourth tank open for a bottle whose Calcium and Nitrogen
+ * have both moved. So four parts come back as three tanks: the Nitrogen tank and
+ * the two phosphate/sulfate bottles.
  */
 const FOUR_PART_SEPARATE_NITROGEN: Scenario = {
   name: "4-part line on Separate Nitrogen (two Calcium bottles pooling into Tank 1)",
@@ -534,17 +540,18 @@ const FOUR_PART_SEPARATE_NITROGEN: Scenario = {
 }
 
 /**
- * The one 3-part line that can't come back as 3 tanks: its Calcium bottle
- * carries Magnesium Sulfate as well, so that bottle can't hold the pooled
- * Calcium — the two would precipitate as gypsum at stock strength. Keeping the
- * Calcium isolated then costs a fourth tank, and that's the right answer:
- * Separate Nitrogen exists to isolate the Calcium, and the grower who'd rather
- * have three tanks with Calcium and sulfate together already has the per-part
- * layout for that.
+ * A 3-part line whose Calcium bottle carries Magnesium Sulfate as well, so that
+ * bottle can't hold the pooled Calcium — the two would precipitate as gypsum at
+ * stock strength. Its Calcium is lifted out into a tank of its own and the
+ * bottle keeps a tank for the sulfate, which is the right answer: the grower who
+ * would rather have Calcium and sulfate together in one tank already has the
+ * per-part layout for that.
  *
- * Here to pin down which of the two rules gives way. Everything else about the
- * layout is arranged to hold the tank count to the part count, so it matters
- * that chemistry still outranks it (see `pickCalciumHost`).
+ * Here to pin down that chemistry outranks the tank count (see
+ * `pickCalciumHost`). It costs nothing here as it happens — the K Base is pure
+ * KNO₃, which follows the Calcium into the Nitrogen tank and empties its own
+ * tank out — so three parts still come back as three tanks. What matters is that
+ * the sulfate never follows.
  */
 const CALCIUM_BOTTLE_CARRIES_SULFATE: Scenario = {
   name: "3-part line whose Calcium bottle also carries MgSO₄ (Calcium stays isolated)",
@@ -611,26 +618,24 @@ const CALCIUM_BOTTLE_CARRIES_SULFATE: Scenario = {
 }
 
 /**
- * A three-part line where no bottle's non-Calcium salts are Nitrogen-free, so
- * the micronutrients have no Nitrogen-free macro tank to ride in — the case that
- * exercises the fallback, and the one that used to buy a fourth tank.
+ * A three-part line where every bottle declares Nitrogen, which is what makes it
+ * worth checking where the micronutrients land.
  *
  * Part A is the Calcium bottle (Ca(NO₃)₂ + KNO₃) and carries the micro package.
- * Part B is a P/K/Mg bottle that also lists KNO₃, so it absorbs Part A's KNO₃
- * when the Nitrogen is gathered and still carries Nitrogen afterwards. Part C is
- * a MAP-only phosphate booster, whose Nitrogen is ammoniacal and rides along
- * with the Phosphorus it was bought for — the kind of Nitrogen
- * `TAPERABLE_NITROGEN_SALTS` deliberately leaves where it is.
+ * Part B is a P/K/Mg bottle that also lists KNO₃. Part C is a MAP-only phosphate
+ * booster, whose Nitrogen is ammoniacal and rides along with the Phosphorus it
+ * was bought for — the kind of Nitrogen `TAPERABLE_NITROGEN_SALTS` deliberately
+ * leaves where it is.
  *
- * The micros go to the Calcium tank. Gathering the KNO₃ into Part B leaves that
- * tank holding nothing but Ca(NO₃)₂, whose Nitrogen isn't what a grower reaches
- * for when tapering — cutting it means giving up Calcium, the thing this layout
- * exists to protect. So the micros sit in a tank that's held steady, in the
- * conventional Tank A arrangement, and the line still comes back as three tanks
- * for three parts.
+ * Gathering both bottles' KNO₃ into the Nitrogen tank is what leaves Part B
+ * Nitrogen-free, and that's where the micros go: beside MKP, MgSO₄ and K₂SO₄, out
+ * of reach of any taper. They don't stay with the Calcium package that declared
+ * them — a tank a grower cuts to bring Nitrogen down is the last place the micro
+ * package belongs, and after the gathering that's exactly what the Calcium tank
+ * is.
  */
 const EVERY_BOTTLE_CARRIES_NITROGEN: Scenario = {
-  name: "3-part line where no bottle is N-free (micros fall back to the Calcium tank)",
+  name: "3-part line where every bottle declares N (micros land off the taper path)",
   partsAnalysis: [
     {
       id: "a",
@@ -694,6 +699,128 @@ const EVERY_BOTTLE_CARRIES_NITROGEN: Scenario = {
     { id: "a", name: "Part A", dose: "4.9", unit: "g_per_gallon" },
     { id: "b", name: "Part B", dose: "3.3", unit: "g_per_gallon" },
     { id: "c", name: "P Booster", dose: "1.5", unit: "g_per_gallon" },
+  ],
+  stockTankOption: "separate",
+}
+
+/**
+ * The one recipe shape where the micronutrients have nowhere good to go: a
+ * single-bottle N-K-Ca base of Ca(NO₃)₂ and KNO₃ with no Phosphorus, Magnesium or
+ * Sulfur at all. Gathering the Nitrogen leaves one macro tank rather than two, so
+ * there's no phosphate/sulfate side for the micros to ride on.
+ *
+ * Both rules about micronutrients can't hold at once here, and this pins which
+ * gives way. They ride along in the Nitrogen tank, where a taper will cut them:
+ * the alternative is a stock tank holding nothing but a few grams of chelates,
+ * which is no product a grower has a counterpart for and one more tank to mix and
+ * label. A recipe with a tank the taper can't reach never has to make the choice
+ * (see `placeMicronutrients`), which is nearly all of them.
+ */
+const ALL_NITROGEN_SINGLE_PART: Scenario = {
+  name: "N-K-Ca base with no P/Mg/S (micros have no tank off the taper path)",
+  partsAnalysis: [
+    {
+      id: "a",
+      // 50% Ca(NO₃)₂ + 50% KNO₃ — Ca 9.5%, N 14.7%, K 19.35% → 23.31% K₂O.
+      name: "Veg Base",
+      nitrogen: "14.7",
+      phosphate: "",
+      potash: "23.31",
+      calcium: "9.5",
+      magnesium: "",
+      sulfur: "",
+      iron: "0.2",
+      manganese: "0.05",
+      zinc: "0.02",
+      boron: "0.02",
+      copper: "0.01",
+      molybdenum: "0.001",
+      includedSalts: salts("calciumNitrate", "potassiumNitrate", "chelatedMicronutrients"),
+    },
+  ],
+  parts: [{ id: "a", name: "Veg Base", dose: "5", unit: "g_per_gallon" }],
+  stockTankOption: "separate",
+}
+
+/**
+ * The one good reason to leave a recipe's Nitrogen in two tanks: at 5 L there is
+ * no single tank that holds 1,100-odd grams of KNO₃ in solution, but two tanks
+ * hold half that each with room to spare. So the split isn't a shortcoming of the
+ * layout, it's the remedy — and the recipe has to say so rather than gather the
+ * Nitrogen anyway and quietly hand the grower a tank that won't dissolve (see
+ * `pourTaperableNitrogenIntoCalciumTank`).
+ *
+ * The Calcium bottle's own KNO₃ still goes in with its Calcium, so the K Base is
+ * the tank that keeps its share and the line still comes back as three tanks.
+ */
+const NITROGEN_TOO_MUCH_FOR_ONE_TANK: Scenario = {
+  name: "High-K 3-part line (KNO₃ stays split because it wouldn't all dissolve)",
+  partsAnalysis: [
+    {
+      id: "a",
+      // 40% Ca(NO₃)₂ + 60% KNO₃ — Ca 7.6%, N 14.54%, K 23.22% → 27.98% K₂O.
+      name: "Cal Base",
+      nitrogen: "14.54",
+      phosphate: "",
+      potash: "27.98",
+      calcium: "7.6",
+      magnesium: "",
+      sulfur: "",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("calciumNitrate", "potassiumNitrate"),
+    },
+    {
+      id: "b",
+      // 40% MKP + 30% MgSO₄ + 30% K₂SO₄ — P 9.12% → 20.9% P₂O₅,
+      // K 24.95% → 30.06% K₂O, Mg 2.97%, S 9.42%.
+      name: "PK Base",
+      nitrogen: "",
+      phosphate: "20.9",
+      potash: "30.06",
+      calcium: "",
+      magnesium: "2.97",
+      sulfur: "9.42",
+      iron: "0.2",
+      manganese: "0.05",
+      zinc: "0.02",
+      boron: "0.02",
+      copper: "0.01",
+      molybdenum: "0.001",
+      includedSalts: salts(
+        "monoPotassiumPhosphate",
+        "magnesiumSulfate",
+        "potassiumSulfate",
+        "chelatedMicronutrients"
+      ),
+    },
+    {
+      id: "c",
+      // 100% KNO₃ — N 13.9%, K 38.7% → 46.63% K₂O.
+      name: "K Base",
+      nitrogen: "13.9",
+      phosphate: "",
+      potash: "46.63",
+      calcium: "",
+      magnesium: "",
+      sulfur: "",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("potassiumNitrate"),
+    },
+  ],
+  parts: [
+    { id: "a", name: "Cal Base", dose: "8", unit: "g_per_gallon" },
+    { id: "b", name: "PK Base", dose: "3", unit: "g_per_gallon" },
+    { id: "c", name: "K Base", dose: "4", unit: "g_per_gallon" },
   ],
   stockTankOption: "separate",
 }
@@ -845,12 +972,21 @@ function reportPerPartSaltContainment(
  *    tank free of taperable Nitrogen anywhere has no better option, so that's
  *    reported as intentional rather than failed.
  *
- * 3. No taperable Nitrogen salt is spread over two tanks when one tank could
- *    hold the lot. Solving each part on its own leaves the same KNO₃ in two
- *    places, and the grower then has to cut both in step to move Nitrogen once.
- *    Solubility is the one good reason to keep the split — so when the combined
- *    amount genuinely wouldn't dissolve, that's reported as intentional rather
- *    than failed (see `saltFitsOneTank` / `consolidateTaperableNitrogen`).
+ * 3. Every taperable Nitrogen salt is in the tank holding the Calcium, so one
+ *    tank carries the whole Nitrogen load and a taper is one dial. Ca(NO₃)₂ is
+ *    normally a recipe's biggest Nitrogen source and its Nitrogen can't be cut
+ *    without cutting the Calcium bought with it, so KNO₃ in a tank of its own
+ *    doesn't give the grower a Calcium-free Nitrogen dial — it gives them two
+ *    dials to turn in step. The pairing is chemically routine (that's a
+ *    conventional Tank A), so solubility is the one good reason not to: when the
+ *    combined amount genuinely wouldn't dissolve in one tank, splitting it halves
+ *    the concentration in each, and that's reported as intentional rather than
+ *    failed — provided the recipe owns up to it in `nitrogenKeptApart`, since a
+ *    grower who has to cut two tanks in step needs telling (see
+ *    `saltFitsOneTank` / `pourTaperableNitrogenIntoCalciumTank`).
+ *
+ *    With no Calcium in any tank there's nothing to pair the Nitrogen with, and
+ *    the weaker rule applies: one tank for each salt, whichever tank that is.
  */
 function reportSeparateNitrogenTaperability(
   result: CalculateRecipeResult,
@@ -900,26 +1036,44 @@ function reportSeparateNitrogenTaperability(
     allPass = false
   }
 
+  // Where the Nitrogen belongs: with the Calcium Nitrate. Read off the tank
+  // roles rather than off the recipe's own account of what it did.
+  const calciumTank = tanks.find((tank) => tank.role === "calcium")
+  const ownedUpTo = new Set(result.separateNitrogenRecipe.nitrogenKeptApart ?? [])
+
   for (const saltKey of TAPERABLE_NITROGEN_SALTS) {
     const holding = tanks.filter((tank) => tank.salts[saltKey] > 0)
-    if (holding.length < 2) continue
+    if (holding.length === 0) continue
+    // Nothing to gather: it's already whole, and either in the Calcium tank or in
+    // a recipe that has no Calcium tank to gather it into.
+    if (holding.length === 1 && (calciumTank === undefined || holding.includes(calciumTank))) {
+      continue
+    }
 
     const total = holding.reduce((grams, tank) => grams + tank.salts[saltKey], 0)
     const where = holding
       .map((tank) => `${tank.name} ${tank.salts[saltKey].toFixed(3)} g`)
       .join(", ")
+    const home = calciumTank ? `with the Calcium in ${calciumTank.name}` : "in one tank"
 
     if (!saltFitsOneTank(saltKey, total, stockVolumeLiters)) {
       console.log(
-        `\n    ${RAW_SALTS[saltKey].name} stays split (${where}) — ${total.toFixed(3)} g in ` +
-          `${stockVolumeLiters} L exceeds its safe solubility, so the split is intentional`
+        `\n    ${RAW_SALTS[saltKey].name} isn't ${home} (${where}) — all ${total.toFixed(3)} g in ` +
+          `${stockVolumeLiters} L would exceed its safe solubility, so keeping it apart is intentional`
       )
+      if (!ownedUpTo.has(saltKey)) {
+        console.log(
+          `    ...but the recipe doesn't report it, so the grower is never told they have two ` +
+            "tanks to cut in step"
+        )
+        allPass = false
+      }
       continue
     }
 
     console.log(
-      `\n    ${RAW_SALTS[saltKey].name} is split across tanks (${where}) even though all ` +
-        `${total.toFixed(3)} g would dissolve in one`
+      `\n    ${RAW_SALTS[saltKey].name} isn't ${home} (${where}) even though all ` +
+        `${total.toFixed(3)} g would dissolve there`
     )
     allPass = false
   }
@@ -929,36 +1083,37 @@ function reportSeparateNitrogenTaperability(
 
 /**
  * From three parts up, Separate Nitrogen is only a regrouping of the per-part
- * tanks: the same parts are solved the same independent way, and the only thing
- * that moves is the Calcium, which pools into whichever tank is the line's
- * Calcium bottle (see `calculateSeparateNitrogenMultiPartRecipe`). So the two
- * layouts must weigh out the same grams of every salt, to the gram. Any
- * difference means the layout re-solved something behind the grower's back —
- * which is exactly the drift away from the original line that solving them per
- * part is meant to avoid.
+ * tanks: the same parts are solved the same independent way, and what moves is
+ * only the Calcium and the taperable Nitrogen, both pooling into one tank (see
+ * `calculateSeparateNitrogenMultiPartRecipe`). So the two layouts must weigh out
+ * the same grams of every salt, to the gram. Any difference means the layout
+ * re-solved something behind the grower's back — which is exactly the drift away
+ * from the original line that solving them per part is meant to avoid.
  *
- * On top of that, four things about the tanks themselves:
+ * On top of that, five things about the tanks themselves:
  *
- *  - Moving the Calcium never buys an extra tank. A three-part line gets three
- *    tanks, not a fourth thin one holding what was left of the Calcium bottle.
+ *  - Pooling never buys an extra tank. A three-part line gets three tanks or
+ *    fewer, not a fourth thin one holding what was left of the Calcium bottle.
  *    This is the check that pins the layout to the shape of the original line,
  *    and it covers the micronutrients too: they ride along in an existing tank
  *    rather than taking one (see `reportSeparateNitrogenTaperability`).
  *  - All the Calcium is in one tank, and nothing phosphate- or sulfate-bearing
  *    shares it. Pooling several parts' Calcium is only safe as long as no
  *    part's phosphate or sulfate can land beside another part's Calcium at
- *    stock strength. What may share it is the host bottle's own nitrates, Urea
- *    and — when there was nowhere else for them — the chelated micros: that's a
- *    conventional Tank A, and it's what keeps the tank count down.
- *  - Every tank stands for exactly one original part, and holds only macro salts
- *    that part declared — the same containment the per-part tanks are held to
- *    below, applied to the Calcium tank as well for everything except the pooled
- *    Calcium itself. A tank that merged two bottles, or borrowed a neighbour's
- *    salt, would still deliver a plausible total, so this is invisible in the
- *    ppm table. The Calcium tank when it holds nothing but Calcium is the one
- *    that legitimately belongs to no part.
- *  - No tank is empty. A part that's pure Calcium Nitrate has nothing left once
- *    its Calcium is pooled, and must not leave a blank tank behind.
+ *    stock strength. What may share it is the recipe's nitrates and Urea and —
+ *    when there was nowhere else for them — the chelated micros: that's a
+ *    conventional Tank A.
+ *  - The Calcium tank stands for no single part. It draws its Calcium from every
+ *    bottle and its Nitrogen from every bottle, so a part name on it would tell
+ *    the grower something untrue about what's inside (see
+ *    `SeparateNitrogenTank.partName`).
+ *  - Every other tank stands for exactly one original part, and holds only macro
+ *    salts that part declared — the same containment the per-part tanks are held
+ *    to below. A tank that merged two bottles, or borrowed a neighbour's salt,
+ *    would still deliver a plausible total, so this is invisible in the ppm
+ *    table.
+ *  - No tank is empty. A part that's pure Calcium Nitrate and KNO₃ has nothing
+ *    left once both are pooled, and must not leave a blank tank behind.
  *
  * The three-part threshold is spelled out here rather than imported from
  * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`: reading the same knob this
@@ -1057,11 +1212,19 @@ function reportSeparateNitrogenMatchesPerPartTanks(
   const macroKeys = SALT_DISPLAY_ORDER.filter((key) => !MICRO_SALT_KEYS.has(key))
 
   for (const tank of tanks) {
-    // The Calcium tank is unnamed when it holds nothing but Calcium (plus, when
-    // there was nowhere else for them, the micros), which is the one tank that
-    // legitimately draws on every part at once.
+    // The Calcium tank is the one that legitimately draws on every part at once,
+    // so it names none of them and there's no bottle to hold its contents to.
+    if (tank.role === "calcium") {
+      if (!tank.partId) continue
+      console.log(
+        `\n    ${tank.name} is named after ${tank.partName}, but the tank pooling every part's ` +
+          "Calcium and every part's Nitrogen stands for no single bottle"
+      )
+      allPass = false
+      continue
+    }
+
     if (!tank.partId) {
-      if (tank.role === "calcium") continue
       console.log(`\n    ${tank.name} merges the parts together instead of standing for one of them`)
       allPass = false
       continue
@@ -1071,12 +1234,9 @@ function reportSeparateNitrogenMatchesPerPartTanks(
     if (!analysis) continue
 
     const allowed = getEnabledSaltKeys(analysis.includedSalts)
-    const foreign = macroKeys.filter((key) => {
-      // Every part's Calcium pools into the Calcium tank by design, so it's the
-      // only salt group there that isn't the host bottle's own.
-      if (tank.role === "calcium" && TANK_1_SALT_KEYS.has(key)) return false
-      return tank.salts[key] > 0 && !allowed.has(key) && !autoAdded.has(key)
-    })
+    const foreign = macroKeys.filter(
+      (key) => tank.salts[key] > 0 && !allowed.has(key) && !autoAdded.has(key)
+    )
     if (foreign.length === 0) continue
 
     console.log(
@@ -1315,6 +1475,13 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
   for (const note of result.separateNitrogenRecipe.autoAddedSalts ?? []) {
     console.log(`    auto-added ${note.saltLabel} for ${note.elementLabel}`)
   }
+  const keptApart = result.separateNitrogenRecipe.nitrogenKeptApart ?? []
+  if (keptApart.length > 0) {
+    console.log(
+      `\n    recipe reports kept out of the Nitrogen tank by solubility: ` +
+        keptApart.map((key) => RAW_SALTS[key].name).join(", ")
+    )
+  }
   if (k2so4Checked && k2so4Needed && !k2so4Used) {
     console.log("\n    EXPECTED Potassium Sulfate to be used — it's checked and K/S run short")
     allPass = false
@@ -1372,6 +1539,8 @@ async function main(): Promise<void> {
     FOUR_PART_SEPARATE_NITROGEN,
     CALCIUM_BOTTLE_CARRIES_SULFATE,
     EVERY_BOTTLE_CARRIES_NITROGEN,
+    ALL_NITROGEN_SINGLE_PART,
+    NITROGEN_TOO_MUCH_FOR_ONE_TANK,
   ]
   const results: boolean[] = []
   for (const scenario of scenarios) {

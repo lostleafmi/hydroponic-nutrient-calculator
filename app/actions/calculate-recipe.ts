@@ -180,8 +180,8 @@ export async function calculateRecipeAction(
 
   // Past a couple of parts, building the Separate Nitrogen tanks out of the
   // pooled solve above moves nutrients between the grower's bottles; solving
-  // each part on its own, then taking nothing but the Calcium out of it, keeps
-  // the tapering benefit without that drift. See
+  // each part on its own, then lifting out only the Calcium and the Nitrogen,
+  // keeps the tapering benefit without that drift. See
   // `separateNitrogenSolvesPartsIndependently`.
   const separateNitrogenRecipe = separateNitrogenSolvesPartsIndependently(parts.length)
     ? calculateSeparateNitrogenMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)

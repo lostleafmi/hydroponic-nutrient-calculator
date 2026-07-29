@@ -329,12 +329,6 @@ export function RecipeScreen({
   const separateNitrogenKeepsPartsDistinct = separateNitrogenRecipe.tanks.some(
     (tank) => tank.partName !== undefined
   )
-  // Set when the pooled Calcium went into one of the line's own bottles rather
-  // than into a tank of its own, which is what keeps the tank count down to the
-  // number of parts (see `calculateSeparateNitrogenMultiPartRecipe`).
-  const separateNitrogenCalciumTankPartName =
-    separateNitrogenRecipe.tanks.find((tank) => tank.role === "calcium")?.partName ?? null
-
   /**
    * The ppm the grower's plants will actually see, reconstructed from the
    * resolved salt amounts of whichever layout is on screen (see
@@ -460,8 +454,7 @@ export function RecipeScreen({
    * straight from a literal feed-chart dose rather than from a ppm target (see
    * `feedRateGramsTooltip`). The Separate Nitrogen layout pools every part's
    * Calcium into one tank, so these are the combined doses — unlike
-   * `PerPartStockTankCards`, there's no single part to attribute them to even
-   * when that tank is one of the line's own bottles.
+   * `PerPartStockTankCards`, there's no single part to attribute them to.
    */
   const calciumFeedRateTooltips = useMemo(() => {
     const tooltips: Partial<Record<SaltKey, React.ReactNode>> = {}
@@ -1153,7 +1146,8 @@ export function RecipeScreen({
             )}
           </div>
 
-          {/* Doser tank layout toggle — one suction line per part, or Ca(NO₃)₂ on its own line */}
+          {/* Doser tank layout toggle — one suction line per part, or all the
+              Nitrogen on one line of its own */}
           {canSeparateCalciumInDoser && (
             <div className="mt-4 border-t border-border pt-4">
               <Label className="mb-2 block text-sm font-medium">Tank Layout</Label>
@@ -1180,14 +1174,14 @@ export function RecipeScreen({
                   }`}
                 >
                   <Droplets className="h-4 w-4" />
-                  Separate Calcium Nitrate
+                  Separate Nitrogen
                 </button>
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {doserLayout === "separate-ca"
                   ? separateNitrogenKeepsPartsDistinct
-                    ? "All your Ca(NO₃)₂ is gathered onto one suction line, making it easy to taper nitrogen at the end of flower — still one line per part, same as your feed chart."
-                    : "Ca(NO₃)₂ gets its own suction line, making it easy to taper nitrogen at the end of flower."
+                    ? "All your Nitrogen — Ca(NO₃)₂ and KNO₃ together — feeds off one suction line, so tapering before harvest is one dial. Your other parts keep a line each, same as your feed chart."
+                    : "All your Nitrogen — Ca(NO₃)₂ and KNO₃ together — feeds off one suction line, so tapering before harvest is one dial."
                   : "One suction line per part in your feed chart — standard doser setup."}
               </p>
             </div>
@@ -1493,7 +1487,6 @@ export function RecipeScreen({
               : multiPartRecipe.tanks.length
           }
           keepsPartsDistinct={separateNitrogenKeepsPartsDistinct}
-          calciumTankPartName={separateNitrogenCalciumTankPartName}
         />
       )}
 
@@ -1537,11 +1530,12 @@ export function RecipeScreen({
           </>
         )}
 
-      {/* Recipe Cards — Separate Nitrogen layout (all the Calcium in one tank,
-          then either one merged tank or one per remaining part) */}
+      {/* Recipe Cards — Separate Nitrogen layout (all the Nitrogen and Calcium in
+          one tank, then either one merged tank or one per remaining part) */}
       {hasValidData && usesSeparateNitrogenLayout && (
         <SeparateNitrogenTankCards
           tanks={separateNitrogenRecipe.tanks}
+          nitrogenKeptApart={separateNitrogenRecipe.nitrogenKeptApart ?? []}
           hasDirectAddCalciumCarbonate={
             (separateNitrogenRecipe.directAddCalciumCarbonate?.grams ?? 0) > 0
           }
@@ -2156,9 +2150,7 @@ const TANK_CARD_STYLES = [
  * has to recognise which physical tank is being talked about.
  */
 function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
-  if (tank.role === "calcium") {
-    return tank.partName ? `${tank.name} (${tank.partName} — Calcium)` : `${tank.name} (Calcium)`
-  }
+  if (tank.role === "calcium") return `${tank.name} (Nitrogen + Calcium)`
   if (tank.partName) return `${tank.name} (${tank.partName})`
   return `${tank.name} (Macros)`
 }
@@ -2170,11 +2162,7 @@ function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
  */
 function separateNitrogenTankBadge(tank: SeparateNitrogenTank): string {
   const micros = tank.hasMicronutrients ? " + Micros" : ""
-  if (tank.role === "calcium") {
-    return tank.partName
-      ? `${tank.partName} + all Calcium${micros}`
-      : `Nitrogen + Calcium${micros}`
-  }
+  if (tank.role === "calcium") return `All Nitrogen + Calcium${micros}`
   if (tank.partName) return `${tank.partName}${micros}`
   return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
 }
@@ -2209,18 +2197,26 @@ function separateNitrogenMicroNote(tank: SeparateNitrogenTank): string {
 
 function separateNitrogenTankDescription(
   tank: SeparateNitrogenTank,
-  calciumTankName: string | null
+  calciumTankName: string | null,
+  nitrogenKeptApart: SaltKey[]
 ): string {
   const micros = separateNitrogenMicroNote(tank)
+  // Named for the grower rather than by formula: this is the one place the copy
+  // has to admit that a salt didn't make it into the Nitrogen tank.
+  const keptApart = nitrogenKeptApart.filter((key) => tank.salts[key] > 0)
+  const keptApartNames = keptApart.map((key) => RAW_SALTS[key].name).join(" and ")
 
   if (tank.role === "calcium") {
-    // Named after a part means this is that bottle's own tank, with the rest of
-    // the line's Calcium moved into it rather than into a tank of its own (see
-    // `calculateSeparateNitrogenMultiPartRecipe`).
-    if (tank.partName) {
-      return `Your ${tank.partName}, holding all the Calcium in your recipe — its own plus whatever came out of your other parts. Nothing phosphate- or sulfate-bearing goes in here, so it stays safe at stock strength. Gathering the Calcium in one place is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together.${micros}`
+    const split =
+      keptApart.length > 0
+        ? ` One exception: there's more ${keptApartNames} in your recipe than a single tank this size will hold in solution, so the remainder stays in the tank below and you'll need to cut the two in step. A bigger stock tank would bring it all in here.`
+        : ""
+
+    if (!saltAmountsCarryTaperableNitrogen(tank.salts)) {
+      return `Just your Calcium source in this stock tank — and with it every bit of Nitrogen your recipe carries, since Ca(NO₃)₂ is the only thing supplying it. Cut this tank back near the end of flower to bring Nitrogen down; the Calcium comes down with it, which is unavoidable when the two arrive in the same salt. The tanks below hold no Nitrogen at all, so they carry on unchanged.${split}${micros}`
     }
-    return `Just your Calcium source in this stock tank. Keeping it on its own is what lets you move Nitrogen near the end of flower: cut back the tanks below to bring Nitrogen down while your Calcium stays exactly where it is, or taper this one to bring both down together.${micros}`
+
+    return `Every Nitrogen source in your recipe, in one stock tank: all your Calcium Nitrate and all your Potassium Nitrate side by side, plus any other nitrate or Urea you're using. That pairing is how a conventional Tank A is mixed, and nothing phosphate- or sulfate-bearing goes in here, so it stays safe at stock strength. This is the tank to dial back near the end of flower — your whole Nitrogen load comes down at once, Calcium along with it, while the Phosphorus, Potassium, Magnesium and Sulfur in the tanks below don't move.${split}${micros}`
   }
 
   // Only worth saying when the Calcium actually went into a tank of its own —
@@ -2229,22 +2225,27 @@ function separateNitrogenTankDescription(
   const safety = calciumTankName
     ? ` Safe to combine in one stock tank because your Calcium stays in ${calciumTankName}.`
     : ""
+  const split =
+    keptApart.length > 0
+      ? ` It also keeps the ${keptApartNames} that wouldn't fit in ${calciumTankName ?? "the Nitrogen tank"} alongside the rest — so cut this tank in step with that one when you taper.`
+      : ""
 
   if (tank.partName) {
-    return `Everything except the Calcium from your ${tank.partName}, built from only that part's own label, dose and checked salts — so this tank still stands in for that bottle, and you can dial it up or down on its own the way your feed chart intends.${micros}${safety}`
+    return `Your ${tank.partName}, minus any Calcium or taperable Nitrogen it declared — both are in ${calciumTankName ?? "the Nitrogen tank"} now. Everything here is built from only that part's own label, dose and checked salts, so this tank still stands in for that bottle and you can dial it up or down on its own the way your feed chart intends.${split}${micros}${safety}`
   }
 
-  return `The rest of your main salts (KNO₃, Mg(NO₃)₂, Urea, MKP/MAP, MgSO₄, K₂SO₄), combined into one clean tank — this is the one to cut back when you want to bring Nitrogen down.${micros}${safety}`
+  return `The rest of your main salts (MKP/MAP, MgSO₄, K₂SO₄), combined into one clean tank. There's no Nitrogen worth tapering in here, so this is the tank you leave alone: dial ${calciumTankName ?? "the Nitrogen tank"} back before harvest and everything in this one keeps feeding at full strength.${split}${micros}${safety}`
 }
 
 /**
  * The Separate Nitrogen tank cards, drawn from whatever tanks the layout came
- * back with: the Calcium tank first, then either one merged non-Calcium tank or
- * the line's remaining parts, one apiece (see
+ * back with: the Nitrogen tank first, then either one merged phosphate/sulfate
+ * tank or the line's remaining parts, one apiece (see
  * `calculateSeparateNitrogenMultiPartRecipe`).
  */
 function SeparateNitrogenTankCards({
   tanks,
+  nitrogenKeptApart,
   hasDirectAddCalciumCarbonate,
   calciumFeedRateTooltips,
   stockTankSize,
@@ -2252,6 +2253,8 @@ function SeparateNitrogenTankCards({
   ecScaleFactor,
 }: {
   tanks: SeparateNitrogenTank[]
+  /** See `SeparateNitrogenRecipe.nitrogenKeptApart` — normally empty. */
+  nitrogenKeptApart: SaltKey[]
   hasDirectAddCalciumCarbonate: boolean
   /** Keyed by salt — see the memo of the same name for why these are combined across parts. */
   calciumFeedRateTooltips: Partial<Record<SaltKey, React.ReactNode>>
@@ -2294,7 +2297,7 @@ function SeparateNitrogenTankCards({
                 </span>
               </CardTitle>
               <CardDescription>
-                {separateNitrogenTankDescription(tank, calciumTankName)}
+                {separateNitrogenTankDescription(tank, calciumTankName, nitrogenKeptApart)}
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -2329,15 +2332,18 @@ function SeparateNitrogenTankCards({
               </div>
               <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-3">
                 <p className="text-sm text-muted-foreground">
-                  {tank.role === "calcium" ? (
+                  {/* The Nitrogen tank normally holds the KNO₃ as well as the
+                      Calcium, so it needs the same salt-by-salt order as any
+                      other tank. Only a tank down to one macro salt gets the
+                      shorter version. */}
+                  {tank.role === "calcium" && macroEntries.length === 1 ? (
                     <>
                       <strong className="text-foreground">How to mix:</strong> Fill the stock tank
-                      about halfway with RO water, add the{" "}
-                      {macroEntries.length > 1 ? "calcium sources" : "calcium source"} and stir
-                      until fully dissolved
+                      about halfway with RO water, add the calcium source and stir until fully
+                      dissolved
                       {tank.hasMicronutrients
                         ? ", then add your micronutrients one at a time, Iron DTPA first. Top up"
-                        : " then top it up"}{" "}
+                        : ", then top it up"}{" "}
                       to {stockTankSize} {unitLabel} and label it &quot;{tank.name}&quot;.
                     </>
                   ) : (
@@ -2528,7 +2534,6 @@ function MixingSafetyBanner({
   tankCount,
   separateCaLayout = false,
   keepsPartsDistinct = false,
-  calciumTankPartName = null,
 }: {
   option: StockTankOption
   /** How many stock tanks the active layout came back with */
@@ -2539,12 +2544,6 @@ function MixingSafetyBanner({
    * rather than merging them (see `separateNitrogenKeepsPartsDistinct`).
    */
   keepsPartsDistinct?: boolean
-  /**
-   * The part whose tank holds the pooled Calcium, when the Calcium went into one
-   * of the line's own bottles rather than into a tank of its own (see
-   * `SeparateNitrogenTank.partName`).
-   */
-  calciumTankPartName?: string | null
 }) {
   if (option === "separate") {
     const otherTankCount = Math.max(tankCount - 1, 0)
@@ -2554,9 +2553,7 @@ function MixingSafetyBanner({
         <div className="space-y-1 text-sm leading-relaxed text-emerald-100">
           <p className="font-semibold">Safest setup</p>
           <p>
-            {calciumTankPartName
-              ? `All your Calcium — and the Nitrogen that comes with it — is gathered into one stock tank, your ${calciumTankPartName}, so it's easy to move Nitrogen at the end of flower without rebalancing anything else.`
-              : "Your Calcium — and the Nitrogen that comes with it — is kept in a stock tank of its own, clear of every phosphate and sulfate, so it's easy to move Nitrogen at the end of flower without rebalancing anything else."}
+            {`Every Nitrogen source in your recipe is gathered into one stock tank — your Calcium Nitrate and whatever else carries Nitrogen, side by side and clear of every phosphate and sulfate. Tapering Nitrogen at the end of flower is that one tank to dial back, with nothing else to rebalance.`}
             {otherTankCount > 0 &&
               (keepsPartsDistinct
                 ? ` The rest of your recipe stays split across ${otherTankCount} more stock tank${otherTankCount === 1 ? "" : "s"}, one per remaining part of your feed chart, so each one still doses like the bottle it replaces — and you mix no more tanks than your line has parts.`
@@ -2578,10 +2575,10 @@ function MixingSafetyBanner({
           <p className="font-semibold">Doser / Injector setup — check your hardware first</p>
           <p>
             {separateCaLayout
-              ? `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} with all your Calcium Nitrate on ${
+              ? `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} with all your Nitrogen on ${
                   keepsPartsDistinct
                     ? "one suction line for easy nitrogen tapering, and one line per part of your feed chart"
-                    : "its own suction line for easy nitrogen tapering"
+                    : "one suction line for easy nitrogen tapering"
                 }.`
               : `We sized ${tankCount} stock tank${tankCount === 1 ? "" : "s"} (one per part in your feed chart) for a standard doser ratio.`}{" "}
             <strong>Confirm the ratio printed on your injector</strong> matches the one we picked

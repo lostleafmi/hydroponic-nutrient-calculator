@@ -89,12 +89,12 @@ function buildDirectAddCalciumCarbonateExport(
  *
  * A tank that belongs to one part is named after that part — the same way the
  * per-part export names its tanks — so an imported formulation still reads as
- * the grower's own feed chart. The Calcium tank is named that way too when it's
- * one of the line's own bottles holding the pooled Calcium, and named for its
- * contents when it holds nothing but Calcium, since then it stands for no single
- * bottle. Only when the parts were pooled and re-solved as one (see
- * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`) is there no part to name any
- * tank after.
+ * the grower's own feed chart. The Calcium tank is named for its contents
+ * instead: it pools every part's Calcium and every part's Nitrogen, so it stands
+ * for no single bottle (see `SeparateNitrogenTank.partName`). And when the parts
+ * were pooled and re-solved as one (see
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`) there's no part to name any tank
+ * after.
  *
  * Whichever tank ended up with the micronutrients says so, since that's never a
  * tank of its own — the package always rides along with macros (see
@@ -102,9 +102,7 @@ function buildDirectAddCalciumCarbonateExport(
  */
 function separateNitrogenTankLabel(tank: SeparateNitrogenTank): string {
   const micros = tank.hasMicronutrients ? " + Micros" : ""
-  if (tank.role === "calcium") {
-    return tank.partName ? `${tank.partName} + Calcium${micros}` : `Nitrogen + Calcium${micros}`
-  }
+  if (tank.role === "calcium") return `Nitrogen + Calcium${micros}`
   if (tank.partName) return `${tank.partName}${micros}`
   return tank.hasMicronutrients ? "Macros + Micros" : "Macros"
 }
@@ -114,10 +112,12 @@ function separateNitrogenMixInstructions(
   sizeNum: number,
   unitLabel: string
 ): string {
-  // A Calcium tank with a part to its name holds that bottle's other salts too,
-  // so it needs the same salt-by-salt order as any other tank. So does one that
-  // took on the micronutrients.
-  if (tank.role === "calcium" && !tank.partName && !tank.hasMicronutrients) {
+  // The Nitrogen tank normally holds the KNO₃ as well as the Calcium, so it
+  // needs the same salt-by-salt order as any other tank. Only a tank down to a
+  // single salt gets the shorter version.
+  const isLoneCalciumSalt =
+    tank.role === "calcium" && getOrderedSaltEntries(tank.salts).length === 1
+  if (isLoneCalciumSalt) {
     return `Fill the stock tank about halfway with RO water, add the calcium source and stir until it's fully dissolved, then top up to ${sizeNum} ${unitLabel} and label it "${tank.name}".`
   }
   return `Fill the stock tank about halfway with RO water, then add the salts in the order listed above${
