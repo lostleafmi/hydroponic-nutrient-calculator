@@ -25,6 +25,7 @@ import {
   RAW_SALTS,
   SALT_DISPLAY_ORDER,
   sumSaltAmounts,
+  TANK_1_SALTS,
   TANK_3_SALTS,
   type ElementalTargets,
   type IncludedSaltsSelection,
@@ -56,6 +57,13 @@ const MICRO_KEYS: Array<keyof ElementalTargets> = [
 
 /** The salts that carry `MICRO_KEYS` — one per micronutrient. */
 const MICRO_SALT_KEYS = new Set<SaltKey>(TANK_3_SALTS)
+
+/**
+ * Everything the Separate Nitrogen layout's Tank 1 may legally hold: the
+ * Calcium salts, plus Ammonium Nitrate when it's the other half of a
+ * Ca(NO₃)₂/NH₄NO₃ double salt and so the same physical product being tapered.
+ */
+const TANK_1_SALT_KEYS = new Set<SaltKey>([...TANK_1_SALTS, "ammoniumNitrate"])
 
 const ELEMENT_SYMBOLS: Record<keyof ElementalTargets, string> = {
   nitrogen: "N",
@@ -468,6 +476,44 @@ const DECLARED_DOSES_HELD_FIXED: Scenario = {
 }
 
 /**
+ * The reported 3-part line with a fourth Cal-Mag bottle added, on Separate
+ * Nitrogen. Past three parts this layout used to be refused outright, so this
+ * covers both that it builds at all and that pouring four independently solved
+ * parts into two shared tanks still adds up (see
+ * `calculateSeparateNitrogenMultiPartRecipe`) — including a second part
+ * contributing Calcium to Tank 1 and Magnesium Nitrate landing in Tank 2
+ * rather than beside the phosphate it would precipitate with.
+ */
+const FOUR_PART_SEPARATE_NITROGEN: Scenario = {
+  name: "4-part line on Separate Nitrogen (two Calcium bottles pooling into Tank 1)",
+  partsAnalysis: [
+    ...REPORTED_THREE_PART.partsAnalysis,
+    {
+      id: "d",
+      name: "Cal Mag",
+      nitrogen: "4",
+      phosphate: "",
+      potash: "",
+      calcium: "5",
+      magnesium: "3",
+      sulfur: "",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("calciumNitrate", "magnesiumNitrate"),
+    },
+  ],
+  parts: [
+    ...REPORTED_THREE_PART.parts,
+    { id: "d", name: "Cal Mag", dose: "2", unit: "g_per_gallon" },
+  ],
+  stockTankOption: "separate",
+}
+
+/**
  * Three parts whose salt lists share nothing, run through the per-part layout:
  * a Calcium bottle, a P/K bottle and a Mg/S bottle. Every element has exactly
  * one part that can legally supply it, so any cross-bottle borrowing shows up
@@ -586,6 +632,70 @@ function reportPerPartSaltContainment(
     console.log(
       `\n    ${tank.name} (${tank.partName}) holds macro salts not checked on that part: ` +
         foreign.map((key) => `${RAW_SALTS[key].name} ${tank.salts[key].toFixed(3)} g`).join(", ")
+    )
+    allPass = false
+  }
+
+  return allPass
+}
+
+/**
+ * From three parts up, Separate Nitrogen is only a regrouping of the per-part
+ * tanks: the same parts are solved the same independent way, and the resulting
+ * salts are poured into two shared tanks by chemistry instead of one tank per
+ * bottle (see `calculateSeparateNitrogenMultiPartRecipe`). So the two layouts
+ * must weigh out the same grams of every salt, to the gram. Any difference
+ * means the layout re-solved something behind the grower's back — which is
+ * exactly the drift away from the original line that splitting them per part
+ * is meant to avoid.
+ *
+ * Also holds Tank 1 to Calcium salts only: pooling several parts into shared
+ * tanks is only safe as long as nothing acidic-, phosphate- or sulfate-bearing
+ * from one part can land beside another part's Calcium at stock strength.
+ *
+ * The three-part threshold is spelled out here rather than imported from
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`: reading the same knob this
+ * check exists to guard would make it agree with the solver by construction,
+ * and quietly skip every scenario the moment that knob moved.
+ */
+const SEPARATE_NITROGEN_PER_PART_PARTS = 3
+
+function reportSeparateNitrogenMatchesPerPartTanks(
+  result: CalculateRecipeResult,
+  scenario: Scenario
+): boolean {
+  if (scenario.parts.length < SEPARATE_NITROGEN_PER_PART_PARTS) return true
+  // The doser layout pools every part's micros into a tank of their own, so its
+  // per-part totals aren't the ones this layout is built from.
+  if (scenario.stockTankOption === "doser") return true
+
+  const separateNitrogen = sumSaltAmounts(result.threeTankRecipe.tank1, result.threeTankRecipe.tank2)
+  const perPart = sumSaltAmounts(...result.multiPartRecipe.tanks.map((tank) => tank.salts))
+  const drifted = SALT_DISPLAY_ORDER.filter(
+    (key) => Math.abs(separateNitrogen[key] - perPart[key]) > 1e-9
+  )
+
+  let allPass = true
+  if (drifted.length > 0) {
+    console.log(
+      "\n    Separate Nitrogen tanks don't hold the per-part amounts: " +
+        drifted
+          .map(
+            (key) =>
+              `${RAW_SALTS[key].name} ${separateNitrogen[key].toFixed(3)} g vs ${perPart[key].toFixed(3)} g`
+          )
+          .join(", ")
+    )
+    allPass = false
+  }
+
+  const misplaced = SALT_DISPLAY_ORDER.filter(
+    (key) => result.threeTankRecipe.tank1[key] > 0 && !TANK_1_SALT_KEYS.has(key)
+  )
+  if (misplaced.length > 0) {
+    console.log(
+      "\n    Tank 1 holds salts that don't belong beside concentrated Calcium: " +
+        misplaced.map((key) => RAW_SALTS[key].name).join(", ")
     )
     allPass = false
   }
@@ -815,6 +925,10 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
     allPass = false
   }
 
+  if (!reportSeparateNitrogenMatchesPerPartTanks(result, scenario)) {
+    allPass = false
+  }
+
   if (scenario.expectExactMatch) {
     for (const [index, layout] of layouts.entries()) {
       if (deviationsByLayout[index].length === 0) continue
@@ -852,6 +966,7 @@ async function main(): Promise<void> {
     NO_DECLARED_SULFUR,
     DECLARED_DOSES_HELD_FIXED,
     PER_PART_ISOLATION,
+    FOUR_PART_SEPARATE_NITROGEN,
   ]
   const results: boolean[] = []
   for (const scenario of scenarios) {

@@ -21,10 +21,12 @@ import {
   calculateElementalTargets,
   calculateMultiPartStockTankRecipe,
   calculateSeparateCalciumRecipe,
+  calculateSeparateNitrogenMultiPartRecipe,
   estimateEcFromElementalTargets,
   saltDerivedSulfurPpm,
 } from "@/lib/hydro-calc/recipe-calculator"
 import {
+  separateNitrogenSolvesPartsIndependently,
   sumCalciumChlorideGramsPerGallon,
   sumCalciumNitrateGramsPerGallon,
   sumUreaNitrogenPpm,
@@ -124,13 +126,13 @@ export async function calculateRecipeAction(
     estimateSource: microEstimateSource,
   } = applyMicroEstimates(rawTargets)
 
-  // The Separate-Nitrogen and Direct-Mix layouts intentionally recombine
-  // nutrients across parts by chemistry rather than by bottle, so they draw
-  // from the union of every part's salt selection. The per-part tank layouts
-  // ("per-part" / doser "one tank per part") instead read each part's own
-  // selection directly inside calculate*MultiPart*Recipe below — that
-  // independence is what makes them the high-fidelity replication path for
-  // multi-part lines, so nothing here may merge their targets.
+  // The Direct-Mix layout (and the Separate-Nitrogen layout below three
+  // parts) intentionally recombines nutrients across parts by chemistry
+  // rather than by bottle, so it draws from the union of every part's salt
+  // selection. Every layout built from per-part solves instead reads each
+  // part's own selection directly inside calculate*MultiPart*Recipe below —
+  // that independence is what makes them the high-fidelity replication path
+  // for multi-part lines, so nothing here may merge their targets.
   const combinedIncludedSalts = unionIncludedSalts(partsAnalysis)
   const combinedCalciumChlorideGramsPerGallon = sumCalciumChlorideGramsPerGallon(partsAnalysis)
   const combinedCalciumNitrateGramsPerGallon = sumCalciumNitrateGramsPerGallon(partsAnalysis, parts)
@@ -176,15 +178,22 @@ export async function calculateRecipeAction(
     combinedUreaNitrogenPpm
   )
 
-  const threeTankRecipe = calculateSeparateCalciumRecipe(
-    targets,
-    stockVolumeLiters,
-    dilutionRatio,
-    combinedIncludedSalts,
-    combinedCalciumChlorideGramsPerGallon,
-    combinedCalciumNitrateGramsPerGallon,
-    combinedUreaNitrogenPpm
-  )
+  // Past a couple of parts, building the Separate Nitrogen tanks out of the
+  // pooled solve above moves nutrients between the grower's bottles; solving
+  // each part on its own first and only then grouping the salts into the two
+  // tanks keeps the tapering benefit without that drift. See
+  // `separateNitrogenSolvesPartsIndependently`.
+  const threeTankRecipe = separateNitrogenSolvesPartsIndependently(parts.length)
+    ? calculateSeparateNitrogenMultiPartRecipe(partsAnalysis, parts, stockVolumeLiters, dilutionRatio)
+    : calculateSeparateCalciumRecipe(
+        targets,
+        stockVolumeLiters,
+        dilutionRatio,
+        combinedIncludedSalts,
+        combinedCalciumChlorideGramsPerGallon,
+        combinedCalciumNitrateGramsPerGallon,
+        combinedUreaNitrogenPpm
+      )
 
   const multiPartRecipe =
     stockTankOption === "doser"

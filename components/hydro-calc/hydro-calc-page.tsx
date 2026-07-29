@@ -14,7 +14,6 @@ import {
   ALL_SALTS_SELECTED,
   DEFAULT_INCLUDED_SALTS,
   defaultStockTankOption,
-  isSeparateNitrogenAvailable,
   normalizeStockTankOption,
   type IncludedSaltsSelection,
 } from "@/lib/hydro-calc/recipe-types"
@@ -240,15 +239,6 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
     load()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFormulationId])
-
-  // Separate Nitrogen can't be built past 3 parts. Fall back to one tank per
-  // part rather than the doser layout — it's the same per-part recipe without
-  // assuming the grower owns an injector.
-  useEffect(() => {
-    if (!isSeparateNitrogenAvailable(parts.length) && stockTankOption === "separate") {
-      setStockTankOption("per-part")
-    }
-  }, [parts.length, stockTankOption])
 
   const handlePartsAnalysisChange = (nextPartsAnalysis: PartAnalysis[]) => {
     setPartsAnalysis(nextPartsAnalysis)

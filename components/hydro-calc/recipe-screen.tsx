@@ -69,7 +69,6 @@ import {
   gramsFromFeedRatePerGallon,
   hasValidRecipeInput,
   isCalciumNitrateSoleDoseSource,
-  isSeparateNitrogenAvailable,
   LITERS_PER_GALLON,
   MAX_PRACTICAL_DILUTION_RATIO,
   MICRO_LABELS,
@@ -205,13 +204,6 @@ export function RecipeScreen({
     initialSettings.doserLayout ?? "per-part"
   )
 
-  // Reset to per-part when the recipe grows beyond 3 parts (separate Ca requires ≤3)
-  useEffect(() => {
-    if (stockTankOption === "doser" && !isSeparateNitrogenAvailable(parts.length)) {
-      setDoserLayout("per-part")
-    }
-  }, [stockTankOption, parts.length])
-
   // Default the size field to 1 gal when the user is in direct-mix mode
   // (the field represents reservoir size there, not stock tank size)
   useEffect(() => {
@@ -221,9 +213,9 @@ export function RecipeScreen({
     }
   }, [stockTankOption])
 
-  // Separate Ca option is only offered in doser mode with ≤3 parts
-  const canSeparateCalciumInDoser =
-    stockTankOption === "doser" && isSeparateNitrogenAvailable(parts.length)
+  // Separate Ca is a sub-layout of doser mode only — outside it, the layout is
+  // the grower's top-level choice on the Feeding Rates screen.
+  const canSeparateCalciumInDoser = stockTankOption === "doser"
 
   const usesPerPartTanks =
     (stockTankOption === "doser" && doserLayout === "per-part") || stockTankOption === "per-part"
@@ -1089,7 +1081,7 @@ export function RecipeScreen({
             )}
           </div>
 
-          {/* Doser tank layout toggle — only when ≤3 parts so separate Ca is possible */}
+          {/* Doser tank layout toggle — one suction line per part, or Ca(NO₃)₂ on its own line */}
           {canSeparateCalciumInDoser && (
             <div className="mt-4 border-t border-border pt-4">
               <Label className="mb-2 block text-sm font-medium">Tank Layout</Label>

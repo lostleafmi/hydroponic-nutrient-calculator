@@ -1392,6 +1392,56 @@ function buildRefinementVariables({
 }
 
 /**
+ * The Tank-A-side salts (see `TANK_A_SALTS`) that still belong in the
+ * Separate Nitrogen layout's Tank 2: they carry no Calcium, so there's
+ * nothing to keep out of the phosphate/sulfate tank, and nothing to taper
+ * with Tank 1.
+ *
+ * Ammonium Nitrate is listed here for the ordinary case — an independently
+ * checked Nitrogen salt — and pulled back out into Tank 1 when it's instead
+ * this recipe's Ca(NO₃)₂/NH₄NO₃ double-salt share (see
+ * `ammoniumNitrateIsCalciumDoubleSalt` and `addToSeparateNitrogenTanks`).
+ */
+const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>([
+  "potassiumNitrate",
+  "ammoniumNitrate",
+  "magnesiumNitrate",
+  "urea",
+])
+
+/**
+ * Fold one solved A/B pair into the Separate Nitrogen layout's two physical
+ * tanks, adding to whatever they already hold.
+ *
+ * Accumulating rather than assigning is what lets the multi-part layout below
+ * pour several independently solved parts into the same pair of tanks. Which
+ * tank each salt lands in is pure precipitation chemistry (see `TANK_1_SALTS`
+ * / `TANK_2_SALTS` / `TANK_3_SALTS`), so it holds however many parts
+ * contributed.
+ */
+function addToSeparateNitrogenTanks(tank1: SaltAmounts, tank2: SaltAmounts, recipe: TankRecipe): void {
+  const { tankA, tankB, ammoniumNitrateIsCalciumDoubleSalt = false } = recipe
+
+  for (const key of TANK_1_SALTS) {
+    tank1[key] += tankA[key]
+  }
+  if (ammoniumNitrateIsCalciumDoubleSalt) {
+    tank1.ammoniumNitrate += tankA.ammoniumNitrate
+  }
+  for (const key of TANK_2_SALTS) {
+    // Already routed to Tank 1 just above, as the other half of the same
+    // physical double-salt product.
+    if (key === "ammoniumNitrate" && ammoniumNitrateIsCalciumDoubleSalt) continue
+    tank2[key] += TANK_A_KEYS_IN_TANK_2.has(key) ? tankA[key] : tankB[key]
+  }
+  // Micronutrients always fold into Tank 2 alongside the rest of the
+  // non-nitrogen components — there is no separate micros tank in this layout.
+  for (const key of TANK_3_SALTS) {
+    tank2[key] += key === "ironDTPA" ? tankA[key] : tankB[key]
+  }
+}
+
+/**
  * Build a stock tank recipe with Nitrogen + Calcium isolated for end-of-flower
  * tapering.
  *
@@ -1416,6 +1466,14 @@ function buildRefinementVariables({
  * `hasMicronutrients` tells callers whether the recipe has any micros at all
  * — use this to decide whether to render a "Micronutrients" sub-section
  * inside Tank 2.
+ *
+ * `targets` here is ONE set of elemental targets, solved in a single pass —
+ * so for a multi-part line it's the parts pooled together, drawing on the
+ * union of their salt selections. That's only used for one- and two-part
+ * lines now; from three parts up,
+ * `calculateSeparateNitrogenMultiPartRecipe` builds the same two tanks out of
+ * per-part solves instead (see
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`).
  */
 export function calculateSeparateCalciumRecipe(
   targets: ElementalTargets,
@@ -1426,17 +1484,7 @@ export function calculateSeparateCalciumRecipe(
   calciumNitrateGramsPerGallon: number = 0,
   ureaNitrogenPpm: number = 0
 ): ThreeTankRecipe {
-  const {
-    tankA,
-    tankB,
-    warnings = [],
-    isApproximate = false,
-    directAddCalciumCarbonate,
-    ammoniumNitrateIsCalciumDoubleSalt = false,
-    autoAddedSalts = [],
-    delivered,
-    deviations,
-  } = calculateStockTankRecipe(
+  const recipe = calculateStockTankRecipe(
     targets,
     stockVolumeLiters,
     dilutionRatio,
@@ -1445,35 +1493,18 @@ export function calculateSeparateCalciumRecipe(
     calciumNitrateGramsPerGallon,
     ureaNitrogenPpm
   )
+  const {
+    warnings = [],
+    isApproximate = false,
+    directAddCalciumCarbonate,
+    autoAddedSalts = [],
+    delivered,
+    deviations,
+  } = recipe
 
   const tank1 = emptySaltAmounts()
   const tank2 = emptySaltAmounts()
-
-  // Ammonium Nitrate normally belongs in Tank 2 alongside the other
-  // Nitrogen macros (see `TANK_2_SALTS`) — EXCEPT when it's this recipe's
-  // Ca(NO₃)₂/NH₄NO₃ double-salt share, in which case it moves into Tank 1
-  // with Calcium Nitrate instead (see the function doc comment above).
-  const TANK_A_KEYS_IN_TANK_2 = new Set<SaltKey>([
-    "potassiumNitrate",
-    ...(ammoniumNitrateIsCalciumDoubleSalt ? [] : (["ammoniumNitrate"] as const)),
-    "magnesiumNitrate",
-    "urea",
-  ])
-
-  for (const key of TANK_1_SALTS) {
-    tank1[key] = tankA[key]
-  }
-  if (ammoniumNitrateIsCalciumDoubleSalt) {
-    tank1.ammoniumNitrate = tankA.ammoniumNitrate
-  }
-  for (const key of TANK_2_SALTS) {
-    tank2[key] = TANK_A_KEYS_IN_TANK_2.has(key) ? tankA[key] : tankB[key]
-  }
-  // Micronutrients always fold into Tank 2 alongside the rest of the
-  // non-nitrogen components — there is no separate micros tank in this layout.
-  for (const key of TANK_3_SALTS) {
-    tank2[key] = key === "ironDTPA" ? tankA[key] : tankB[key]
-  }
+  addToSeparateNitrogenTanks(tank1, tank2, recipe)
 
   const hasMicronutrients = TANK_3_SALTS.some((key) => tank2[key] > 0)
 
@@ -1549,32 +1580,54 @@ function saltAmountsHasContent(salts: SaltAmounts): boolean {
 }
 
 /**
- * One stock tank per nutrient part the user entered. Each part's guaranteed
- * analysis and feed rate drive the salts in that tank — mirroring how
- * commercial multi-part lines are bottled.
- *
- * Each part's own `includedSalts` selection (not a shared/global one) gates
- * which raw salts the solver may reach for while sizing that part's tank.
- * This keeps the tanks faithful to the original product: a part that only
- * lists Calcium Nitrate on its label can never end up with Potassium
- * Nitrate or MKP in its tank, even if those salts are checked on a
- * different part.
+ * Everything a layout built from per-part solves reports the same way, no
+ * matter how it arranges the resulting salts into physical tanks.
  */
-export function calculateMultiPartStockTankRecipe(
+interface PerPartSolveTotals {
+  warnings: SaltGapWarning[]
+  autoAddedSalts: SaltAutoAddNote[]
+  directAddCalciumCarbonate?: DirectAddCalciumCarbonate
+  /** Every solved part's own label-derived targets, summed */
+  targets: ElementalTargets
+  delivered: ElementalTargets
+  deviations: TargetDeviation[]
+}
+
+/**
+ * Solve each dosed part on its own — the shared core of every layout that
+ * keeps a part's label, dose and checked salts to itself: the per-part tanks,
+ * the doser variant of them, and the Separate Nitrogen layout from three
+ * parts up.
+ *
+ * A part is solved strictly against its own guaranteed analysis and its own
+ * `includedSalts`, which is what keeps these layouts faithful to the original
+ * product: a part that only lists Calcium Nitrate on its label can never end
+ * up with Potassium Nitrate or MKP in its tank, even if those salts are
+ * checked on a different part.
+ *
+ * `onPartSolved` decides where that part's salts physically go; the totals
+ * every layout reports identically — warnings, auto-added salts, direct-add
+ * Calcium Carbonate, and the combined target/delivered ppm — are accumulated
+ * here so the layouts can't drift apart on them. Note the accumulation
+ * happens for every solved part, including one whose salts don't end up in a
+ * tank at all (a part whose only Calcium source is Carbonate, which is always
+ * a direct reservoir addition), since its nutrients still reach the
+ * reservoir.
+ */
+function solveEachPartIndependently(
   partsAnalysis: PartAnalysis[],
   parts: NutrientPart[],
   stockVolumeLiters: number,
-  dilutionRatio: number
-): MultiPartTankRecipe {
+  dilutionRatio: number,
+  onPartSolved: (feedingPart: NutrientPart, recipe: TankRecipe) => void
+): PerPartSolveTotals {
   const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
-  const tanks: PartStockTank[] = []
   const warningsByElement = new Map<string, SaltGapWarning>()
   const autoAddedByElement = new Map<string, SaltAutoAddNote>()
   const defaultMicroProfilePartId = pickDefaultMicroProfilePartId(partsAnalysis, parts)
-  let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
-  let tankIndex = 0
   const combinedTargets = emptyElementalTargets()
   const delivered = emptyElementalTargets()
+  let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
 
   for (const feedingPart of parts) {
     if (parsePositive(feedingPart.dose) === 0) continue
@@ -1588,14 +1641,7 @@ export function calculateMultiPartStockTankRecipe(
     const { targets } = applyMicroEstimates(rawTargets, {
       allowDefaultProfile: feedingPart.id === defaultMicroProfilePartId,
     })
-    const {
-      tankA,
-      tankB,
-      warnings = [],
-      directAddCalciumCarbonate: partDirectAdd,
-      autoAddedSalts = [],
-      delivered: partDelivered,
-    } = calculateStockTankRecipe(
+    const recipe = calculateStockTankRecipe(
       targets,
       stockVolumeLiters,
       dilutionRatio,
@@ -1604,40 +1650,127 @@ export function calculateMultiPartStockTankRecipe(
       calciumNitrateGramsPerGallonForPart(analysis, feedingPart),
       ureaNitrogenPpmForPart(feedingPart, analysis)
     )
-    for (const warning of warnings) warningsByElement.set(warning.element, warning)
-    for (const note of autoAddedSalts) autoAddedByElement.set(note.element, note)
-    directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
+
+    for (const warning of recipe.warnings ?? []) warningsByElement.set(warning.element, warning)
+    for (const note of recipe.autoAddedSalts ?? []) autoAddedByElement.set(note.element, note)
+    directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(
+      directAddCalciumCarbonate,
+      recipe.directAddCalciumCarbonate
+    )
     addElementalPpm(combinedTargets, targets)
-    addElementalPpm(delivered, partDelivered)
+    addElementalPpm(delivered, recipe.delivered)
 
-    // Calcium Carbonate never lands in a part's tank (folded into
-    // `directAddCalciumCarbonate` above instead), so a part whose only
-    // Calcium source is Carbonate legitimately has nothing left to weigh
-    // into a physical tank here — skip creating one for it.
-    const salts = combineSaltAmounts(tankA, tankB)
-    if (!saltAmountsHasContent(salts)) continue
-
-    tankIndex += 1
-    tanks.push({
-      index: tankIndex,
-      name: `Tank ${tankIndex}`,
-      partName: feedingPart.name,
-      partId: feedingPart.id,
-      salts,
-    })
+    onPartSolved(feedingPart, recipe)
   }
 
-  const warnings = Array.from(warningsByElement.values())
-  const autoAddedSalts = Array.from(autoAddedByElement.values())
-  const deviations = deviationsFromTotals(combinedTargets, delivered)
+  return {
+    warnings: Array.from(warningsByElement.values()),
+    autoAddedSalts: Array.from(autoAddedByElement.values()),
+    directAddCalciumCarbonate,
+    targets: combinedTargets,
+    delivered,
+    deviations: deviationsFromTotals(combinedTargets, delivered),
+  }
+}
+
+/**
+ * One stock tank per nutrient part the user entered. Each part's guaranteed
+ * analysis and feed rate drive the salts in that tank — mirroring how
+ * commercial multi-part lines are bottled. See `solveEachPartIndependently`
+ * for how each part is solved in isolation.
+ */
+export function calculateMultiPartStockTankRecipe(
+  partsAnalysis: PartAnalysis[],
+  parts: NutrientPart[],
+  stockVolumeLiters: number,
+  dilutionRatio: number
+): MultiPartTankRecipe {
+  const tanks: PartStockTank[] = []
+
+  const totals = solveEachPartIndependently(
+    partsAnalysis,
+    parts,
+    stockVolumeLiters,
+    dilutionRatio,
+    (feedingPart, recipe) => {
+      // Calcium Carbonate never lands in a part's tank (it comes back as
+      // `directAddCalciumCarbonate` instead), so a part whose only Calcium
+      // source is Carbonate legitimately has nothing left to weigh into a
+      // physical tank here — skip creating one for it.
+      const salts = combineSaltAmounts(recipe.tankA, recipe.tankB)
+      if (!saltAmountsHasContent(salts)) return
+
+      const index = tanks.length + 1
+      tanks.push({
+        index,
+        name: `Tank ${index}`,
+        partName: feedingPart.name,
+        partId: feedingPart.id,
+        salts,
+      })
+    }
+  )
+
   return {
     tanks,
-    warnings,
-    isApproximate: warnings.length > 0 || deviations.length > 0,
-    directAddCalciumCarbonate,
-    autoAddedSalts,
-    delivered,
-    deviations,
+    warnings: totals.warnings,
+    isApproximate: totals.warnings.length > 0 || totals.deviations.length > 0,
+    directAddCalciumCarbonate: totals.directAddCalciumCarbonate,
+    autoAddedSalts: totals.autoAddedSalts,
+    delivered: totals.delivered,
+    deviations: totals.deviations,
+  }
+}
+
+/**
+ * The Separate Nitrogen layout for a multi-part line — same two physical
+ * tanks as `calculateSeparateCalciumRecipe`, but built from per-part solves.
+ *
+ * Every part is solved on its own against its own label, dose and checked
+ * salts (see `solveEachPartIndependently`), so the grams here are the same
+ * ones the per-part tanks would call for — this layout only differs in how
+ * those grams are grouped into physical tanks: each part's Calcium source
+ * pours into the shared Tank 1, everything else into the shared Tank 2. That
+ * means end-of-flower tapering (drop Tank 1, drop Nitrogen) costs nothing in
+ * fidelity to the line being replicated, which is the whole problem with
+ * pooling the parts and re-solving them as one: that hands the solver freedom
+ * to cover one bottle's target out of another bottle's salts, and the further
+ * a line is split across bottles the further the result drifts from it.
+ *
+ * Pooling parts into a shared tank stays safe because the split is chemical,
+ * not per-bottle: Tank 1 only ever receives Calcium salts, so no part's
+ * phosphate or sulfate can ever meet another part's Calcium at concentrated
+ * strength (see `TANK_1_SALTS` / `TANK_2_SALTS`).
+ */
+export function calculateSeparateNitrogenMultiPartRecipe(
+  partsAnalysis: PartAnalysis[],
+  parts: NutrientPart[],
+  stockVolumeLiters: number,
+  dilutionRatio: number
+): ThreeTankRecipe {
+  const tank1 = emptySaltAmounts()
+  const tank2 = emptySaltAmounts()
+
+  const totals = solveEachPartIndependently(
+    partsAnalysis,
+    parts,
+    stockVolumeLiters,
+    dilutionRatio,
+    (_feedingPart, recipe) => {
+      addToSeparateNitrogenTanks(tank1, tank2, recipe)
+    }
+  )
+
+  return {
+    tank1,
+    tank2,
+    hasMicronutrients: TANK_3_SALTS.some((key) => tank2[key] > 0),
+    warnings: totals.warnings,
+    isApproximate: totals.warnings.length > 0 || totals.deviations.length > 0,
+    directAddCalciumCarbonate: totals.directAddCalciumCarbonate,
+    autoAddedSalts: totals.autoAddedSalts,
+    delivered: totals.delivered,
+    deviations: totals.deviations,
   }
 }
 
@@ -1664,82 +1797,44 @@ export function calculateDoserMultiPartRecipe(
   stockVolumeLiters: number,
   dilutionRatio: number
 ): MultiPartTankRecipe {
-  const analysisById = new Map(partsAnalysis.map((part) => [part.id, part]))
-  const macroTanks: PartStockTank[] = []
+  const tanks: PartStockTank[] = []
   const consolidatedMicros = emptySaltAmounts()
-  const warningsByElement = new Map<string, SaltGapWarning>()
-  const autoAddedByElement = new Map<string, SaltAutoAddNote>()
-  const defaultMicroProfilePartId = pickDefaultMicroProfilePartId(partsAnalysis, parts)
-  let directAddCalciumCarbonate: DirectAddCalciumCarbonate | undefined
-  let tankIndex = 0
-  const combinedTargets = emptyElementalTargets()
-  const delivered = emptyElementalTargets()
-
   const microKeys = new Set<SaltKey>(TANK_3_SALTS)
 
-  for (const feedingPart of parts) {
-    if (parsePositive(feedingPart.dose) === 0) continue
-    const analysis = analysisById.get(feedingPart.id)
-    if (!analysis) continue
-
-    const rawTargets = calculateElementalTargets([analysis], [feedingPart])
-    const hasAnyElement = Object.values(rawTargets).some((value) => value > 0)
-    if (!hasAnyElement) continue
-
-    const { targets } = applyMicroEstimates(rawTargets, {
-      allowDefaultProfile: feedingPart.id === defaultMicroProfilePartId,
-    })
-    const {
-      tankA,
-      tankB,
-      warnings = [],
-      directAddCalciumCarbonate: partDirectAdd,
-      autoAddedSalts = [],
-      delivered: partDelivered,
-    } = calculateStockTankRecipe(
-      targets,
-      stockVolumeLiters,
-      dilutionRatio,
-      analysis.includedSalts,
-      parsePositive(analysis.calciumChlorideGramsPerGallon),
-      calciumNitrateGramsPerGallonForPart(analysis, feedingPart),
-      ureaNitrogenPpmForPart(feedingPart, analysis)
-    )
-    for (const warning of warnings) warningsByElement.set(warning.element, warning)
-    for (const note of autoAddedSalts) autoAddedByElement.set(note.element, note)
-    directAddCalciumCarbonate = combineDirectAddCalciumCarbonate(directAddCalciumCarbonate, partDirectAdd)
-    addElementalPpm(combinedTargets, targets)
-    addElementalPpm(delivered, partDelivered)
-    const allSalts = combineSaltAmounts(tankA, tankB)
-
-    const macroSalts = emptySaltAmounts()
-    for (const key of SALT_DISPLAY_ORDER) {
-      if (microKeys.has(key)) {
-        consolidatedMicros[key] += allSalts[key]
-      } else {
-        macroSalts[key] = allSalts[key]
+  const totals = solveEachPartIndependently(
+    partsAnalysis,
+    parts,
+    stockVolumeLiters,
+    dilutionRatio,
+    (feedingPart, recipe) => {
+      const allSalts = combineSaltAmounts(recipe.tankA, recipe.tankB)
+      const macroSalts = emptySaltAmounts()
+      for (const key of SALT_DISPLAY_ORDER) {
+        if (microKeys.has(key)) {
+          consolidatedMicros[key] += allSalts[key]
+        } else {
+          macroSalts[key] = allSalts[key]
+        }
       }
+
+      if (!saltAmountsHasContent(macroSalts)) return
+
+      const index = tanks.length + 1
+      tanks.push({
+        index,
+        name: `Tank ${index}`,
+        partName: feedingPart.name,
+        partId: feedingPart.id,
+        salts: macroSalts,
+      })
     }
-
-    if (!saltAmountsHasContent(macroSalts)) continue
-
-    tankIndex += 1
-    macroTanks.push({
-      index: tankIndex,
-      name: `Tank ${tankIndex}`,
-      partName: feedingPart.name,
-      partId: feedingPart.id,
-      salts: macroSalts,
-    })
-  }
-
-  const tanks = [...macroTanks]
+  )
 
   if (saltAmountsHasContent(consolidatedMicros)) {
-    tankIndex += 1
+    const index = tanks.length + 1
     tanks.push({
-      index: tankIndex,
-      name: `Tank ${tankIndex}`,
+      index,
+      name: `Tank ${index}`,
       partName: "Micros",
       partId: "consolidated-micros",
       salts: consolidatedMicros,
@@ -1747,17 +1842,14 @@ export function calculateDoserMultiPartRecipe(
     })
   }
 
-  const warnings = Array.from(warningsByElement.values())
-  const autoAddedSalts = Array.from(autoAddedByElement.values())
-  const deviations = deviationsFromTotals(combinedTargets, delivered)
   return {
     tanks,
-    warnings,
-    isApproximate: warnings.length > 0 || deviations.length > 0,
-    directAddCalciumCarbonate,
-    autoAddedSalts,
-    delivered,
-    deviations,
+    warnings: totals.warnings,
+    isApproximate: totals.warnings.length > 0 || totals.deviations.length > 0,
+    directAddCalciumCarbonate: totals.directAddCalciumCarbonate,
+    autoAddedSalts: totals.autoAddedSalts,
+    delivered: totals.delivered,
+    deviations: totals.deviations,
   }
 }
 

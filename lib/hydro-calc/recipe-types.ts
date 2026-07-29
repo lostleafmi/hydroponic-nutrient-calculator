@@ -723,14 +723,16 @@ export function getEnabledSaltKeys(selection?: IncludedSaltsSelection): Set<Salt
  * where a checkbox is true if ANY part checked it.
  *
  * Used only by recipe layouts that intentionally recombine nutrients across
- * parts by chemistry rather than by original bottle (the "Separate Nitrogen"
- * 3-tank layout, the Direct Mix layout, and the EC estimate) — those modes
- * aren't trying to mirror which part a salt came from, so any salt the user
- * indicated is present *anywhere* in their product is fair game. The
- * per-part tank layouts (`"per-part"` and the doser's "one tank per part")
- * must NOT use this — they read each part's own `includedSalts` directly so
- * salts stay confined to the part the user said they belong to, which is
- * what makes them the faithful replication path.
+ * parts by chemistry rather than by original bottle (the Direct Mix layout,
+ * the EC estimate, and the Separate Nitrogen layout below three parts — see
+ * `SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS`) — those modes aren't trying
+ * to mirror which part a salt came from, so any salt the user indicated is
+ * present *anywhere* in their product is fair game. Every layout built from
+ * per-part solves (`"per-part"`, the doser's "one tank per part", and
+ * Separate Nitrogen from three parts up) must NOT use this — they read each
+ * part's own `includedSalts` directly so salts stay confined to the part the
+ * user said they belong to, which is what makes them the faithful
+ * replication path.
  */
 export function unionIncludedSalts(parts: PartAnalysis[]): IncludedSaltsSelection {
   const union: IncludedSaltsSelection = { ...DEFAULT_INCLUDED_SALTS }
@@ -758,11 +760,27 @@ export function sumCalciumChlorideGramsPerGallon(parts: PartAnalysis[]): number 
   }, 0)
 }
 
-/** Max parts for which the Separate Nitrogen tapering layout is offered */
-export const SEPARATE_NITROGEN_MAX_PARTS = 3
+/**
+ * From this many parts up, the Separate Nitrogen layout solves every part on
+ * its own — exactly like the per-part tanks — and only *then* groups the
+ * resulting salts into its two physical tanks (see
+ * `calculateSeparateNitrogenMultiPartRecipe`). Tapering Tank 1 still drops
+ * Nitrogen, but the grams being tapered are the ones the grower's own parts
+ * called for rather than a fresh recipe solved from every part's salts pooled
+ * together, which is what used to pull a 3-part line away from the feed it
+ * was replicating.
+ *
+ * Below this count the layout keeps the pooled solve (see
+ * `calculateSeparateCalciumRecipe` and `unionIncludedSalts`). With one part
+ * there is nothing to pool in the first place, and with two the pooled solve
+ * has enough freedom to land closer to the label's summed ppm than solving
+ * each bottle alone does — the drift only becomes the bigger of the two
+ * problems once there are three or more bottles to shuffle nutrients between.
+ */
+export const SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS = 3
 
-export function isSeparateNitrogenAvailable(partCount: number): boolean {
-  return partCount <= SEPARATE_NITROGEN_MAX_PARTS
+export function separateNitrogenSolvesPartsIndependently(partCount: number): boolean {
+  return partCount >= SEPARATE_NITROGEN_PER_PART_SOLVE_MIN_PARTS
 }
 
 /**
@@ -788,10 +806,38 @@ export function isPerPartReplicationPreferred(partCount: number): boolean {
 }
 
 /**
- * `"per-part"` was previously called `"ab"`, back when the option was framed
- * as "combine into A + B tanks". The name was always a misnomer — the layout
- * builds one tank per part in the feed chart, not a fixed pair of chemistry
- * tanks — so it's since been renamed. Saved formulations still carry the old
+ * Beyond a handful of parts, spelling every tank letter out stops reading as
+ * a name and starts reading as a list, so the title falls back to naming the
+ * rule instead. No commercial line comes close to this many bottles.
+ */
+const MAX_LETTERED_PARTS = 6
+
+/**
+ * Name the per-part option after the tanks it actually produces — "Combine
+ * into A + B tanks" for a two-part line, "Combine into A, B & C tanks" for
+ * three, and so on. The letters are positional (Part A, Part B, … — the same
+ * order and lettering the Guaranteed Analysis screen names new parts after),
+ * not the grower's own part names, which they're free to rename to anything.
+ *
+ * A single part has no pair of tanks to spell out, so it falls back to naming
+ * the rule instead — as does an implausibly long line (see
+ * `MAX_LETTERED_PARTS`).
+ */
+export function perPartStockTankOptionTitle(partCount: number): string {
+  if (partCount < 2 || partCount > MAX_LETTERED_PARTS) return "One Stock Tank per Part"
+  const letters = Array.from({ length: partCount }, (_, index) => String.fromCharCode(65 + index))
+  if (partCount === 2) return `Combine into ${letters.join(" + ")} tanks`
+  const last = letters[letters.length - 1]
+  return `Combine into ${letters.slice(0, -1).join(", ")} & ${last} tanks`
+}
+
+/**
+ * `"per-part"` was previously the stored value `"ab"`, from when the option
+ * was hard-coded around a two-part line. The layout builds one tank per part
+ * in the feed chart whatever the part count, so the stored value is now named
+ * after that rule and the A/B wording lives only in the on-screen title, where
+ * it follows the actual number of parts (see
+ * `perPartStockTankOptionTitle`). Saved formulations still carry the old
  * value, so normalize whatever comes back from storage before using it.
  */
 export function normalizeStockTankOption(value: unknown): StockTankOption | null {

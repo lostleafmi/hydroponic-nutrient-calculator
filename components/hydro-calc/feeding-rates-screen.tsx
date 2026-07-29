@@ -31,7 +31,8 @@ export interface NutrientPart {
 
 import {
   isPerPartReplicationPreferred,
-  isSeparateNitrogenAvailable,
+  perPartStockTankOptionTitle,
+  separateNitrogenSolvesPartsIndependently,
 } from "@/lib/hydro-calc/recipe-types"
 
 /**
@@ -59,18 +60,22 @@ export function FeedingRatesScreen({
   onBack,
   onNext
 }: FeedingRatesScreenProps) {
-  const canUseSeparateNitrogen = isSeparateNitrogenAvailable(parts.length)
   // With more than one part, keeping each part in its own tank is what holds
   // the recipe closest to the line being replicated — every other layout
   // merges the parts and re-solves them as one. See
   // `isPerPartReplicationPreferred`.
   const prefersPerPartTanks = isPerPartReplicationPreferred(parts.length)
+  // From three parts up, Separate Nitrogen is built out of those same
+  // per-part solves rather than from the parts pooled together, so it no
+  // longer trades fidelity for tapering. See
+  // `separateNitrogenSolvesPartsIndependently`.
+  const separateNitrogenKeepsPartsIntact = separateNitrogenSolvesPartsIndependently(parts.length)
   const tankCountLabel = `${parts.length} tank${parts.length === 1 ? "" : "s"}`
 
   const perPartOptionCard = (
     <StockTankOptionCard
       value="per-part"
-      title="One Stock Tank per Part"
+      title={perPartStockTankOptionTitle(parts.length)}
       description={
         prefersPerPartTanks
           ? `Rebuilds each part of your feed chart as its own stock tank (${tankCountLabel}), from only that part's label percentages, its dose, and the salts you checked for it. Measure mL out of each tank into your reservoir by hand, exactly like you would with the original bottles — a doser works too, but isn't required.`
@@ -83,23 +88,32 @@ export function FeedingRatesScreen({
     />
   )
 
-  const separateNitrogenOptionCard = canUseSeparateNitrogen ? (
+  const separateNitrogenDescription = (() => {
+    const purpose =
+      "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor."
+    if (separateNitrogenKeepsPartsIntact) {
+      return `${purpose} Each of your ${parts.length} parts is still solved on its own, from only its own label and salts — the same math as one tank per part — and the salts are then grouped into 2 tanks: your Calcium and its Nitrogen in Tank 1, everything else in Tank 2. Taper Tank 1 near harvest and the rest of the recipe stays put.`
+    }
+    if (prefersPerPartTanks) {
+      return `${purpose} Blends your parts together into 2 tanks by chemistry instead of keeping them separate, so the ppm can drift a little from your original line.`
+    }
+    return `${purpose} Best for hand mixing into your reservoir or batch tank.`
+  })()
+
+  const separateNitrogenOptionCard = (
     <StockTankOptionCard
       value="separate"
       title="Separate Nitrogen for tapering before harvest"
-      description={
-        prefersPerPartTanks
-          ? "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor. Blends your parts together into 2 tanks by chemistry instead of keeping them separate, so the ppm can drift a little from your original line."
-          : "Isolate Nitrogen so you can taper it at the end of flowering for better smoothness and flavor. Best for hand mixing into your reservoir or batch tank."
-      }
+      description={separateNitrogenDescription}
       icon={<Droplets className="h-5 w-5" />}
       selected={stockTankOption === "separate"}
       recommended={!prefersPerPartTanks}
       safetyLabel="Safest"
       safetyTone="safe"
       note="Only for flower recipes"
+      accuracyLabel={separateNitrogenKeepsPartsIntact ? "Matches per-part amounts" : undefined}
     />
-  ) : null
+  )
 
   const addPart = () => {
     const newPart: NutrientPart = {
@@ -191,13 +205,14 @@ export function FeedingRatesScreen({
             onValueChange={(value) => onStockTankOptionChange(value as StockTankOption)}
             className="space-y-3"
           >
-            {/* The recommended option leads: for multi-part lines that's the
-                per-part tanks, since they're the only layout that keeps each
-                part's label, dose and salts to itself and so reproduce the
-                original feed most closely. A single part has nothing to keep
-                separate, so Separate Nitrogen leads there instead. */}
-            {prefersPerPartTanks ? perPartOptionCard : separateNitrogenOptionCard}
-            {prefersPerPartTanks ? separateNitrogenOptionCard : perPartOptionCard}
+            {/* Separate Nitrogen leads at every part count: end-of-flower
+                tapering is the one capability no other layout offers, and
+                it's what growers come to this screen looking for. The
+                per-part tanks follow, badged as the closest match to the
+                original line — for multi-part feeds they're still the
+                recommended default. */}
+            {separateNitrogenOptionCard}
+            {perPartOptionCard}
             <StockTankOptionCard
               value="doser"
               title="Doser / Injector Optimized"
@@ -222,8 +237,8 @@ export function FeedingRatesScreen({
               closest you can get to the original feed: each tank is solved only against its own
               part, so Part A stays Part A instead of having nutrients shuffled into it from the
               other bottles.
-              {!canUseSeparateNitrogen &&
-                " Separate Nitrogen tapering is only available for 3-part feeds or fewer."}
+              {separateNitrogenKeepsPartsIntact &&
+                ` Separate Nitrogen weighs out those same per-part amounts, so tapering Nitrogen before harvest costs you nothing here — it just pours them into 2 tanks instead of ${parts.length}.`}
             </p>
           )}
 
