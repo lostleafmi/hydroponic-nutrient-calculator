@@ -218,9 +218,13 @@ export function GuaranteedAnalysisScreen({
           <div className="rounded-lg border border-border bg-secondary/30 p-4">
             <h4 className="mb-1 font-semibold text-foreground">Directions</h4>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Input your product&apos;s nutrient percentages from the guaranteed analysis on the label.
-              Take a picture or a screenshot of the guaranteed analysis on your label and upload it
-              for reference while you input the values from the label into the corresponding fields.
+              Take a picture or screenshot of the guaranteed analysis section of the label on your
+              bag/bottle. All you will need are the nutrient percentages and the &quot;Derived
+              from&quot; section, if your picture is of the entire label it will be harder to read
+              and reference the numbers with this tool, use the zoom feature if needed. Use the
+              picture to input all of the corresponding nutrient percentages manually and then
+              refer to the &quot;Derived from&quot; section of your picture to check all of the
+              Salts &amp; Inputs in each part.
             </p>
           </div>
 
