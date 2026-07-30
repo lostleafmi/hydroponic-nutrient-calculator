@@ -38,7 +38,6 @@ import {
   isLiquidDoseUnit,
   isPerPartReplicationPreferred,
   perPartStockTankOptionTitle,
-  separateNitrogenSolvesPartsIndependently,
   volumeUnitNoun,
   type DoseUnit,
   type VolumeUnit,
@@ -100,58 +99,29 @@ export function FeedingRatesScreen({
   // merges the parts and re-solves them as one. See
   // `isPerPartReplicationPreferred`.
   const prefersPerPartTanks = isPerPartReplicationPreferred(parts.length)
-  // From three parts up, Separate Nitrogen is built out of those same
-  // per-part solves rather than from the parts pooled together, and it keeps
-  // each part in a tank of its own without adding one — so it no longer trades
-  // fidelity, per-bottle control or tank count for tapering. See
-  // `separateNitrogenSolvesPartsIndependently`.
-  const separateNitrogenKeepsPartsIntact = separateNitrogenSolvesPartsIndependently(parts.length)
-  const tankCountLabel = `${parts.length} tank${parts.length === 1 ? "" : "s"}`
 
   const perPartOptionCard = (
     <StockTankOptionCard
       value="per-part"
       title={perPartStockTankOptionTitle(parts.length)}
-      description={
-        prefersPerPartTanks
-          ? `Rebuilds each part of your feed chart as its own stock tank (${tankCountLabel}), from only that part's label percentages, its dose, and the salts you checked for it. Measure mL out of each tank into your reservoir by hand, exactly like you would with the original bottles — a doser works too, but isn't required.`
-          : `One stock tank for your single part (${tankCountLabel}). Measure mL out of it into your reservoir by hand, exactly like you would with the original bottle — a doser works too, but isn't required.`
-      }
+      description="Replicates your line exactly as-is to be mixed into stock tanks then dosed into a batch tank"
       icon={<FlaskConical className="h-5 w-5" />}
       selected={stockTankOption === "per-part"}
-      recommended={prefersPerPartTanks}
-      accuracyLabel={prefersPerPartTanks ? "Closest to your line" : undefined}
+      accuracyLabel={prefersPerPartTanks ? "Replicate your line as is" : undefined}
     />
   )
-
-  const separateNitrogenDescription = (() => {
-    const purpose =
-      "Gathers every Nitrogen source — your Calcium Nitrate and your Potassium Nitrate together — into one stock tank, so you can taper Nitrogen at the end of flowering with a single dial for better smoothness and flavor."
-    if (separateNitrogenKeepsPartsIntact) {
-      return `${purpose} No more than ${tankCountLabel} — each of your ${parts.length} parts solved on its own, from only its own label and salts, the same math as one tank per part. Nothing is re-solved; the Calcium and the Nitrogen just move into a tank of their own, and your remaining parts keep tanks of theirs.`
-    }
-    if (prefersPerPartTanks) {
-      return `${purpose} Blends your parts together into 2 tanks by chemistry instead of keeping them separate, so the ppm can drift a little from your original line.`
-    }
-    return `${purpose} Best for hand mixing into your reservoir or batch tank.`
-  })()
 
   const separateNitrogenOptionCard = (
     <StockTankOptionCard
       value="separate"
       title="Separate Nitrogen for tapering before harvest"
-      description={separateNitrogenDescription}
+      description={
+        'Formulates stock tanks to be dosed into batch tanks. Combines all Nitrogen sources into one tank while replicating your exact nutrient lines profile so you can taper Nitrogen at the end of the flowering cycle for better flavor and smoothness. If you are using dosers and want this capability simply select the Doser option, calculate the recipe and then select "Separate nitrogen" in the tank layout.'
+      }
       icon={<Droplets className="h-5 w-5" />}
       selected={stockTankOption === "separate"}
       recommended={!prefersPerPartTanks}
-      safetyLabel="Safest"
-      safetyTone="safe"
       note="Only for flower recipes"
-      accuracyLabel={
-        separateNitrogenKeepsPartsIntact
-          ? `All N in one tank · ${tankCountLabel} or fewer`
-          : undefined
-      }
     />
   )
 
@@ -280,7 +250,7 @@ export function FeedingRatesScreen({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-xl text-foreground">
             <FlaskConical className="h-5 w-5 text-primary" />
-            <span>How do you want to mix your stock tanks?</span>
+            <span>How do you want to mix your nutrients?</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="h-4 w-4 cursor-help text-muted-foreground" />
@@ -305,39 +275,25 @@ export function FeedingRatesScreen({
             {/* Separate Nitrogen leads at every part count: end-of-flower
                 tapering is the one capability no other layout offers, and
                 it's what growers come to this screen looking for. The
-                per-part tanks follow, badged as the closest match to the
-                original line — for multi-part feeds they're still the
-                recommended default. */}
+                per-part tanks follow, which replicate the original line
+                exactly as-is. */}
             {separateNitrogenOptionCard}
             {perPartOptionCard}
             <StockTankOptionCard
               value="doser"
               title="Doser / Injector Optimized"
-              description={`Starts from the same one-tank-per-part recipe (${tankCountLabel}), then tunes it for injector hardware: the ratio snaps to a standard doser preset, and every part's micronutrients are pooled into one extra tank so no suction line ends up with a pinch too small to weigh accurately.`}
+              description="Automatically determines recommended doser ratios and formulates stock tanks to replicate your nutrient line"
               icon={<Gauge className="h-5 w-5" />}
               selected={stockTankOption === "doser"}
             />
             <StockTankOptionCard
               value="direct"
               title="Mix Directly into Reservoir"
-              description="No stock tanks. You add each salt straight into the reservoir, one at a time, stirring until it fully dissolves before adding the next. Simplest for small batches you mix fresh each time."
+              description="No stock tanks, directly add each input into your reservoir"
               icon={<Beaker className="h-5 w-5" />}
               selected={stockTankOption === "direct"}
-              safetyLabel="Most careful order needed"
-              safetyTone="danger"
             />
           </RadioGroup>
-
-          {prefersPerPartTanks && (
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              With {parts.length} parts in your nutrient line, one stock tank per part is the
-              closest you can get to the original feed: each tank is solved only against its own
-              part, so Part A stays Part A instead of having nutrients shuffled into it from the
-              other bottles.
-              {separateNitrogenKeepsPartsIntact &&
-                ` Separate Nitrogen weighs out those same per-part amounts and keeps your parts in tanks of their own, so tapering Nitrogen before harvest costs you nothing here — it only lifts the Calcium and the Nitrogen out into one tank you dial back on its own.`}
-            </p>
-          )}
 
         </CardContent>
       </Card>
