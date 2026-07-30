@@ -33,7 +33,6 @@ export interface NutrientPart {
 }
 
 import {
-  chartDoseVolumePhrase,
   doseUnitFor,
   doseUnitLabel,
   isLiquidDoseUnit,
@@ -156,7 +155,6 @@ export function FeedingRatesScreen({
     />
   )
 
-  const chartVolumePhrase = chartDoseVolumePhrase(volumeUnit)
   const dryDoseLabel = doseUnitLabel(doseUnitFor("g", volumeUnit))
   const liquidDoseLabel = doseUnitLabel(doseUnitFor("ml", volumeUnit))
 
@@ -192,12 +190,11 @@ export function FeedingRatesScreen({
                 <span>Enter dosage rates from your feed chart</span>
               </CardTitle>
               <CardDescription>
-                Look at your nutrient label or feed chart and type in how much of each part you use
-                per {chartVolumePhrase} for the growth stage you&apos;re in.{" "}
-                {volumeUnit === "liters" &&
-                  "That's the number a metric chart already prints, so copy it across as it's written — no dividing it down to a per-liter figure. "}
-                The unit starts at {dryDoseLabel} (good for dry powders). Flip the switch on the
-                right to {liquidDoseLabel} if your nutrients come as a liquid.
+                Enter the dosages of each part for whatever stage of the growth cycle this
+                calculation is for. The toggle is automatically set to {dryDoseLabel} for dry
+                powders, if you are replicating a liquid line simply toggle the switch on the right
+                to &quot;{liquidDoseLabel}&quot;. If you would rather use liters instead of gallons
+                you can use the toggle at the top right.
               </CardDescription>
             </div>
             <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
