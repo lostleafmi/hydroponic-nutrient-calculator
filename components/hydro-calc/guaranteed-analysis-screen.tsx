@@ -757,13 +757,14 @@ function PartAnalysisCard({
                 )}
                 {option.id === "urea" && (
                   <div>
-                    <div className="flex items-center gap-2">
-                      <Label
-                        htmlFor={`salt-${part.id}-${option.id}-percent`}
-                        className="text-xs text-muted-foreground"
-                      >
-                        % Urea Nitrogen (required)
-                      </Label>
+                    <Label
+                      htmlFor={`salt-${part.id}-${option.id}-percent`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      % Urea Nitrogen (required) — this number should be just under total nitrogen
+                      in the percentages.
+                    </Label>
+                    <div className="mt-1 flex items-center gap-2">
                       <Input
                         id={`salt-${part.id}-${option.id}-percent`}
                         type="number"
