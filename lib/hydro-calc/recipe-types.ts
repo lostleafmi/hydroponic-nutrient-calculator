@@ -16,8 +16,15 @@ import type { NutrientPart, StockTankOption } from "@/components/hydro-calc/feed
 /** Typical liquid nutrient concentrate density (g/mL) */
 export const LIQUID_CONCENTRATE_DENSITY = 1.2
 
-/** US gallons → liters */
-export const LITERS_PER_GALLON = 3.785
+/**
+ * US gallons → liters, exact. Every gallon↔liter hop in the calculator goes
+ * through this one constant so a rate quoted per gallon and a concentration
+ * quoted per liter can never disagree by a rounded conversion.
+ */
+export const LITERS_PER_GALLON = 3.785411784
+
+/** US gallons → millilitres — `LITERS_PER_GALLON` in the unit stock doses are measured in */
+export const ML_PER_GALLON = LITERS_PER_GALLON * 1000
 
 /** Guaranteed-analysis oxide → elemental conversion factors */
 export const P2O5_TO_P = 30.974 / 70.974 // ≈ 0.436
@@ -1599,6 +1606,28 @@ const SALT_FRACTION_TO_ELEMENT = {
 } as const satisfies Record<string, keyof ElementalTargets>
 
 /**
+ * Every element one salt carries, paired with its weight fraction — the
+ * composition half of any grams→ppm conversion, split out from the unit
+ * arithmetic so the two can be checked against each other.
+ *
+ * `elementalPpmFromSaltAmounts` below converts grams held in a stock tank;
+ * `deliveredPpmFromStockTankDose` (see `displayed-recipe.ts`) converts the
+ * g-per-gallon-of-stock and mL/gal rate the grower actually reads off the
+ * screen. Both must land on the same ppm, and they only do so unconditionally
+ * if they agree about what's in each salt — hence one shared table.
+ */
+export function saltElementFractions(key: SaltKey): Array<[keyof ElementalTargets, number]> {
+  const composition: Record<string, unknown> = RAW_SALTS[key]
+  const fractions: Array<[keyof ElementalTargets, number]> = []
+  for (const [fraction, element] of Object.entries(SALT_FRACTION_TO_ELEMENT)) {
+    const elementFraction = composition[fraction]
+    if (typeof elementFraction !== "number" || elementFraction <= 0) continue
+    fractions.push([element, elementFraction])
+  }
+  return fractions
+}
+
+/**
  * Elemental ppm a set of resolved stock-tank salt amounts ACTUALLY delivers
  * to the working (reservoir) solution once diluted 1:`dilutionRatio`.
  *
@@ -1628,10 +1657,7 @@ export function elementalPpmFromSaltAmounts(
   for (const saltKey of Object.keys(RAW_SALTS) as SaltKey[]) {
     const grams = salts[saltKey]
     if (!(grams > 0)) continue
-    const composition: Record<string, unknown> = RAW_SALTS[saltKey]
-    for (const [fraction, element] of Object.entries(SALT_FRACTION_TO_ELEMENT)) {
-      const elementFraction = composition[fraction]
-      if (typeof elementFraction !== "number" || elementFraction <= 0) continue
+    for (const [element, elementFraction] of saltElementFractions(saltKey)) {
       delivered[element] += ((grams * elementFraction) / stockVolumeLiters) * (1000 / dilutionRatio)
     }
   }

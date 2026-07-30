@@ -506,8 +506,27 @@ function refineSaltAmountsToTargets(
   }
 
   variables.forEach((variable, index) => {
+    // A variable the fit wanted at zero lands a few float ulps above it
+    // instead: the projection clamps at exactly 0 only when the closed-form
+    // step overshoots, and the anchor keeps nudging it back toward whatever
+    // the sequential pass left. What comes out is a salt "in" the recipe at
+    // 4e-14 g, which reads as a real ingredient to everything downstream —
+    // it earns a row in the tank card, it makes `expectAbsent` fire, it drags
+    // a taperable-Nitrogen warning along. Anything delivering less than the
+    // convergence floor is noise by the same standard the loop above used to
+    // decide it had converged, so round it away here rather than leaving
+    // every consumer to guess at its own threshold.
+    // Guarded on a non-empty coefficient set: a salt carrying none of the
+    // fitted elements was skipped by the descent entirely and still holds
+    // whatever the sequential pass gave it, which is a real amount this pass
+    // has no standing to erase.
+    const negligible =
+      coefficients[index].size > 0 &&
+      [...coefficients[index].values()].every(
+        (ppmPerUnit) => values[index] * ppmPerUnit < REFINEMENT_CONVERGENCE_PPM
+      )
     for (const { saltKey, gramsPerUnit } of variable.components) {
-      amounts[saltKey] = values[index] * gramsPerUnit
+      amounts[saltKey] = negligible ? 0 : values[index] * gramsPerUnit
     }
   })
 }

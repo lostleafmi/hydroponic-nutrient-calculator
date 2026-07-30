@@ -97,6 +97,11 @@ import {
   type SeparateNitrogenTank,
   type TargetDeviation,
 } from "@/lib/hydro-calc/recipe-types"
+import {
+  scaleDirectMixRecipe,
+  scaleMultiPartTankRecipe,
+  scaleSeparateNitrogenRecipe,
+} from "@/lib/hydro-calc/displayed-recipe"
 
 /** Rendered before the first Server Action response arrives */
 const EMPTY_TARGETS = emptyElementalTargets()
@@ -317,9 +322,44 @@ export function RecipeScreen({
   const estimatedEc = calcResult?.estimatedEc ?? null
   const calciumNitrateEcPpmDelta = calcResult?.calciumNitrateEcPpmDelta ?? { calciumPpmDelta: 0, nitrogenPpmDelta: 0 }
   const saltDerivedSulfurPpm = calcResult?.saltDerivedSulfurPpm ?? 0
-  const separateNitrogenRecipe = calcResult?.separateNitrogenRecipe ?? EMPTY_SEPARATE_NITROGEN_RECIPE
-  const multiPartRecipe = calcResult?.multiPartRecipe ?? EMPTY_MULTI_PART_RECIPE
-  const directRecipe = calcResult?.directRecipe ?? EMPTY_DIRECT_RECIPE
+  const solvedSeparateNitrogenRecipe =
+    calcResult?.separateNitrogenRecipe ?? EMPTY_SEPARATE_NITROGEN_RECIPE
+  const solvedMultiPartRecipe = calcResult?.multiPartRecipe ?? EMPTY_MULTI_PART_RECIPE
+  const solvedDirectRecipe = calcResult?.directRecipe ?? EMPTY_DIRECT_RECIPE
+
+  const parsedTargetEc = parseFloat(targetEcInput)
+  /**
+   * How far off the solver's own EC estimate the grower has asked to run. At a
+   * fixed dilution ratio the dose rate never moves, so hitting a different EC
+   * means scaling every gram in every stock tank — and with them the ppm those
+   * grams deliver, the concentrations the solubility check looks at, and the
+   * amounts that get exported. Applied once, to the recipes themselves, just
+   * below; see `lib/hydro-calc/displayed-recipe.ts` for why it isn't a
+   * formatting concern.
+   */
+  const ecScaleFactor =
+    estimatedEc !== null && estimatedEc > 0 && parsedTargetEc > 0
+      ? parsedTargetEc / estimatedEc
+      : 1
+
+  /**
+   * The recipes as the grower sees them — at their chosen Target EC. Everything
+   * below reads these rather than what the solver returned, so the tank cards,
+   * the "What your plants will get" panel, the solubility report and the
+   * exported formulation all describe one and the same set of grams.
+   */
+  const separateNitrogenRecipe = useMemo(
+    () => scaleSeparateNitrogenRecipe(solvedSeparateNitrogenRecipe, ecScaleFactor),
+    [solvedSeparateNitrogenRecipe, ecScaleFactor]
+  )
+  const multiPartRecipe = useMemo(
+    () => scaleMultiPartTankRecipe(solvedMultiPartRecipe, ecScaleFactor),
+    [solvedMultiPartRecipe, ecScaleFactor]
+  )
+  const directRecipe = useMemo(
+    () => scaleDirectMixRecipe(solvedDirectRecipe, ecScaleFactor),
+    [solvedDirectRecipe, ecScaleFactor]
+  )
 
   // True when the Separate Nitrogen layout gave each part a tank of its own
   // instead of merging every part's non-Calcium salts into one (see
@@ -431,23 +471,24 @@ export function RecipeScreen({
     multiPartRecipe.directAddCalciumCarbonate,
   ])
 
-  // Solubility-aware safety check for the chosen mode. We feed in the *actual*
-  // tank groupings used in the UI so the limiting-salt report matches the
-  // bottle the user will be filling.
+  // The stock volume and dilution ratio the salt amounts on screen were
+  // actually solved for. Everything derived from those grams — the solubility
+  // check, the mL/gal usage rate, the exported formulation — must use this
+  // basis rather than the live `stockVolumeLiters`/`dilutionRatio` state, which
+  // can briefly run ahead of `calcResult` while a debounced recalculation is in
+  // flight (e.g. right after the auto-sync effect below writes a new
+  // recommended ratio into state). A rate quoted at one ratio beside grams
+  // solved at another is the mismatch that makes displayed tanks stop
+  // round-tripping to the displayed ppm.
   //
-  // Important: this must be checked against the volume/ratio that the server
-  // action actually used to produce these salt amounts (`calcResult`), not
-  // the live `stockVolumeLiters`/`dilutionRatio` state. Those can briefly run
-  // ahead of `calcResult` while a debounced recalculation is in flight — e.g.
-  // right after the auto-sync effect below writes a new recommended ratio
-  // into state. Since the safe-ratio formula is only ratio-invariant when the
-  // ratio matches the one the grams were computed with, feeding it a
-  // still-live (already-bumped) ratio against stale grams makes the reported
-  // "safe ratio" balloon on every render — which then feeds right back into
-  // that same auto-sync effect and spirals into "Maximum update depth
-  // exceeded". Anchoring on `calcResult`'s own basis keeps the two in sync.
-  const solubilityBasisVolumeLiters = calcResult?.stockVolumeLiters ?? stockVolumeLiters
-  const solubilityBasisDilutionRatio = calcResult?.dilutionRatio ?? dilutionRatio
+  // For the solubility check it's also a stability requirement: the safe-ratio
+  // formula is only ratio-invariant when the ratio matches the one the grams
+  // were computed with, so feeding it a still-live (already-bumped) ratio
+  // against stale grams makes the reported "safe ratio" balloon on every
+  // render — which then feeds right back into that same auto-sync effect and
+  // spirals into "Maximum update depth exceeded".
+  const recipeBasisVolumeLiters = calcResult?.stockVolumeLiters ?? stockVolumeLiters
+  const recipeBasisDilutionRatio = calcResult?.dilutionRatio ?? dilutionRatio
 
   /**
    * Calculation-path tooltips for the two Calcium salts whose grams can come
@@ -462,24 +503,24 @@ export function RecipeScreen({
       tooltips.calciumNitrate = feedRateGramsTooltip(
         RAW_SALTS.calciumNitrate.name,
         calciumNitrateGramsPerGallonCombined,
-        solubilityBasisVolumeLiters,
-        solubilityBasisDilutionRatio
+        recipeBasisVolumeLiters,
+        recipeBasisDilutionRatio
       )
     }
     if (calciumChlorideGramsPerGallonCombined > 0) {
       tooltips.calciumChloride = feedRateGramsTooltip(
         RAW_SALTS.calciumChloride.name,
         calciumChlorideGramsPerGallonCombined,
-        solubilityBasisVolumeLiters,
-        solubilityBasisDilutionRatio
+        recipeBasisVolumeLiters,
+        recipeBasisDilutionRatio
       )
     }
     return tooltips
   }, [
     calciumNitrateGramsPerGallonCombined,
     calciumChlorideGramsPerGallonCombined,
-    solubilityBasisVolumeLiters,
-    solubilityBasisDilutionRatio,
+    recipeBasisVolumeLiters,
+    recipeBasisDilutionRatio,
   ])
 
   const solubilityReport = useMemo(() => {
@@ -489,8 +530,8 @@ export function RecipeScreen({
           name: separateNitrogenTankLabel(tank),
           salts: tank.salts,
         })),
-        solubilityBasisVolumeLiters,
-        solubilityBasisDilutionRatio
+        recipeBasisVolumeLiters,
+        recipeBasisDilutionRatio
       )
     }
     if (usesPerPartTanks) {
@@ -499,8 +540,8 @@ export function RecipeScreen({
           name: `${tank.name} (${tank.partName})`,
           salts: tank.salts,
         })),
-        solubilityBasisVolumeLiters,
-        solubilityBasisDilutionRatio
+        recipeBasisVolumeLiters,
+        recipeBasisDilutionRatio
       )
     }
     return null
@@ -509,8 +550,8 @@ export function RecipeScreen({
     usesPerPartTanks,
     separateNitrogenRecipe,
     multiPartRecipe,
-    solubilityBasisVolumeLiters,
-    solubilityBasisDilutionRatio,
+    recipeBasisVolumeLiters,
+    recipeBasisDilutionRatio,
   ])
 
   // For doser mode we prefer a "real-world doser preset" (1:100, 1:128, 1:200)
@@ -589,18 +630,6 @@ export function RecipeScreen({
     setTargetEcIsManual(false)
     if (estimatedEc !== null) setTargetEcInput(estimatedEc.toFixed(2))
   }
-
-  const parsedTargetEc = parseFloat(targetEcInput)
-  // Scale factor applied to every displayed salt amount. Keeping the dilution
-  // ratio fixed, scaling the gram amounts up/down changes the nutrient dose
-  // proportionally, which shifts the EC by the same factor.
-  const ecScaleFactor =
-    estimatedEc !== null && estimatedEc > 0 && parsedTargetEc > 0
-      ? parsedTargetEc / estimatedEc
-      : 1
-
-  // Helper used in inline JSX — applies the EC scale before formatting
-  const scaledGrams = (g: number) => formatGrams(g * ecScaleFactor)
 
   // What to show in the Estimated EC badge
   const displayedEc =
@@ -770,12 +799,15 @@ export function RecipeScreen({
     multiPartRecipe.tanks.length,
   ])
 
-  const mlPerGallon = stockTankMlPerGallon(dilutionRatio)
-  const mlPerLiter = stockTankMlPerLiter(dilutionRatio)
-
   // Direct-mix amounts are already sized for the whole reservoir (no stock
   // tank being diluted), so there's no meaningful dilution ratio there.
-  const effectiveDilutionRatio = stockTankOption === "direct" ? 1 : dilutionRatio
+  const effectiveDilutionRatio = stockTankOption === "direct" ? 1 : recipeBasisDilutionRatio
+
+  // The dose rate that goes with the grams on screen. Quoted off
+  // `recipeBasisDilutionRatio` for the reason spelled out there: a rate and a
+  // set of grams computed at two different ratios don't describe the same feed.
+  const mlPerGallon = stockTankMlPerGallon(recipeBasisDilutionRatio)
+  const mlPerLiter = stockTankMlPerLiter(recipeBasisDilutionRatio)
 
   const formulationMode: FormulationTankMode = usesSeparateNitrogenLayout
     ? "separate-nitrogen"
@@ -794,7 +826,6 @@ export function RecipeScreen({
         separateNitrogenRecipe,
         multiPartRecipe,
         directRecipe,
-        ecScaleFactor,
         stockTankSize,
         stockTankUnit,
         dilutionRatio: effectiveDilutionRatio,
@@ -805,7 +836,6 @@ export function RecipeScreen({
       separateNitrogenRecipe,
       multiPartRecipe,
       directRecipe,
-      ecScaleFactor,
       stockTankSize,
       stockTankUnit,
       effectiveDilutionRatio,
@@ -851,8 +881,11 @@ export function RecipeScreen({
         includedSalts: combinedIncludedSalts,
         stockTankSize,
         stockTankUnit,
-        concentrationRatio: dilutionRatio,
+        concentrationRatio: recipeBasisDilutionRatio,
         targetEc: resolvedTargetEc,
+        // Recorded for provenance only — `tanks` below already hold the scaled
+        // grams and `elementalTargets` the ppm they deliver, so nothing
+        // reloading this formulation should apply the factor a second time.
         ecScaleFactor,
         elementalTargets: targets,
         estimatedEc,
@@ -1130,7 +1163,7 @@ export function RecipeScreen({
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {targetEcIsManual && Math.abs(ecScaleFactor - 1) > 0.005
-                    ? `All amounts scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm.`
+                    ? `All amounts — and the ppm above — scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm.`
                     : "All amounts adjust automatically when you change this."}
                 </p>
                 {targetEcIsManual && Math.abs(ecScaleFactor - 1) > 0.005 && (
@@ -1193,7 +1226,7 @@ export function RecipeScreen({
       {hasValidData && stockTankOption === "doser" && solubilityReport && (
         <RecommendedRatioCard
           report={solubilityReport}
-          currentRatio={dilutionRatio}
+          currentRatio={recipeBasisDilutionRatio}
           recommendedRatio={recommendedRatio}
           ratioIsManual={ratioIsManual}
           onReset={resetRatioToRecommended}
@@ -1216,7 +1249,7 @@ export function RecipeScreen({
       {hasValidData && stockTankOption !== "direct" && stockTankOption !== "doser" && stockTankUsageLabels.length > 0 && (
         <StockTankUsageCard
           tankLabels={stockTankUsageLabels}
-          dilutionRatio={dilutionRatio}
+          dilutionRatio={recipeBasisDilutionRatio}
           mlPerGallon={mlPerGallon}
           mlPerLiter={mlPerLiter}
           isDoser={false}
@@ -1465,11 +1498,11 @@ export function RecipeScreen({
             <p>
               Add{" "}
               <span className="font-mono font-semibold text-amber-50">
-                {scaledGrams(activeDirectAddCalciumCarbonate.gramsPerGallon)}
+                {formatGrams(activeDirectAddCalciumCarbonate.gramsPerGallon)}
               </span>{" "}
               of Calcium Carbonate per gallon (
               <span className="font-mono">
-                {scaledGrams(activeDirectAddCalciumCarbonate.gramsPerLiter)}
+                {formatGrams(activeDirectAddCalciumCarbonate.gramsPerLiter)}
               </span>{" "}
               per liter) of reservoir/batch water — not into any of the stock tanks below.
             </p>
@@ -1542,7 +1575,6 @@ export function RecipeScreen({
           calciumFeedRateTooltips={calciumFeedRateTooltips}
           stockTankSize={stockTankSize}
           stockTankUnit={stockTankUnit}
-          ecScaleFactor={ecScaleFactor}
         />
       )}
 
@@ -1552,12 +1584,11 @@ export function RecipeScreen({
           tanks={multiPartRecipe.tanks}
           partsAnalysis={partsAnalysis}
           parts={parts}
-          stockVolumeLiters={solubilityBasisVolumeLiters}
-          dilutionRatio={solubilityBasisDilutionRatio}
+          stockVolumeLiters={recipeBasisVolumeLiters}
+          dilutionRatio={recipeBasisDilutionRatio}
           stockTankSize={stockTankSize}
           stockTankUnit={stockTankUnit}
           isDoser={stockTankOption === "doser"}
-          ecScaleFactor={ecScaleFactor}
         />
       )}
 
@@ -1591,14 +1622,14 @@ export function RecipeScreen({
                     ? feedRateGramsTooltip(
                         RAW_SALTS.calciumChloride.name,
                         calciumChlorideGramsPerGallonCombined,
-                        solubilityBasisVolumeLiters,
+                        recipeBasisVolumeLiters,
                         1
                       )
                     : key === "calciumNitrate" && calciumNitrateGramsPerGallonCombined > 0
                       ? feedRateGramsTooltip(
                           RAW_SALTS.calciumNitrate.name,
                           calciumNitrateGramsPerGallonCombined,
-                          solubilityBasisVolumeLiters,
+                          recipeBasisVolumeLiters,
                           1
                         )
                       : undefined
@@ -1607,7 +1638,7 @@ export function RecipeScreen({
                     key={key}
                     name={RAW_SALTS[key].name}
                     formula={RAW_SALTS[key].formula}
-                    amount={scaledGrams(amount)}
+                    amount={formatGrams(amount)}
                     micro={MICRO_SALT_KEYS.has(key)}
                     tooltip={tooltip}
                   />
@@ -2250,8 +2281,8 @@ function SeparateNitrogenTankCards({
   calciumFeedRateTooltips,
   stockTankSize,
   stockTankUnit,
-  ecScaleFactor,
 }: {
+  /** Already at the grower's Target EC — see `scaleSeparateNitrogenRecipe`. */
   tanks: SeparateNitrogenTank[]
   /** See `SeparateNitrogenRecipe.nitrogenKeptApart` — normally empty. */
   nitrogenKeptApart: SaltKey[]
@@ -2260,9 +2291,7 @@ function SeparateNitrogenTankCards({
   calciumFeedRateTooltips: Partial<Record<SaltKey, React.ReactNode>>
   stockTankSize: string
   stockTankUnit: "gallons" | "liters"
-  ecScaleFactor: number
 }) {
-  const scaledGrams = (g: number) => formatGrams(g * ecScaleFactor)
   const calciumTankName = tanks.find((tank) => tank.role === "calcium")?.name ?? null
   const unitLabel = stockTankUnit === "gallons" ? "gallons" : "liters"
 
@@ -2307,7 +2336,7 @@ function SeparateNitrogenTankCards({
                     key={key}
                     name={RAW_SALTS[key].name}
                     formula={RAW_SALTS[key].formula}
-                    amount={scaledGrams(amount)}
+                    amount={formatGrams(amount)}
                     tooltip={tooltips[key]}
                   />
                 ))}
@@ -2322,7 +2351,7 @@ function SeparateNitrogenTankCards({
                           key={key}
                           name={RAW_SALTS[key].name}
                           formula={RAW_SALTS[key].formula}
-                          amount={scaledGrams(amount)}
+                          amount={formatGrams(amount)}
                           micro
                         />
                       ))}
@@ -2382,8 +2411,8 @@ function PerPartStockTankCards({
   stockTankSize,
   stockTankUnit,
   isDoser,
-  ecScaleFactor,
 }: {
+  /** Already at the grower's Target EC — see `scaleMultiPartTankRecipe`. */
   tanks: PartStockTank[]
   partsAnalysis: PartAnalysis[]
   parts: NutrientPart[]
@@ -2392,9 +2421,7 @@ function PerPartStockTankCards({
   stockTankSize: string
   stockTankUnit: "gallons" | "liters"
   isDoser: boolean
-  ecScaleFactor: number
 }) {
-  const scaledGrams = (g: number) => formatGrams(g * ecScaleFactor)
   const analysisById = new Map(partsAnalysis.map((a) => [a.id, a]))
   const partById = new Map(parts.map((p) => [p.id, p]))
 
@@ -2478,7 +2505,7 @@ function PerPartStockTankCards({
                     key={key}
                     name={RAW_SALTS[key].name}
                     formula={RAW_SALTS[key].formula}
-                    amount={scaledGrams(amount)}
+                    amount={formatGrams(amount)}
                     tooltip={tankFeedRateTooltips[key]}
                   />
                 ))}
@@ -2492,7 +2519,7 @@ function PerPartStockTankCards({
                         key={key}
                         name={RAW_SALTS[key].name}
                         formula={RAW_SALTS[key].formula}
-                        amount={scaledGrams(amount)}
+                        amount={formatGrams(amount)}
                         micro
                       />
                     ))}

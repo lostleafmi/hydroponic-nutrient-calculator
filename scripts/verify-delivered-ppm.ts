@@ -10,6 +10,15 @@
  * resolved grams (`elementalPpmFromSaltAmounts`) and diffs the two for every
  * recipe layout.
  *
+ * `reportDisplayedRoundTrip` then closes the loop the solver can't see: it
+ * takes the numbers as the *screen* prints them — each tank's grams at the
+ * chosen Target EC, the tank size, and the one mL/gal usage rate — and works
+ * forward to the reservoir ppm the way a grower with a scale and a measuring
+ * jug would. Checking the solver against itself was never enough: the Target EC
+ * scale used to be applied only where grams were formatted, so the tanks and
+ * the ppm panel could disagree by that factor with every server-side check
+ * still green.
+ *
  * Run with: npm run verify:ppm
  */
 
@@ -20,22 +29,38 @@ import {
   CALCIUM_INCOMPATIBLE_SALTS,
   DEFAULT_INCLUDED_SALTS,
   elementalPpmFromSaltAmounts,
+  emptyElementalTargets,
   emptySaltAmounts,
+  formatGrams,
+  formatMl,
   getEnabledSaltKeys,
   isWithinMatchTolerance,
+  LITERS_PER_GALLON,
   RAW_SALTS,
   SALT_DISPLAY_ORDER,
   saltAmountsCarryTaperableNitrogen,
   saltFitsOneTank,
+  stockTankMlPerGallon,
   sumSaltAmounts,
   TAPERABLE_NITROGEN_SALTS,
   TANK_1_SALTS,
   TANK_3_SALTS,
+  type DirectMixRecipe,
   type ElementalTargets,
   type IncludedSaltsSelection,
+  type MultiPartTankRecipe,
   type SaltAmounts,
   type SaltKey,
+  type SeparateNitrogenRecipe,
 } from "@/lib/hydro-calc/recipe-types"
+import {
+  deliveredPpmFromStockTankDose,
+  scaleDirectMixRecipe,
+  scaleElementalTargets,
+  scaleMultiPartTankRecipe,
+  scaleSeparateNitrogenRecipe,
+  stockSaltGramsPerGallonOfStock,
+} from "@/lib/hydro-calc/displayed-recipe"
 
 const STOCK_VOLUME_LITERS = 5
 const DILUTION_RATIO = 100
@@ -112,6 +137,16 @@ interface Scenario {
   expectExactMatch?: boolean
   /** Salts that must not appear at all — e.g. an unchecked salt the fit must not invent. */
   expectAbsent?: SaltKey[]
+  /** Stock tank the grower is mixing into, when `STOCK_VOLUME_LITERS` isn't the interesting size. */
+  stockVolumeLiters?: number
+  dilutionRatio?: number
+  /**
+   * A Target EC the grower typed over the solver's own estimate, which the
+   * Recipe screen honours by scaling every gram in every tank (see
+   * `lib/hydro-calc/displayed-recipe.ts`). Left unset, the screen shows the
+   * recipe at its estimated EC and the scale is 1.
+   */
+  targetEc?: number
 }
 
 /**
@@ -1257,9 +1292,110 @@ function reportSeparateNitrogenMatchesPerPartTanks(
   return allPass
 }
 
-/** A layout's resolved salts, flattened to one comparable set. */
+/**
+ * The reported delivered-ppm case, reconstructed: a 1 gallon stock tank at
+ * 1:160 — so each tank card reads directly as g per gallon of stock solution,
+ * and the usage rate prints as 23.7 mL/gal — on a three-part line whose Calcium
+ * bottle is straight CalciNit and whose two bloom bottles are MKP / MgSO₄ /
+ * K₂SO₄ blends. Plus the detail that turns out to be the whole scenario: a
+ * grower who typed a Target EC above the solver's own estimate.
+ *
+ * Every label ratio here is exactly buildable from the salts checked, so the
+ * solver lands on the label and every server-side check passes. What the grower
+ * saw was the tank cards reading ~5.7% richer than the ppm panel above them at
+ * an unchanged 23.7 mL/gal — Ca 209 against a displayed 197.4, N 170.5 against
+ * 161.1, K 306 against 289.2 — proportional across all twelve elements, because
+ * one scale factor was reaching the grams and nothing else.
+ */
+const TARGET_EC_SCALED_THREE_PART: Scenario = {
+  name: "3-part line at a raised Target EC (tanks and ppm panel must still agree)",
+  partsAnalysis: [
+    {
+      id: "a",
+      // Straight CalciNit — `RAW_SALTS.calciumNitrate`'s own composition.
+      name: "Cal Nitrate",
+      nitrogen: "15.5",
+      phosphate: "",
+      potash: "",
+      calcium: "19",
+      magnesium: "",
+      sulfur: "",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("calciumNitrate"),
+    },
+    {
+      id: "b",
+      // 13.67% MKP + 47.92% MgSO₄ + 38.41% K₂SO₄ — P 3.12% → 7.14% P₂O₅,
+      // K 21.17% → 25.51% K₂O, Mg 4.74%, S 13.30% — plus the micro package.
+      name: "Bloom A",
+      nitrogen: "",
+      phosphate: "7.14",
+      potash: "25.51",
+      calcium: "",
+      magnesium: "4.74",
+      sulfur: "13.30",
+      iron: "0.415",
+      manganese: "0.133",
+      zinc: "0.066",
+      boron: "0.05",
+      copper: "0.013",
+      molybdenum: "0.05",
+      includedSalts: salts(
+        "monoPotassiumPhosphate",
+        "magnesiumSulfate",
+        "potassiumSulfate",
+        "chelatedMicronutrients"
+      ),
+    },
+    {
+      id: "c",
+      // 55.65% MKP + 26.61% MgSO₄ + 17.74% K₂SO₄ — P 12.69% → 29.07% P₂O₅,
+      // K 23.94% → 28.85% K₂O, Mg 2.63%, S 6.72%.
+      name: "Bloom B",
+      nitrogen: "",
+      phosphate: "29.07",
+      potash: "28.85",
+      calcium: "",
+      magnesium: "2.63",
+      sulfur: "6.72",
+      iron: "",
+      manganese: "",
+      zinc: "",
+      boron: "",
+      copper: "",
+      molybdenum: "",
+      includedSalts: salts("monoPotassiumPhosphate", "magnesiumSulfate", "potassiumSulfate"),
+    },
+  ],
+  parts: [
+    { id: "a", name: "Cal Nitrate", dose: "3.93", unit: "g_per_gallon" },
+    { id: "b", name: "Bloom A", dose: "3.92", unit: "g_per_gallon" },
+    { id: "c", name: "Bloom B", dose: "1.10", unit: "g_per_gallon" },
+  ],
+  stockTankOption: "separate",
+  stockVolumeLiters: LITERS_PER_GALLON,
+  dilutionRatio: 160,
+  targetEc: 3.0,
+}
+
+/** A layout's resolved salts, as the Recipe screen would show them. */
 interface ResolvedLayout {
   label: string
+  /**
+   * One entry per stock tank the grower mixes, in card order — kept separate
+   * rather than summed because each tank's grams are rounded for display on
+   * their own, and `reportDisplayedRoundTrip` works from the rounded figures.
+   *
+   * Any direct-add Calcium Carbonate rides along as a tank of its own: it never
+   * goes into a stock tank, but it does dissolve into the reservoir, so it has
+   * to be counted somewhere.
+   */
+  tanks: SaltAmounts[]
   salts: SaltAmounts
   /** Direct-mix amounts are already at working strength (see calculateDirectMixRecipe). */
   dilutionRatio: number
@@ -1267,42 +1403,95 @@ interface ResolvedLayout {
   reported: ElementalTargets
 }
 
-function resolvedLayouts(result: CalculateRecipeResult): ResolvedLayout[] {
-  const carbonate = (grams: number | undefined): SaltAmounts => {
+/**
+ * A whole result as the Recipe screen renders it: every layout, and the label's
+ * own targets, brought to the strength the grower asked for. Built with the same
+ * helpers `recipe-screen.tsx` uses before it renders a single gram, so this is
+ * the screen's arithmetic rather than a restatement of it (see
+ * `lib/hydro-calc/displayed-recipe.ts`).
+ *
+ * The label targets are scaled alongside the tanks for the reason spelled out
+ * in `scaleDeviations`: running the recipe 6% strong doesn't put six elements
+ * off label, it moves the whole comparison up by 6%.
+ */
+interface DisplayedRecipes {
+  ecScaleFactor: number
+  targets: ElementalTargets
+  separateNitrogen: SeparateNitrogenRecipe
+  perPart: MultiPartTankRecipe
+  direct: DirectMixRecipe
+}
+
+function displayedRecipes(
+  result: CalculateRecipeResult,
+  targetEc: number | undefined
+): DisplayedRecipes {
+  const ecScaleFactor =
+    targetEc !== undefined &&
+    targetEc > 0 &&
+    result.estimatedEc !== null &&
+    result.estimatedEc > 0
+      ? targetEc / result.estimatedEc
+      : 1
+
+  return {
+    ecScaleFactor,
+    targets: scaleElementalTargets(result.targets, ecScaleFactor),
+    separateNitrogen: scaleSeparateNitrogenRecipe(result.separateNitrogenRecipe, ecScaleFactor),
+    perPart: scaleMultiPartTankRecipe(result.multiPartRecipe, ecScaleFactor),
+    direct: scaleDirectMixRecipe(result.directRecipe, ecScaleFactor),
+  }
+}
+
+function resolvedLayouts(displayed: DisplayedRecipes, dilutionRatio: number): ResolvedLayout[] {
+  const carbonate = (grams: number | undefined): SaltAmounts[] => {
+    if (!(grams !== undefined && grams > 0)) return []
     const set = emptySaltAmounts()
-    set.calciumCarbonate = grams ?? 0
-    return set
+    set.calciumCarbonate = grams
+    return [set]
   }
 
-  const separateNitrogenTanks = result.separateNitrogenRecipe.tanks
+  const { separateNitrogen, perPart, direct } = displayed
+
+  const layout = (
+    label: string,
+    tanks: SaltAmounts[],
+    dilutionRatio: number,
+    reported: ElementalTargets
+  ): ResolvedLayout => ({
+    label,
+    tanks,
+    salts: sumSaltAmounts(...tanks),
+    dilutionRatio,
+    reported,
+  })
+
+  const tankCount = separateNitrogen.tanks.length
   return [
-    {
-      label: `Separate Nitrogen (${separateNitrogenTanks.length} tank${separateNitrogenTanks.length === 1 ? "" : "s"})`,
-      salts: sumSaltAmounts(
-        ...separateNitrogenTanks.map((tank) => tank.salts),
-        carbonate(result.separateNitrogenRecipe.directAddCalciumCarbonate?.grams)
-      ),
-      dilutionRatio: result.dilutionRatio,
-      reported: result.separateNitrogenRecipe.delivered,
-    },
-    {
-      label: "One tank per part",
-      salts: sumSaltAmounts(
-        ...result.multiPartRecipe.tanks.map((tank) => tank.salts),
-        carbonate(result.multiPartRecipe.directAddCalciumCarbonate?.grams)
-      ),
-      dilutionRatio: result.dilutionRatio,
-      reported: result.multiPartRecipe.delivered,
-    },
-    {
-      label: "Direct mix",
-      salts: sumSaltAmounts(
-        result.directRecipe.salts,
-        carbonate(result.directRecipe.directAddCalciumCarbonate?.grams)
-      ),
-      dilutionRatio: 1,
-      reported: result.directRecipe.delivered,
-    },
+    layout(
+      `Separate Nitrogen (${tankCount} tank${tankCount === 1 ? "" : "s"})`,
+      [
+        ...separateNitrogen.tanks.map((tank) => tank.salts),
+        ...carbonate(separateNitrogen.directAddCalciumCarbonate?.grams),
+      ],
+      dilutionRatio,
+      separateNitrogen.delivered
+    ),
+    layout(
+      "One tank per part",
+      [
+        ...perPart.tanks.map((tank) => tank.salts),
+        ...carbonate(perPart.directAddCalciumCarbonate?.grams),
+      ],
+      dilutionRatio,
+      perPart.delivered
+    ),
+    layout(
+      "Direct mix",
+      [direct.salts, ...carbonate(direct.directAddCalciumCarbonate?.grams)],
+      1,
+      direct.delivered
+    ),
   ]
 }
 
@@ -1396,11 +1585,165 @@ function reportLayout(
   return allPass
 }
 
+/**
+ * Relative agreement demanded of the exact displayed quantities. This isn't a
+ * tolerance so much as a float-noise allowance: the g-per-gallon-of-stock and
+ * mL/gal figures describe the same physical feed as the grams, so the two paths
+ * have to agree to the last few bits or one of them has a unit wrong.
+ */
+const ROUND_TRIP_EXACT_RELATIVE = 1e-9
+
+/** What the numbers as *printed* have to hold to, once display rounding is allowed for. */
+const ROUND_TRIP_PRINTED_RELATIVE = 0.005
+const ROUND_TRIP_PRINTED_MACRO_FLOOR_PPM = 0.5
+
+/**
+ * The rounding budget below is a tight bound rather than a generous one: for a
+ * trace salt whose printed grams are the *only* thing feeding an element, the
+ * budget and the observed drift are the same quantity computed two ways, and
+ * whichever one lands a bit higher is down to float ordering. Widen it by
+ * enough to swallow that and nothing more.
+ */
+const ROUND_TRIP_BUDGET_SLACK = 1e-9
+
+/** A number as the screen prints it — back through the app's own formatters. */
+function asPrintedGrams(grams: number): number {
+  return parseFloat(formatGrams(grams))
+}
+
+function asPrintedMl(ml: number): number {
+  return parseFloat(formatMl(ml))
+}
+
+/**
+ * The check the reported bug would have failed.
+ *
+ * Works entirely from what the Recipe screen puts in front of the grower — each
+ * tank's grams, the tank's size, and the single mL/gal usage rate — and derives
+ * the reservoir ppm the way they would: how much of each salt a gallon of that
+ * stock solution holds, times how much stock goes into a gallon of water.
+ *
+ *   g per gallon of stock = tank grams × LITERS_PER_GALLON ÷ tank litres
+ *   mL/gal               = 1000 ÷ dilution ratio × LITERS_PER_GALLON
+ *   ppm                  = g per gallon of stock × (mL/gal ÷ ML_PER_GALLON)
+ *                          ÷ LITERS_PER_GALLON × 1000 × element fraction
+ *
+ * Deliberately routed through mL and gallons rather than the solver's
+ * `grams × 1000 ÷ (litres × ratio)`, so a gallon↔litre hop applied twice or
+ * skipped once on either path shows up as a mismatch instead of cancelling.
+ *
+ * Two passes. The first uses the underlying values and holds them to float
+ * noise — that's the real invariant. The second re-reads every figure through
+ * `formatGrams`/`formatMl`, so it measures what a grower who types the printed
+ * numbers into a calculator actually gets, and allows for the rounding those
+ * formatters introduce on top of a 0.5% band.
+ */
+function reportDisplayedRoundTrip(
+  layout: ResolvedLayout,
+  stockVolumeLiters: number
+): boolean {
+  const mlPerGallon = stockTankMlPerGallon(layout.dilutionRatio)
+  const printedMlPerGallon = asPrintedMl(mlPerGallon)
+
+  const fromDisplayed = (
+    tankSalts: SaltAmounts[],
+    ml: number,
+    round: (grams: number) => number
+  ): ElementalTargets => {
+    const perTank = tankSalts.map((salts) => {
+      const printed = emptySaltAmounts()
+      for (const key of SALT_DISPLAY_ORDER) {
+        if (salts[key] > 0) printed[key] = round(salts[key])
+      }
+      return deliveredPpmFromStockTankDose(
+        stockSaltGramsPerGallonOfStock(printed, stockVolumeLiters),
+        ml
+      )
+    })
+    const total = emptyElementalTargets()
+    for (const tank of perTank) {
+      for (const key of Object.keys(total) as Array<keyof ElementalTargets>) {
+        total[key] += tank[key]
+      }
+    }
+    return total
+  }
+
+  const exact = fromDisplayed(layout.tanks, mlPerGallon, (grams) => grams)
+  const printed = fromDisplayed(layout.tanks, printedMlPerGallon, asPrintedGrams)
+
+  // Upper bound on how far display rounding alone can move each element: the
+  // grams each tank was rounded by, converted to ppm, plus the whole figure
+  // shifted by however much the usage rate was rounded by.
+  const rateSkew = mlPerGallon > 0 ? Math.abs(printedMlPerGallon - mlPerGallon) / mlPerGallon : 0
+  const roundingBudget = emptyElementalTargets()
+  for (const tankSalts of layout.tanks) {
+    for (const key of SALT_DISPLAY_ORDER) {
+      const grams = tankSalts[key]
+      if (!(grams > 0)) continue
+      const gramsSkew = Math.abs(asPrintedGrams(grams) - grams)
+      if (gramsSkew === 0) continue
+      const skewed = emptySaltAmounts()
+      skewed[key] = gramsSkew
+      const asPpm = deliveredPpmFromStockTankDose(
+        stockSaltGramsPerGallonOfStock(skewed, stockVolumeLiters),
+        printedMlPerGallon
+      )
+      for (const element of Object.keys(roundingBudget) as Array<keyof ElementalTargets>) {
+        roundingBudget[element] += asPpm[element]
+      }
+    }
+  }
+
+  console.log(
+    `\n  ${layout.label} — round-trip from the displayed tanks at ` +
+      `${formatMl(mlPerGallon)} mL/gal into ${(stockVolumeLiters / LITERS_PER_GALLON).toFixed(2)} gal of stock`
+  )
+  console.log(
+    `    ${padRight("element", 8)}${padLeft("on screen", 11)}${padLeft("from g/gal", 12)}${padLeft("as printed", 12)}${padLeft("diff", 10)}   status`
+  )
+
+  let allPass = true
+  for (const key of [...MACRO_KEYS, ...MICRO_KEYS]) {
+    const onScreen = layout.reported[key]
+    if (onScreen === 0 && exact[key] === 0) continue
+
+    const exactDiff = exact[key] - onScreen
+    const printedDiff = printed[key] - onScreen
+    const exactAllowance = Math.max(Math.abs(onScreen) * ROUND_TRIP_EXACT_RELATIVE, 1e-9)
+    const printedAllowance = Math.max(
+      Math.abs(onScreen) * ROUND_TRIP_PRINTED_RELATIVE,
+      (roundingBudget[key] + Math.abs(onScreen) * rateSkew) * (1 + ROUND_TRIP_BUDGET_SLACK),
+      MACRO_KEYS.includes(key) ? ROUND_TRIP_PRINTED_MACRO_FLOOR_PPM : 0
+    )
+
+    let status: string
+    if (Math.abs(exactDiff) > exactAllowance) {
+      status = "TANKS != PANEL"
+      allPass = false
+    } else if (Math.abs(printedDiff) > printedAllowance) {
+      status = "PRINTED != PANEL"
+      allPass = false
+    } else {
+      status = "ok"
+    }
+
+    console.log(
+      `    ${padRight(ELEMENT_SYMBOLS[key], 8)}${padLeft(fmt(onScreen), 11)}${padLeft(fmt(exact[key]), 12)}${padLeft(fmt(printed[key]), 12)}${padLeft(signed(printedDiff), 10)}   ${status}`
+    )
+  }
+
+  return allPass
+}
+
 async function runScenario(scenario: Scenario): Promise<boolean> {
+  const stockVolumeLiters = scenario.stockVolumeLiters ?? STOCK_VOLUME_LITERS
+  const dilutionRatio = scenario.dilutionRatio ?? DILUTION_RATIO
+
   console.log(`\n${"=".repeat(88)}`)
   console.log(scenario.name)
   console.log(
-    `Stock tank ${STOCK_VOLUME_LITERS} L at 1:${DILUTION_RATIO} — feed rates: ` +
+    `Stock tank ${stockVolumeLiters.toFixed(3)} L at 1:${dilutionRatio} — feed rates: ` +
       scenario.parts.map((part) => `${part.name} ${part.dose} g/gal`).join(", ")
   )
   console.log("=".repeat(88))
@@ -1409,24 +1752,36 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
     partsAnalysis: scenario.partsAnalysis,
     parts: scenario.parts,
     stockTankOption: scenario.stockTankOption,
-    stockVolumeLiters: STOCK_VOLUME_LITERS,
-    dilutionRatio: DILUTION_RATIO,
+    stockVolumeLiters,
+    dilutionRatio,
   })
+
+  // Everything below is checked against the recipe the grower is looking at, at
+  // whatever Target EC they set — not the one the solver returned.
+  const displayed = displayedRecipes(result, scenario.targetEc)
+  if (displayed.ecScaleFactor !== 1) {
+    console.log(
+      `\n  Target EC ${scenario.targetEc?.toFixed(2)} over an estimated ` +
+        `${result.estimatedEc?.toFixed(2)} — every tank scaled ×${displayed.ecScaleFactor.toFixed(4)}`
+    )
+  }
 
   console.log("\n  Label-derived elemental targets (from the guaranteed analysis + feed rates):")
   for (const key of [...MACRO_KEYS, ...MICRO_KEYS]) {
-    if (result.targets[key] === 0) continue
-    console.log(`    ${padRight(ELEMENT_SYMBOLS[key], 6)}${padLeft(fmt(result.targets[key]), 10)} ppm`)
+    if (displayed.targets[key] === 0) continue
+    console.log(
+      `    ${padRight(ELEMENT_SYMBOLS[key], 6)}${padLeft(fmt(displayed.targets[key]), 10)} ppm`
+    )
   }
 
-  const layouts = resolvedLayouts(result)
-  for (const tank of result.separateNitrogenRecipe.tanks) {
+  const layouts = resolvedLayouts(displayed, dilutionRatio)
+  for (const tank of displayed.separateNitrogen.tanks) {
     const role = [tank.partName, tank.role === "calcium" ? "calcium" : null]
       .filter(Boolean)
       .join(" + ")
     reportSalts(`Separate Nitrogen ${tank.name} (${role})`, tank.salts)
   }
-  for (const tank of result.multiPartRecipe.tanks) {
+  for (const tank of displayed.perPart.tanks) {
     reportSalts(`Per-part ${tank.name} (${tank.partName})`, tank.salts)
   }
 
@@ -1444,9 +1799,9 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
   const k2so4Needed =
     (["potassium", "sulfur"] as const).some(
       (element) =>
-        result.targets[element] > 0 &&
-        k2so4Delivered[element] < result.targets[element] &&
-        !isWithinMatchTolerance(element, k2so4Delivered[element], result.targets[element])
+        displayed.targets[element] > 0 &&
+        k2so4Delivered[element] < displayed.targets[element] &&
+        !isWithinMatchTolerance(element, k2so4Delivered[element], displayed.targets[element])
     )
   if (k2so4Checked) {
     console.log(
@@ -1456,14 +1811,19 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
   }
 
   const deviationsByLayout = [
-    result.separateNitrogenRecipe.deviations,
-    result.multiPartRecipe.deviations,
-    result.directRecipe.deviations,
+    displayed.separateNitrogen.deviations,
+    displayed.perPart.deviations,
+    displayed.direct.deviations,
   ]
 
   let allPass = true
   layouts.forEach((layout, index) => {
-    if (!reportLayout(layout, result.targets, deviationsByLayout[index], result.stockVolumeLiters)) {
+    if (
+      !reportLayout(layout, displayed.targets, deviationsByLayout[index], result.stockVolumeLiters)
+    ) {
+      allPass = false
+    }
+    if (!reportDisplayedRoundTrip(layout, result.stockVolumeLiters)) {
       allPass = false
     }
   })
@@ -1541,6 +1901,7 @@ async function main(): Promise<void> {
     EVERY_BOTTLE_CARRIES_NITROGEN,
     ALL_NITROGEN_SINGLE_PART,
     NITROGEN_TOO_MUCH_FOR_ONE_TANK,
+    TARGET_EC_SCALED_THREE_PART,
   ]
   const results: boolean[] = []
   for (const scenario of scenarios) {

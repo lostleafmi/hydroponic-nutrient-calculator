@@ -66,20 +66,19 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100
 }
 
-function buildInputs(salts: SaltAmounts, ecScaleFactor: number): FormulationTankInput[] {
+function buildInputs(salts: SaltAmounts): FormulationTankInput[] {
   return getOrderedSaltEntries(salts).map(([key, amount]) => ({
     salt: RAW_SALTS[key].name,
     formula: RAW_SALTS[key].formula,
-    amount_g: round2(amount * ecScaleFactor),
+    amount_g: round2(amount),
   }))
 }
 
 function buildDirectAddCalciumCarbonateExport(
-  directAdd: DirectAddCalciumCarbonate | undefined,
-  ecScaleFactor: number
+  directAdd: DirectAddCalciumCarbonate | undefined
 ): FormulationDirectAddCalciumCarbonate | undefined {
   if (!directAdd || !(directAdd.gramsPerGallon > 0)) return undefined
-  const gramsPerGallon = round2(directAdd.gramsPerGallon * ecScaleFactor)
+  const gramsPerGallon = round2(directAdd.gramsPerGallon)
   if (!(gramsPerGallon > 0)) return undefined
   return { gramsPerGallon }
 }
@@ -125,12 +124,17 @@ function separateNitrogenMixInstructions(
   }. Wait for each one to fully dissolve before adding the next. Top up to ${sizeNum} ${unitLabel} and label it "${tank.name}".`
 }
 
+/**
+ * The recipes handed in here must already be at the strength the grower is
+ * looking at — i.e. run through `scaleSeparateNitrogenRecipe` and friends for
+ * any Target EC override — so an exported formulation and the tank cards it was
+ * read off carry the same grams. See `lib/hydro-calc/displayed-recipe.ts`.
+ */
 export function buildFormulationTanksData({
   mode,
   separateNitrogenRecipe,
   multiPartRecipe,
   directRecipe,
-  ecScaleFactor,
   stockTankSize,
   stockTankUnit,
   dilutionRatio,
@@ -140,7 +144,6 @@ export function buildFormulationTanksData({
   separateNitrogenRecipe: SeparateNitrogenRecipe
   multiPartRecipe: MultiPartTankRecipe
   directRecipe: DirectMixRecipe
-  ecScaleFactor: number
   stockTankSize: string
   stockTankUnit: "gallons" | "liters"
   dilutionRatio: number
@@ -154,7 +157,7 @@ export function buildFormulationTanksData({
   const mlPerGallon = round2(stockTankMlPerGallon(dilutionRatio))
 
   if (mode === "direct") {
-    const inputs = buildInputs(directRecipe.salts, ecScaleFactor)
+    const inputs = buildInputs(directRecipe.salts)
     const tanks: FormulationTank[] =
       inputs.length === 0
         ? []
@@ -168,8 +171,7 @@ export function buildFormulationTanksData({
             },
           ]
     const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
-      directRecipe.directAddCalciumCarbonate,
-      ecScaleFactor
+      directRecipe.directAddCalciumCarbonate
     )
     // Direct-mix amounts are already sized for the whole reservoir — there's
     // no concentrated stock tank being diluted, so no per-gallon usage rate applies.
@@ -179,8 +181,7 @@ export function buildFormulationTanksData({
   if (mode === "separate-nitrogen") {
     const usageRates: Record<string, number> = {}
     const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
-      separateNitrogenRecipe.directAddCalciumCarbonate,
-      ecScaleFactor
+      separateNitrogenRecipe.directAddCalciumCarbonate
     )
 
     // However many tanks the layout came back with — one merged non-Calcium
@@ -190,7 +191,7 @@ export function buildFormulationTanksData({
     const tanks: FormulationTank[] = separateNitrogenRecipe.tanks
       .map((tank) => {
         const id = `tank${tank.index}`
-        const inputs = buildInputs(tank.salts, ecScaleFactor)
+        const inputs = buildInputs(tank.salts)
         if (inputs.length === 0) return null
 
         usageRates[id] = mlPerGallon
@@ -209,13 +210,12 @@ export function buildFormulationTanksData({
   // mode === "per-part" — one stock tank per nutrient part ("per-part" + doser modes)
   const usageRates: Record<string, number> = {}
   const directAddCalciumCarbonate = buildDirectAddCalciumCarbonateExport(
-    multiPartRecipe.directAddCalciumCarbonate,
-    ecScaleFactor
+    multiPartRecipe.directAddCalciumCarbonate
   )
   const tanks: FormulationTank[] = multiPartRecipe.tanks
     .map((tank) => {
       const id = `tank${tank.index}`
-      const inputs = buildInputs(tank.salts, ecScaleFactor)
+      const inputs = buildInputs(tank.salts)
       if (inputs.length === 0) return null
 
       usageRates[id] = mlPerGallon
