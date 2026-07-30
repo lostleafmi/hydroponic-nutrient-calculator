@@ -25,10 +25,18 @@ import {
   unwrapSavedFormulation,
 } from "@/lib/hydro-calc/formulation-persistence"
 import {
+  convertDoseValue,
+  convertStockTankSize,
   DEFAULT_INCLUDED_SALTS,
+  DEFAULT_STOCK_TANK_SIZE,
+  DIRECT_MIX_RESERVOIR_SIZE,
+  getDoseGramsPerGallon,
+  LITERS_PER_GALLON,
   SALT_CHECKBOX_OPTIONS,
   unionIncludedSalts,
+  type DoseUnit,
   type IncludedSaltsSelection,
+  type VolumeUnit,
 } from "@/lib/hydro-calc/recipe-types"
 
 const SALT_IDS: Array<keyof IncludedSaltsSelection> = SALT_CHECKBOX_OPTIONS.map((option) => option.id)
@@ -391,7 +399,126 @@ function reportLegacyFieldMigrations() {
   )
 }
 
+/**
+ * The liters feed chart reads per 10 L (`CHART_DOSE_LITERS`), because that's
+ * what a metric chart prints. Nothing on screen says so once the number reaches
+ * the solver, which is what makes a wrong basis here so quiet: a per-10 L rate
+ * mistaken for per-litre still solves, still balances, and still looks
+ * plausible — it just feeds the plants ten times what the grower asked for.
+ *
+ * So the bar is that the three ways of writing one dose are one dose. 29 mL/10 L
+ * is 2.9 mL/L is 10.978 mL/gal, and all three have to arrive at the solver's
+ * per-gallon basis as the same number.
+ */
+function reportDoseUnitBasis() {
+  console.log("\n=== One dose, three units, one feed ===")
+
+  const dose = (value: string, unit: DoseUnit): NutrientPart => ({
+    id: "a",
+    name: "Part A",
+    dose: value,
+    unit,
+  })
+
+  // 29 mL per 10 L is the shape of an Athena/Canna chart line.
+  const perTenLiters = getDoseGramsPerGallon(dose("29", "ml_per_10L"))
+  const perLiter = getDoseGramsPerGallon(dose("2.9", "ml_per_liter"))
+  const perGallon = getDoseGramsPerGallon(dose(String(2.9 * LITERS_PER_GALLON), "ml_per_gallon"))
+
+  const agree = (a: number, b: number) => Math.abs(a - b) <= Math.abs(a) * 1e-9
+  check(
+    agree(perTenLiters, perLiter),
+    "29 mL/10 L is the same feed as 2.9 mL/L",
+    `${perTenLiters} vs ${perLiter} g/gal`
+  )
+  check(
+    agree(perTenLiters, perGallon),
+    "29 mL/10 L is the same feed as its mL/gal equivalent",
+    `${perTenLiters} vs ${perGallon} g/gal`
+  )
+  check(
+    // 29 mL/10 L × 1.2 g/mL ÷ 10 L × 3.785 L/gal
+    agree(perTenLiters, ((29 * 1.2) / 10) * LITERS_PER_GALLON),
+    "the per-gallon grams are the literal unit conversion, not a tenfold miss",
+    `${perTenLiters} g/gal`
+  )
+
+  // Flipping the toggle re-quotes the number rather than reinterpreting it, so
+  // the dose has to survive the flip — to within the rounding the rewritten
+  // value is deliberately held to (`CONVERTED_AMOUNT_TOLERANCE`), since a
+  // grower is shown 10.9777 rather than 10.977694274 mL/gal.
+  const toGallons = convertDoseValue("29", "ml_per_10L", "ml_per_gallon")
+  const flipped = getDoseGramsPerGallon(dose(toGallons, "ml_per_gallon"))
+  check(
+    Math.abs(flipped - perTenLiters) <= perTenLiters * 1e-5,
+    "flipping 29 mL/10 L to gallons keeps the dose",
+    `29 mL/10 L → ${toGallons} mL/gal (${flipped} vs ${perTenLiters} g/gal)`
+  )
+  check(
+    convertDoseValue(toGallons, "ml_per_gallon", "ml_per_10L") === "29",
+    "and flipping it back reads 29 again, not 28.999…",
+    `→ ${convertDoseValue(toGallons, "ml_per_gallon", "ml_per_10L")}`
+  )
+  check(
+    convertDoseValue("", "ml_per_10L", "ml_per_gallon") === "" &&
+      convertDoseValue(".", "ml_per_10L", "ml_per_gallon") === ".",
+    "a field the grower hasn't filled in stays empty rather than becoming 0"
+  )
+
+  // A save from the first liters mode carries a true per-litre rate. Loading it
+  // has to re-quote the number, not just relabel it.
+  const legacySave = throughJson({
+    partsAnalysis: [FOUR_PART_LINE[0]],
+    parts: [dose("2.9", "ml_per_liter")],
+  })
+  const loaded = hydrateSavedFeedingParts(unwrapSavedFormulation(legacySave))
+  check(
+    loaded?.[0].unit === "ml_per_10L",
+    "a legacy per-litre save loads onto the per-10 L basis",
+    `unit came back as ${loaded?.[0].unit}`
+  )
+  check(
+    loaded !== null && agree(getDoseGramsPerGallon(loaded[0]), perLiter),
+    "and it's still the same feed it was saved as",
+    loaded ? `2.9 ml/L → ${loaded[0].dose} ${loaded[0].unit}` : undefined
+  )
+}
+
+/**
+ * The tank/reservoir size field starts on a round number in whichever unit it's
+ * showing, rather than on a conversion of the other unit's round number — a
+ * grower who has typed nothing should never be looking at 18.927 L. A size they
+ * did type is converted like any other volume, since it's theirs.
+ */
+function reportRoundDefaultSizes() {
+  console.log("\n=== Untouched default sizes stay round across a unit flip ===")
+
+  const cases: Array<[string, VolumeUnit, VolumeUnit, string]> = [
+    [DEFAULT_STOCK_TANK_SIZE.gallons, "gallons", "liters", DEFAULT_STOCK_TANK_SIZE.liters],
+    [DEFAULT_STOCK_TANK_SIZE.liters, "liters", "gallons", DEFAULT_STOCK_TANK_SIZE.gallons],
+    [DIRECT_MIX_RESERVOIR_SIZE.gallons, "gallons", "liters", DIRECT_MIX_RESERVOIR_SIZE.liters],
+    [DIRECT_MIX_RESERVOIR_SIZE.liters, "liters", "gallons", DIRECT_MIX_RESERVOIR_SIZE.gallons],
+  ]
+  for (const [value, from, to, expected] of cases) {
+    const converted = convertStockTankSize(value, from, to)
+    check(
+      converted === expected,
+      `${value} ${from} flips to ${expected} ${to}`,
+      `got ${converted}`
+    )
+  }
+
+  // A size the grower typed is not a default, so it converts normally.
+  check(
+    convertStockTankSize("13", "gallons", "liters") === "49.21",
+    "a size the grower typed is converted, not swapped",
+    `13 gallons → ${convertStockTankSize("13", "gallons", "liters")} liters`
+  )
+}
+
 console.log("Formulation save → load round-trip verification")
+reportDoseUnitBasis()
+reportRoundDefaultSizes()
 reportPerPartRoundTrip()
 reportPartsAnalysisStrippedOfSalts()
 reportLegacyGlobalSaltsSave()

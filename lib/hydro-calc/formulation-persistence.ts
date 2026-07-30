@@ -2,6 +2,7 @@ import type { PartAnalysis } from "@/components/hydro-calc/guaranteed-analysis-s
 import type { NutrientPart } from "@/components/hydro-calc/feeding-rates-screen"
 import {
   DEFAULT_INCLUDED_SALTS,
+  migrateLegacyDoseUnit,
   parsePositive,
   SALT_CHECKBOX_OPTIONS,
   type DoseUnit,
@@ -372,13 +373,18 @@ export function hydrateSavedPartsAnalysis(saved: Record<string, unknown>): PartA
 const SAVED_DOSE_UNITS: readonly DoseUnit[] = [
   "ml_per_gallon",
   "g_per_gallon",
+  "ml_per_10L",
+  "g_per_10L",
+  // Written only by saves from the first liters mode, when the feed chart was
+  // read per litre rather than per 10 L — see `migrateLegacyDoseUnit`, which is
+  // what stops one of these coming back a tenth as strong.
   "ml_per_liter",
   "g_per_liter",
 ]
 
 /**
- * A dose's unit as saved. Per-liter rates only exist in saves written after
- * the volume preference was added, so anything unrecognized — including a save
+ * A dose's unit as saved. Metric rates only exist in saves written after the
+ * volume preference was added, so anything unrecognized — including a save
  * that predates the field entirely — falls back to dry grams per gallon, the
  * basis the calculator started with.
  */
@@ -386,7 +392,11 @@ function asDoseUnit(raw: unknown): DoseUnit {
   return SAVED_DOSE_UNITS.find((unit) => unit === raw) ?? "g_per_gallon"
 }
 
-/** Rebuild the Feeding Rates screen's parts, coercing doses back to input strings. */
+/**
+ * Rebuild the Feeding Rates screen's parts, coercing doses back to input
+ * strings and re-quoting any legacy per-litre rate onto the per-10 L basis the
+ * chart input reads today (see `migrateLegacyDoseUnit`).
+ */
 export function hydrateSavedFeedingParts(saved: Record<string, unknown>): NutrientPart[] | null {
   const rawParts = saved.parts
   if (!Array.isArray(rawParts) || rawParts.length === 0) return null
@@ -394,8 +404,7 @@ export function hydrateSavedFeedingParts(saved: Record<string, unknown>): Nutrie
   const parts = rawParts.filter(isRecord).map((rawPart, index) => ({
     id: typeof rawPart.id === "string" && rawPart.id !== "" ? rawPart.id : `saved-part-${index}`,
     name: typeof rawPart.name === "string" && rawPart.name !== "" ? rawPart.name : `Part ${index + 1}`,
-    dose: asAnalysisString(rawPart.dose),
-    unit: asDoseUnit(rawPart.unit),
+    ...migrateLegacyDoseUnit(asAnalysisString(rawPart.dose), asDoseUnit(rawPart.unit)),
   }))
 
   return parts.length > 0 ? parts : null

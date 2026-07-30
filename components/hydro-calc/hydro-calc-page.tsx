@@ -11,9 +11,11 @@ import {
 import { FeedingRatesScreen, type NutrientPart, type StockTankOption } from "@/components/hydro-calc/feeding-rates-screen"
 import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-calc/recipe-screen"
 import {
-  convertRateValue,
-  convertVolumeValue,
+  convertDoseValue,
+  convertStockTankSize,
+  DEFAULT_STOCK_TANK_SIZE,
   defaultStockTankOption,
+  DIRECT_MIX_RESERVOIR_SIZE,
   doseUnitFor,
   doseUnitVolumeUnit,
   normalizeStockTankOption,
@@ -142,7 +144,7 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
    * them never flips the feed chart back.
    */
   const [volumeUnit, setVolumeUnit] = useState<VolumeUnit>("gallons")
-  const [stockTankSize, setStockTankSize] = useState("5")
+  const [stockTankSize, setStockTankSize] = useState(DEFAULT_STOCK_TANK_SIZE.gallons)
   const [stockTankUnit, setStockTankUnit] = useState<VolumeUnit>("gallons")
   const [usageRateUnit, setUsageRateUnit] = useState<VolumeUnit>("gallons")
 
@@ -261,22 +263,26 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
   /**
    * Flipping the Feeding Rates card's unit re-quotes every number already
    * typed rather than reinterpreting it, so the actual dose the grower gets
-   * doesn't jump — 4 g/gal becomes 1.0567 g/L, the same feed either way. The
+   * doesn't jump — 4 g/gal becomes 10.567 g/10 L, the same feed either way. The
    * stock tank size and mL usage rate follow to the new unit too (the tank
-   * size converted the same way), which is what the note on that card tells
-   * the grower just happened.
+   * size converted the same way, unless it's still the untouched default —
+   * see `convertStockTankSize`), which is what the note on that card tells the
+   * grower just happened.
    */
   const handleVolumeUnitChange = (nextUnit: VolumeUnit) => {
     if (nextUnit === volumeUnit) return
     setVolumeUnit(nextUnit)
     setParts((currentParts) =>
-      currentParts.map((part) => ({
-        ...part,
-        dose: convertRateValue(part.dose, doseUnitVolumeUnit(part.unit), nextUnit),
-        unit: rebaseDoseUnit(part.unit, nextUnit),
-      }))
+      currentParts.map((part) => {
+        const nextDoseUnit = rebaseDoseUnit(part.unit, nextUnit)
+        return {
+          ...part,
+          dose: convertDoseValue(part.dose, part.unit, nextDoseUnit),
+          unit: nextDoseUnit,
+        }
+      })
     )
-    setStockTankSize((currentSize) => convertVolumeValue(currentSize, stockTankUnit, nextUnit))
+    setStockTankSize((currentSize) => convertStockTankSize(currentSize, stockTankUnit, nextUnit))
     setStockTankUnit(nextUnit)
     setUsageRateUnit(nextUnit)
   }
@@ -284,10 +290,10 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
   const handleStockTankOptionChange = (option: StockTankOption) => {
     setStockTankOption(option)
     // In direct-mix mode the size field is the reservoir being fed, not a stock
-    // tank, so it starts from a single gallon's worth of feed — expressed in
-    // whichever unit is currently in play.
+    // tank, so it starts from one batch's worth of feed — the round size of
+    // whichever unit is currently in play, not a conversion of the other's.
     if (option === "direct") {
-      setStockTankSize(convertVolumeValue("1", "gallons", stockTankUnit))
+      setStockTankSize(DIRECT_MIX_RESERVOIR_SIZE[stockTankUnit])
     }
   }
 

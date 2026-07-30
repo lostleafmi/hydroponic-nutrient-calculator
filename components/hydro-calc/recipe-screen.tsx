@@ -62,7 +62,7 @@ import {
   RAW_SALTS,
   calciumChlorideElementalCalciumPpm,
   checkRecipeSolubility,
-  convertVolumeValue,
+  convertStockTankSize,
   DEFAULT_MICRO_PROFILE_IRON_PPM,
   emptyElementalTargets,
   emptySaltAmounts,
@@ -236,13 +236,15 @@ export function RecipeScreen({
 
   /**
    * Moving this toggle re-expresses the size that's already in the field so
-   * the tank doesn't silently change volume. It's a local override of the
-   * Feeding Rates unit and deliberately doesn't report back to it — see the
+   * the tank doesn't silently change volume — except for a size the grower
+   * hasn't touched, which swaps to the other unit's round default rather than
+   * to its conversion (see `convertStockTankSize`). It's a local override of
+   * the Feeding Rates unit and deliberately doesn't report back to it — see the
    * volume-unit state in `HydroCalcPage`.
    */
   const handleStockTankUnitChange = (nextUnit: VolumeUnit) => {
     if (nextUnit === stockTankUnit) return
-    onStockTankSizeChange(convertVolumeValue(stockTankSize, stockTankUnit, nextUnit))
+    onStockTankSizeChange(convertStockTankSize(stockTankSize, stockTankUnit, nextUnit))
     onStockTankUnitChange(nextUnit)
   }
 

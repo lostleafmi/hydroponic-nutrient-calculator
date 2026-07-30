@@ -31,6 +31,14 @@ export const ML_PER_GALLON = LITERS_PER_GALLON * 1000
  * rates, their stock tank size, and the mL-per-water usage rate all quote a
  * volume, and this is the one preference all three follow.
  *
+ * `"liters"` does NOT mean "per litre" everywhere it's applied, and the
+ * difference is deliberate rather than an oversight. The feed chart input is
+ * read per 10 L, because that's the figure a metric chart prints (see
+ * `CHART_DOSE_LITERS` and `DoseUnit`). The stock tank's usage rate is read per
+ * litre, because that's a dilution the grower measures out themselves with no
+ * chart to copy from. Only the chart entry follows the printed convention; ask
+ * `doseUnitLiters` rather than assuming a unit implies its own name.
+ *
  * It is a display and input basis only. Everything the solver sees is still
  * canonical: volumes in liters (`stockVolumeLiters`) and feed rates
  * normalized to grams per US gallon (`getDoseGramsPerGallon`).
@@ -38,30 +46,78 @@ export const ML_PER_GALLON = LITERS_PER_GALLON * 1000
 export type VolumeUnit = "gallons" | "liters"
 
 /**
+ * How many litres of water a metric feed chart quotes its rates against.
+ *
+ * Athena, Canna and every other metric chart a grower is likely to be holding
+ * print "29 mL per 10 L", not a per-litre figure — a per-litre column would be
+ * a string of decimals for the small bottles. Typing what the chart prints is
+ * the whole point of that screen, so 10 L is the basis the liters-mode input
+ * reads in, and the division to per-litre happens here rather than in the
+ * grower's head.
+ */
+export const CHART_DOSE_LITERS = 10
+
+/**
  * A feed-chart dose as the grower typed it: mL for a liquid concentrate or
- * grams for a dry powder, quoted per gallon or per liter of working
- * (reservoir) solution.
+ * grams for a dry powder, quoted against whatever volume of working
+ * (reservoir) solution the chart it was copied from uses.
  *
  * The two per-gallon values came first and are still what a save written
  * before the volume preference existed carries, so they stay spelled exactly
- * as they were.
+ * as they were. `ml_per_liter` / `g_per_liter` are likewise frozen: they're
+ * what the first liters-mode saves wrote, before the input moved to the per-10 L
+ * basis metric charts actually print, and they still mean a true per-litre
+ * rate. Nothing writes them any more — a load re-quotes them onto the per-10 L
+ * pair (see `migrateLegacyDoseUnit`) — but they must keep parsing.
  */
-export type DoseUnit = "ml_per_gallon" | "g_per_gallon" | "ml_per_liter" | "g_per_liter"
+export type DoseUnit =
+  | "ml_per_gallon"
+  | "g_per_gallon"
+  | "ml_per_10L"
+  | "g_per_10L"
+  | "ml_per_liter"
+  | "g_per_liter"
 
 /** Whether a dose is measured out as liquid millilitres rather than dry grams. */
 export function isLiquidDoseUnit(unit: DoseUnit): boolean {
-  return unit === "ml_per_gallon" || unit === "ml_per_liter"
+  return unit === "ml_per_gallon" || unit === "ml_per_10L" || unit === "ml_per_liter"
+}
+
+/**
+ * Litres of working solution one entered dose covers — the denominator behind
+ * the unit, and the only thing that separates the three bases from each other.
+ *
+ * Every conversion a dose goes through (to the solver's per-gallon basis, and
+ * between units when the grower flips the toggle) is a ratio of these, so a
+ * dose can't mean one volume on screen and another in the recipe.
+ */
+export function doseUnitLiters(unit: DoseUnit): number {
+  switch (unit) {
+    case "ml_per_gallon":
+    case "g_per_gallon":
+      return LITERS_PER_GALLON
+    case "ml_per_10L":
+    case "g_per_10L":
+      return CHART_DOSE_LITERS
+    case "ml_per_liter":
+    case "g_per_liter":
+      return 1
+  }
 }
 
 /** The volume of solution a dose is quoted against. */
 export function doseUnitVolumeUnit(unit: DoseUnit): VolumeUnit {
-  return unit === "ml_per_liter" || unit === "g_per_liter" ? "liters" : "gallons"
+  return unit === "ml_per_gallon" || unit === "g_per_gallon" ? "gallons" : "liters"
 }
 
-/** The dose unit for a given measure and volume basis. */
+/**
+ * The dose unit for a given measure and volume basis — the pair the feed
+ * chart input actually offers, so liters means the per-10 L chart basis rather
+ * than the legacy per-litre one.
+ */
 export function doseUnitFor(measure: "ml" | "g", volumeUnit: VolumeUnit): DoseUnit {
-  if (measure === "ml") return volumeUnit === "liters" ? "ml_per_liter" : "ml_per_gallon"
-  return volumeUnit === "liters" ? "g_per_liter" : "g_per_gallon"
+  if (measure === "ml") return volumeUnit === "liters" ? "ml_per_10L" : "ml_per_gallon"
+  return volumeUnit === "liters" ? "g_per_10L" : "g_per_gallon"
 }
 
 /** Re-quote a dose unit against another volume, keeping mL vs g as it was. */
@@ -69,10 +125,17 @@ export function rebaseDoseUnit(unit: DoseUnit, volumeUnit: VolumeUnit): DoseUnit
   return doseUnitFor(isLiquidDoseUnit(unit) ? "ml" : "g", volumeUnit)
 }
 
-/** How a dose unit reads on screen, e.g. `g/gal` or `ml/L`. */
+/** The volume a dose unit is quoted against, as it reads on screen: `gal`, `10 L`, `L`. */
+export function doseUnitVolumeLabel(unit: DoseUnit): string {
+  if (doseUnitVolumeUnit(unit) === "gallons") return volumeUnitShortLabel("gallons")
+  const liters = doseUnitLiters(unit)
+  return liters === 1 ? "L" : `${liters} L`
+}
+
+/** How a dose unit reads on screen, e.g. `g/gal` or `ml/10 L`. */
 export function doseUnitLabel(unit: DoseUnit): string {
   const measure = isLiquidDoseUnit(unit) ? "ml" : "g"
-  return `${measure}/${volumeUnitShortLabel(doseUnitVolumeUnit(unit))}`
+  return `${measure}/${doseUnitVolumeLabel(unit)}`
 }
 
 /** Unit suffix for a rate or tank size, e.g. `gal` or `L`. */
@@ -84,6 +147,16 @@ export function volumeUnitShortLabel(unit: VolumeUnit): string {
 export function volumeUnitNoun(unit: VolumeUnit, plural = false): string {
   const noun = unit === "liters" ? "liter" : "gallon"
   return plural ? `${noun}s` : noun
+}
+
+/**
+ * The feed chart's own basis spelled out for prose, e.g. "per <b>10 litres of
+ * water</b>". Deliberately not `volumeUnitNoun`: the metric chart input is read
+ * per 10 L (see `CHART_DOSE_LITERS`), and prose that says "per liter" beside it
+ * is telling the grower to divide a number they should be copying across.
+ */
+export function chartDoseVolumePhrase(volumeUnit: VolumeUnit): string {
+  return volumeUnit === "liters" ? `${CHART_DOSE_LITERS} liters of water` : "gallon"
 }
 
 /**
@@ -135,13 +208,93 @@ export function convertVolumeValue(value: string, from: VolumeUnit, to: VolumeUn
 }
 
 /**
- * Re-express a rate quoted *per* unit volume (g/gal ↔ g/L, mL/gal ↔ mL/L) in
- * another unit. Inverse of `convertVolumeValue`: a smaller volume of water
- * takes proportionally less of the same concentrate.
+ * Re-quote a feed-chart dose against another unit's volume, so flipping the
+ * toggle changes what the number is measured against and not how much
+ * concentrate the plants end up seeing: 4 g/gal becomes 10.567 g/10 L, the same
+ * feed either way.
+ *
+ * The factor is the ratio of the two units' litres (see `doseUnitLiters`), so
+ * every hop — including gal ↔ 10 L, which is neither a plain 3.785 nor a plain
+ * 10 — comes off the one `LITERS_PER_GALLON` and the one `CHART_DOSE_LITERS`
+ * the solver uses.
  */
-export function convertRateValue(value: string, from: VolumeUnit, to: VolumeUnit): string {
+export function convertDoseValue(value: string, from: DoseUnit, to: DoseUnit): string {
   if (from === to) return value
-  return convertInputValue(value, to === "liters" ? 1 / LITERS_PER_GALLON : LITERS_PER_GALLON)
+  return convertInputValue(value, doseUnitLiters(to) / doseUnitLiters(from))
+}
+
+/**
+ * A saved dose on the unit pair the feed chart input reads today.
+ *
+ * The liters input used to be per-litre and now matches what metric charts
+ * print, per 10 L (see `CHART_DOSE_LITERS`). A save carrying the old unit means
+ * a true per-litre rate, so the number is re-quoted rather than relabelled —
+ * relabelling would silently make every reloaded metric formulation a tenth as
+ * strong. Anything already on a current unit is returned untouched.
+ */
+export function migrateLegacyDoseUnit(
+  dose: string,
+  unit: DoseUnit
+): { dose: string; unit: DoseUnit } {
+  if (unit !== "ml_per_liter" && unit !== "g_per_liter") return { dose, unit }
+  const migrated = rebaseDoseUnit(unit, "liters")
+  return { dose: convertDoseValue(dose, unit, migrated), unit: migrated }
+}
+
+/**
+ * Stock tank size a fresh session starts on, per unit.
+ *
+ * A gallons default converted straight across lands on 18.927 L, which is not a
+ * tank anybody sells or a number anybody types. Both entries are the round size
+ * of that unit's common tank, and `convertStockTankSize` swaps one for the
+ * other while the grower hasn't touched the field — so the flip round-trips
+ * exactly (5 → 20 → 5) instead of drifting through a conversion.
+ */
+export const DEFAULT_STOCK_TANK_SIZE: Record<VolumeUnit, string> = {
+  gallons: "5",
+  liters: "20",
+}
+
+/**
+ * Size the direct-mix layout starts on, per unit.
+ *
+ * Direct mix has no stock tank — the field is the batch of feed itself — so it
+ * starts from a single gallon's worth. Converted straight across that's
+ * 3.785 L; 5 L is the round batch a metric grower actually mixes, and the one
+ * every "per 5 L" bottle of pH Down is marked for.
+ */
+export const DIRECT_MIX_RESERVOIR_SIZE: Record<VolumeUnit, string> = {
+  gallons: "1",
+  liters: "5",
+}
+
+/**
+ * Every size the volume field starts a session on, so a unit flip can swap one
+ * unit's round default for the other's rather than converting it.
+ *
+ * No two rows may carry the same value for the same unit: the unit being
+ * converted *from* is the only thing identifying which row an untouched default
+ * belongs to. (Gallons reads 5 and 1, liters 20 and 5 — the repeated 5 means
+ * different things in different columns, which is exactly why the lookup is by
+ * column rather than by value.)
+ */
+const ROUND_DEFAULT_SIZES: Array<Record<VolumeUnit, string>> = [
+  DEFAULT_STOCK_TANK_SIZE,
+  DIRECT_MIX_RESERVOIR_SIZE,
+]
+
+/**
+ * `convertVolumeValue` for the tank/reservoir size field, substituting the
+ * other unit's round default (see `ROUND_DEFAULT_SIZES`) for a size the grower
+ * hasn't changed. A size they did type is theirs, and is converted like any
+ * other volume.
+ */
+export function convertStockTankSize(value: string, from: VolumeUnit, to: VolumeUnit): string {
+  if (from === to) return value
+  const trimmed = value.trim()
+  const untouched = ROUND_DEFAULT_SIZES.find((sizes) => sizes[from] === trimmed)
+  if (untouched) return untouched[to]
+  return convertVolumeValue(value, from, to)
 }
 
 /** Guaranteed-analysis oxide → elemental conversion factors */
@@ -1785,15 +1938,19 @@ export function sumSaltAmounts(...sets: SaltAmounts[]): SaltAmounts {
 /**
  * A nutrient part's own feed-chart dose, normalized to dry grams per US
  * gallon of working (reservoir) feed — converting a liquid dose via the
- * standard liquid-concentrate density, and a dose the grower quoted per liter
- * through `LITERS_PER_GALLON`, when needed. Per-gallon grams stay the one
- * basis the solver ever sees, whichever unit the feed chart was typed in.
+ * standard liquid-concentrate density, then dividing by the litres the unit
+ * quotes against (`doseUnitLiters`) and multiplying back up by
+ * `LITERS_PER_GALLON`. Per-gallon grams stay the one basis the solver ever
+ * sees, whichever unit the feed chart was typed in.
+ *
+ * The division is what keeps a metric chart honest: 29 mL/10 L is 2.9 mL/L, so
+ * it must reach the solver as the same feed as 10.98 mL/gal — not ten times it.
  */
 export function getDoseGramsPerGallon(part: NutrientPart): number {
   const dose = parsePositive(part.dose)
   if (dose === 0) return 0
   const grams = isLiquidDoseUnit(part.unit) ? dose * LIQUID_CONCENTRATE_DENSITY : dose
-  return doseUnitVolumeUnit(part.unit) === "liters" ? grams * LITERS_PER_GALLON : grams
+  return (grams / doseUnitLiters(part.unit)) * LITERS_PER_GALLON
 }
 
 /** Grams of concentrate applied per liter of working (reservoir) solution */
@@ -1887,7 +2044,7 @@ export function getTotalDoseMlPerGallon(parts: NutrientPart[]): number {
     const dose = parsePositive(part.dose)
     if (dose === 0) return total
     const ml = isLiquidDoseUnit(part.unit) ? dose : dose / LIQUID_CONCENTRATE_DENSITY
-    return total + (doseUnitVolumeUnit(part.unit) === "liters" ? ml * LITERS_PER_GALLON : ml)
+    return total + (ml / doseUnitLiters(part.unit)) * LITERS_PER_GALLON
   }, 0)
 }
 

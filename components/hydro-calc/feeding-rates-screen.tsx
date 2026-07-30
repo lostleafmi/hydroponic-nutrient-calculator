@@ -33,6 +33,7 @@ export interface NutrientPart {
 }
 
 import {
+  chartDoseVolumePhrase,
   doseUnitFor,
   doseUnitLabel,
   isLiquidDoseUnit,
@@ -155,7 +156,7 @@ export function FeedingRatesScreen({
     />
   )
 
-  const volumeNoun = volumeUnitNoun(volumeUnit)
+  const chartVolumePhrase = chartDoseVolumePhrase(volumeUnit)
   const dryDoseLabel = doseUnitLabel(doseUnitFor("g", volumeUnit))
   const liquidDoseLabel = doseUnitLabel(doseUnitFor("ml", volumeUnit))
 
@@ -192,9 +193,11 @@ export function FeedingRatesScreen({
               </CardTitle>
               <CardDescription>
                 Look at your nutrient label or feed chart and type in how much of each part you use
-                per {volumeNoun} for the growth stage you&apos;re in. The unit starts at{" "}
-                {dryDoseLabel} (good for dry powders). Flip the switch on the right to{" "}
-                {liquidDoseLabel} if your nutrients come as a liquid.
+                per {chartVolumePhrase} for the growth stage you&apos;re in.{" "}
+                {volumeUnit === "liters" &&
+                  "That's the number a metric chart already prints, so copy it across as it's written — no dividing it down to a per-liter figure. "}
+                The unit starts at {dryDoseLabel} (good for dry powders). Flip the switch on the
+                right to {liquidDoseLabel} if your nutrients come as a liquid.
               </CardDescription>
             </div>
             <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
@@ -232,7 +235,9 @@ export function FeedingRatesScreen({
               <p className="flex-1 text-sm leading-relaxed text-sky-100">
                 Switched stock tank size and usage rates to{" "}
                 {volumeUnitNoun(syncedUnitNotice, true)} as well, toggle these independently if
-                needed
+                needed.{" "}
+                {syncedUnitNotice === "liters" &&
+                  "Those are read per liter — the per 10 L basis is the feed chart above only."}
               </p>
               <button
                 type="button"
@@ -375,6 +380,7 @@ function PartEntry({
   const isLiquid = isLiquidDoseUnit(part.unit)
   const liquidUnitLabel = doseUnitLabel(doseUnitFor("ml", volumeUnit))
   const dryUnitLabel = doseUnitLabel(doseUnitFor("g", volumeUnit))
+  const activeUnitLabel = isLiquid ? liquidUnitLabel : dryUnitLabel
 
   return (
     <div className="rounded-lg border-2 border-border bg-secondary/20 p-4">
@@ -411,6 +417,7 @@ function PartEntry({
             value={part.dose}
             onChange={(e) => onUpdate({ dose: e.target.value })}
             placeholder="0.0"
+            aria-label={`${part.name} dose in ${activeUnitLabel}`}
             className="border-2 border-border bg-card"
           />
         </div>
