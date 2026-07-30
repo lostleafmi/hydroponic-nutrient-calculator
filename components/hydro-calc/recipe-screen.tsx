@@ -46,6 +46,10 @@ import {
   type FeedingStage,
 } from "@/lib/hydro-calc/feeding-scheduler"
 import { buildFormulationTanksData, type FormulationTankMode } from "@/lib/hydro-calc/formulation-export"
+import {
+  buildSavedPartSalts,
+  FORMULATION_SCHEMA_VERSION,
+} from "@/lib/hydro-calc/formulation-persistence"
 import type { PartAnalysis } from "./guaranteed-analysis-screen"
 import type { NutrientPart, StockTankOption } from "./feeding-rates-screen"
 import {
@@ -870,14 +874,22 @@ export function RecipeScreen({
       const formulationName = dashboardFormulationName.trim() || buildUntitledFormulationName()
       const resolvedTargetEc = parsedTargetEc > 0 ? parsedTargetEc : estimatedEc
       const payload = {
-        // Strip local blob URLs from photo fields before sending. Each part
-        // already carries its own `includedSalts` selection; the top-level
-        // `includedSalts` below is kept only for backward compatibility with
-        // consumers that still expect the old global shape (it's the union
-        // of every part's selection).
+        formulationSchemaVersion: FORMULATION_SCHEMA_VERSION,
+        // Strip local blob URLs from photo fields before sending — everything
+        // else about a part, its own `includedSalts` included, is kept so the
+        // Guaranteed Analysis screen can be rebuilt exactly as saved.
         partsAnalysis: partsAnalysis.map(({ photoUrl: _photoUrl, photoName: _photoName, ...p }) => p),
+        // The same per-part selections again, flat and under a name of their
+        // own, so a reload can still tell which part a salt belongs to even if
+        // `partsAnalysis` came back rebuilt from a narrower set of fields.
+        // See `SavedPartSalts` for why that's worth the duplication.
+        partSalts: buildSavedPartSalts(partsAnalysis),
         parts,
         stockTankOption,
+        // Every part's salts pooled together — a shopping list of what this
+        // formulation uses, kept for consumers that predate per-part
+        // selection. It is NOT any part's selection: loading must never hand
+        // this to a part (see `hydrateSavedPartsAnalysis`).
         includedSalts: combinedIncludedSalts,
         stockTankSize,
         stockTankUnit,

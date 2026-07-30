@@ -10,13 +10,12 @@ import {
 } from "@/components/hydro-calc/guaranteed-analysis-screen"
 import { FeedingRatesScreen, type NutrientPart, type StockTankOption } from "@/components/hydro-calc/feeding-rates-screen"
 import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-calc/recipe-screen"
+import { defaultStockTankOption, normalizeStockTankOption } from "@/lib/hydro-calc/recipe-types"
 import {
-  ALL_SALTS_SELECTED,
-  DEFAULT_INCLUDED_SALTS,
-  defaultStockTankOption,
-  normalizeStockTankOption,
-  type IncludedSaltsSelection,
-} from "@/lib/hydro-calc/recipe-types"
+  hydrateSavedFeedingParts,
+  hydrateSavedPartsAnalysis,
+  unwrapSavedFormulation,
+} from "@/lib/hydro-calc/formulation-persistence"
 import { toast } from "@/hooks/use-toast"
 
 const DASHBOARD_API_BASE =
@@ -77,44 +76,6 @@ function syncFeedingPartsFromAnalysis(
       unit: "g_per_gallon" as const,
     }
   })
-}
-
-/**
- * Salts & Inputs selection used to live as one global object on the saved
- * formulation. Saves from before per-part selection existed either have no
- * `includedSalts` at all (pre-feature) or have it as that single legacy
- * global object — never per-part. New saves carry `includedSalts` on each
- * `partsAnalysis` entry directly, so this only kicks in for old data.
- */
-function migrateLegacyIncludedSalts(raw: unknown): IncludedSaltsSelection | null {
-  if (!raw || typeof raw !== "object") return null
-
-  // Strip deprecated fields (other, otherText) that may exist in old saves.
-  // Migrate ironChelate → chelatedMicronutrients so pre-refactor saves carry
-  // their iron selection forward as a full micro package.
-  const { other: _other, otherText: _otherText, ironChelate, ...validSalts } = raw as Record<string, unknown>
-  const migrated: Partial<IncludedSaltsSelection> = validSalts as Partial<IncludedSaltsSelection>
-  if (ironChelate === true && !("chelatedMicronutrients" in validSalts)) {
-    migrated.chelatedMicronutrients = true
-  }
-  return { ...DEFAULT_INCLUDED_SALTS, ...migrated }
-}
-
-/** Fill in `includedSalts` on any loaded part that predates per-part selection. */
-function withMigratedPartSalts(
-  partsAnalysis: PartAnalysis[],
-  legacyGlobalSalts: unknown
-): PartAnalysis[] {
-  // Older saves never had per-part selection — fall back to whatever the
-  // save had globally, or "all salts" if that's missing too, so migrated
-  // formulations keep working without hitting the "select at least one
-  // salt" validation.
-  const fallback = migrateLegacyIncludedSalts(legacyGlobalSalts) ?? ALL_SALTS_SELECTED
-
-  return partsAnalysis.map((part) => ({
-    ...part,
-    includedSalts: part.includedSalts ?? fallback,
-  }))
 }
 
 function syncAnalysisPartsFromFeeding(
@@ -190,29 +151,39 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
           throw new Error(errText || `Server responded with ${res.status}`)
         }
 
-        const data = await res.json()
+        // Tolerates the fetch handing back either the formulation itself or a
+        // stored row wrapping it.
+        const saved = unwrapSavedFormulation(await res.json())
 
         // --- Populate wizard state ---
-        if (Array.isArray(data.partsAnalysis) && data.partsAnalysis.length > 0) {
-          setPartsAnalysis(withMigratedPartSalts(data.partsAnalysis, data.includedSalts))
+        // Each part's salts come from that part alone — see
+        // `hydrateSavedPartsAnalysis` for what a save without them falls back to.
+        const savedPartsAnalysis = hydrateSavedPartsAnalysis(saved)
+        if (savedPartsAnalysis) {
+          setPartsAnalysis(savedPartsAnalysis)
         }
-        if (Array.isArray(data.parts) && data.parts.length > 0) {
-          setParts(data.parts)
+        const savedParts = hydrateSavedFeedingParts(saved)
+        if (savedParts) {
+          setParts(savedParts)
         }
         // Older saved formulations still carry the pre-rename "ab" value for
         // the per-part layout — see `normalizeStockTankOption`.
-        const savedStockTankOption = normalizeStockTankOption(data.stockTankOption)
+        const savedStockTankOption = normalizeStockTankOption(saved.stockTankOption)
         if (savedStockTankOption) {
           setStockTankOption(savedStockTankOption)
         }
 
         // --- Pre-fill recipe screen settings ---
         const settings: RecipeInitialSettings = {}
-        if (data.stockTankSize) settings.stockTankSize = String(data.stockTankSize)
-        if (data.stockTankUnit) settings.stockTankUnit = data.stockTankUnit
-        if (data.concentrationRatio) settings.concentrationRatio = String(data.concentrationRatio)
-        if (data.doserLayout) settings.doserLayout = data.doserLayout
-        if (data.targetEc != null) settings.targetEcInput = String(data.targetEc)
+        if (saved.stockTankSize) settings.stockTankSize = String(saved.stockTankSize)
+        if (saved.stockTankUnit === "gallons" || saved.stockTankUnit === "liters") {
+          settings.stockTankUnit = saved.stockTankUnit
+        }
+        if (saved.concentrationRatio) settings.concentrationRatio = String(saved.concentrationRatio)
+        if (saved.doserLayout === "per-part" || saved.doserLayout === "separate-ca") {
+          settings.doserLayout = saved.doserLayout
+        }
+        if (saved.targetEc != null) settings.targetEcInput = String(saved.targetEc)
         setRecipeInitialSettings(settings)
         setRecipeKey((k) => k + 1)
 

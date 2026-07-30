@@ -700,23 +700,13 @@ export const DEFAULT_INCLUDED_SALTS: IncludedSaltsSelection = {
   chelatedMicronutrients: false,
 }
 
-/** Used when loading old saved formulations that pre-date per-salt selection. */
-export const ALL_SALTS_SELECTED: IncludedSaltsSelection = {
-  calciumNitrate: true,
-  calciumCarbonate: true,
-  calciumChloride: true,
-  calciumAcetate: true,
-  calciumGluconate: true,
-  potassiumNitrate: true,
-  urea: true,
-  potassiumSulfate: true,
-  monoPotassiumPhosphate: true,
-  monoAmmoniumPhosphate: true,
-  magnesiumSulfate: true,
-  magnesiumNitrate: true,
-  ammoniumNitrateOrSulfate: true,
-  chelatedMicronutrients: true,
-}
+/*
+ * There is deliberately no "every salt checked" constant here. Loading an old
+ * formulation used to reach for one when the save carried nothing per-part,
+ * which handed every bottle in the line a full fourteen-salt kit the grower
+ * never selected. `hydrateSavedPartsAnalysis` narrows what the save does have
+ * to each part's own analysis instead.
+ */
 
 /** Checkbox options rendered on the "Salts & Inputs Included" screen */
 export interface SaltCheckboxOption {
