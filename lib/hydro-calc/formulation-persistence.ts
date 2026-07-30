@@ -4,6 +4,7 @@ import {
   DEFAULT_INCLUDED_SALTS,
   parsePositive,
   SALT_CHECKBOX_OPTIONS,
+  type DoseUnit,
   type IncludedSaltsSelection,
 } from "@/lib/hydro-calc/recipe-types"
 
@@ -368,6 +369,23 @@ export function hydrateSavedPartsAnalysis(saved: Record<string, unknown>): PartA
   })
 }
 
+const SAVED_DOSE_UNITS: readonly DoseUnit[] = [
+  "ml_per_gallon",
+  "g_per_gallon",
+  "ml_per_liter",
+  "g_per_liter",
+]
+
+/**
+ * A dose's unit as saved. Per-liter rates only exist in saves written after
+ * the volume preference was added, so anything unrecognized — including a save
+ * that predates the field entirely — falls back to dry grams per gallon, the
+ * basis the calculator started with.
+ */
+function asDoseUnit(raw: unknown): DoseUnit {
+  return SAVED_DOSE_UNITS.find((unit) => unit === raw) ?? "g_per_gallon"
+}
+
 /** Rebuild the Feeding Rates screen's parts, coercing doses back to input strings. */
 export function hydrateSavedFeedingParts(saved: Record<string, unknown>): NutrientPart[] | null {
   const rawParts = saved.parts
@@ -377,7 +395,7 @@ export function hydrateSavedFeedingParts(saved: Record<string, unknown>): Nutrie
     id: typeof rawPart.id === "string" && rawPart.id !== "" ? rawPart.id : `saved-part-${index}`,
     name: typeof rawPart.name === "string" && rawPart.name !== "" ? rawPart.name : `Part ${index + 1}`,
     dose: asAnalysisString(rawPart.dose),
-    unit: rawPart.unit === "ml_per_gallon" ? ("ml_per_gallon" as const) : ("g_per_gallon" as const),
+    unit: asDoseUnit(rawPart.unit),
   }))
 
   return parts.length > 0 ? parts : null

@@ -26,6 +26,124 @@ export const LITERS_PER_GALLON = 3.785411784
 /** US gallons → millilitres — `LITERS_PER_GALLON` in the unit stock doses are measured in */
 export const ML_PER_GALLON = LITERS_PER_GALLON * 1000
 
+/**
+ * Which volume of water the grower measures against — their feed chart's
+ * rates, their stock tank size, and the mL-per-water usage rate all quote a
+ * volume, and this is the one preference all three follow.
+ *
+ * It is a display and input basis only. Everything the solver sees is still
+ * canonical: volumes in liters (`stockVolumeLiters`) and feed rates
+ * normalized to grams per US gallon (`getDoseGramsPerGallon`).
+ */
+export type VolumeUnit = "gallons" | "liters"
+
+/**
+ * A feed-chart dose as the grower typed it: mL for a liquid concentrate or
+ * grams for a dry powder, quoted per gallon or per liter of working
+ * (reservoir) solution.
+ *
+ * The two per-gallon values came first and are still what a save written
+ * before the volume preference existed carries, so they stay spelled exactly
+ * as they were.
+ */
+export type DoseUnit = "ml_per_gallon" | "g_per_gallon" | "ml_per_liter" | "g_per_liter"
+
+/** Whether a dose is measured out as liquid millilitres rather than dry grams. */
+export function isLiquidDoseUnit(unit: DoseUnit): boolean {
+  return unit === "ml_per_gallon" || unit === "ml_per_liter"
+}
+
+/** The volume of solution a dose is quoted against. */
+export function doseUnitVolumeUnit(unit: DoseUnit): VolumeUnit {
+  return unit === "ml_per_liter" || unit === "g_per_liter" ? "liters" : "gallons"
+}
+
+/** The dose unit for a given measure and volume basis. */
+export function doseUnitFor(measure: "ml" | "g", volumeUnit: VolumeUnit): DoseUnit {
+  if (measure === "ml") return volumeUnit === "liters" ? "ml_per_liter" : "ml_per_gallon"
+  return volumeUnit === "liters" ? "g_per_liter" : "g_per_gallon"
+}
+
+/** Re-quote a dose unit against another volume, keeping mL vs g as it was. */
+export function rebaseDoseUnit(unit: DoseUnit, volumeUnit: VolumeUnit): DoseUnit {
+  return doseUnitFor(isLiquidDoseUnit(unit) ? "ml" : "g", volumeUnit)
+}
+
+/** How a dose unit reads on screen, e.g. `g/gal` or `ml/L`. */
+export function doseUnitLabel(unit: DoseUnit): string {
+  const measure = isLiquidDoseUnit(unit) ? "ml" : "g"
+  return `${measure}/${volumeUnitShortLabel(doseUnitVolumeUnit(unit))}`
+}
+
+/** Unit suffix for a rate or tank size, e.g. `gal` or `L`. */
+export function volumeUnitShortLabel(unit: VolumeUnit): string {
+  return unit === "liters" ? "L" : "gal"
+}
+
+/** The unit spelled out for prose, e.g. "per <b>gallon</b> of reservoir water". */
+export function volumeUnitNoun(unit: VolumeUnit, plural = false): string {
+  const noun = unit === "liters" ? "liter" : "gallon"
+  return plural ? `${noun}s` : noun
+}
+
+/**
+ * How close a rewritten number has to stay to the exact conversion: 0.001%,
+ * orders of magnitude finer than any scale or measuring jug a grower mixes
+ * with, and finer than the printed recipe resolves to.
+ */
+const CONVERTED_AMOUNT_TOLERANCE = 1e-5
+
+/**
+ * The shortest way to write a converted value that's still the same number to
+ * within `CONVERTED_AMOUNT_TOLERANCE`.
+ *
+ * Significant digits rather than decimal places, because these values span a
+ * 0.066 g/L micro dose to a 378 L tank and any fixed decimal count is too
+ * coarse at one end or noise at the other. Taking the shortest form inside the
+ * tolerance is also what lets a unit flip round-trip: 5 gal becomes 18.927 L,
+ * and 18.927 L comes back as 5 rather than 4.9999, because "5" is itself
+ * within tolerance of the exact 4.99998.
+ */
+function formatConvertedAmount(value: number): string {
+  if (!Number.isFinite(value)) return ""
+  const allowedError = Math.abs(value) * CONVERTED_AMOUNT_TOLERANCE
+  for (let digits = 2; digits < 8; digits++) {
+    const candidate = Number(value.toPrecision(digits))
+    if (Math.abs(candidate - value) <= allowedError) return String(candidate)
+  }
+  return String(Number(value.toPrecision(8)))
+}
+
+/**
+ * Convert what's in a numeric input between volume units, leaving anything
+ * that isn't a number the grower can see — an empty field, a lone "." or "-"
+ * part-way through typing — exactly as it was. Writing a `0` into a field the
+ * grower hasn't filled in yet would read as a real entered dose.
+ */
+function convertInputValue(value: string, factor: number): string {
+  const trimmed = value.trim()
+  if (trimmed === "") return value
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed) || parsed === 0) return value
+  return formatConvertedAmount(parsed * factor)
+}
+
+/** Re-express a volume (a tank or reservoir size) in another unit. */
+export function convertVolumeValue(value: string, from: VolumeUnit, to: VolumeUnit): string {
+  if (from === to) return value
+  return convertInputValue(value, to === "liters" ? LITERS_PER_GALLON : 1 / LITERS_PER_GALLON)
+}
+
+/**
+ * Re-express a rate quoted *per* unit volume (g/gal ↔ g/L, mL/gal ↔ mL/L) in
+ * another unit. Inverse of `convertVolumeValue`: a smaller volume of water
+ * takes proportionally less of the same concentrate.
+ */
+export function convertRateValue(value: string, from: VolumeUnit, to: VolumeUnit): string {
+  if (from === to) return value
+  return convertInputValue(value, to === "liters" ? 1 / LITERS_PER_GALLON : LITERS_PER_GALLON)
+}
+
 /** Guaranteed-analysis oxide → elemental conversion factors */
 export const P2O5_TO_P = 30.974 / 70.974 // ≈ 0.436
 export const K2O_TO_K = 78.169 / 94.196 // ≈ 0.830
@@ -1666,13 +1784,16 @@ export function sumSaltAmounts(...sets: SaltAmounts[]): SaltAmounts {
 
 /**
  * A nutrient part's own feed-chart dose, normalized to dry grams per US
- * gallon of working (reservoir) feed — converting a liquid `ml_per_gallon`
- * dose via the standard liquid-concentrate density when needed.
+ * gallon of working (reservoir) feed — converting a liquid dose via the
+ * standard liquid-concentrate density, and a dose the grower quoted per liter
+ * through `LITERS_PER_GALLON`, when needed. Per-gallon grams stay the one
+ * basis the solver ever sees, whichever unit the feed chart was typed in.
  */
 export function getDoseGramsPerGallon(part: NutrientPart): number {
   const dose = parsePositive(part.dose)
   if (dose === 0) return 0
-  return part.unit === "ml_per_gallon" ? dose * LIQUID_CONCENTRATE_DENSITY : dose
+  const grams = isLiquidDoseUnit(part.unit) ? dose * LIQUID_CONCENTRATE_DENSITY : dose
+  return doseUnitVolumeUnit(part.unit) === "liters" ? grams * LITERS_PER_GALLON : grams
 }
 
 /** Grams of concentrate applied per liter of working (reservoir) solution */
@@ -1765,7 +1886,8 @@ export function getTotalDoseMlPerGallon(parts: NutrientPart[]): number {
   return parts.reduce((total, part) => {
     const dose = parsePositive(part.dose)
     if (dose === 0) return total
-    return total + (part.unit === "ml_per_gallon" ? dose : dose / LIQUID_CONCENTRATE_DENSITY)
+    const ml = isLiquidDoseUnit(part.unit) ? dose : dose / LIQUID_CONCENTRATE_DENSITY
+    return total + (doseUnitVolumeUnit(part.unit) === "liters" ? ml * LITERS_PER_GALLON : ml)
   }, 0)
 }
 

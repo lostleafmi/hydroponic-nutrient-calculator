@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -20,19 +21,27 @@ import {
   ShieldCheck,
   Gauge,
   Target,
+  Info,
+  X,
 } from "lucide-react"
 
 export interface NutrientPart {
   id: string
   name: string
   dose: string
-  unit: "ml_per_gallon" | "g_per_gallon"
+  unit: DoseUnit
 }
 
 import {
+  doseUnitFor,
+  doseUnitLabel,
+  isLiquidDoseUnit,
   isPerPartReplicationPreferred,
   perPartStockTankOptionTitle,
   separateNitrogenSolvesPartsIndependently,
+  volumeUnitNoun,
+  type DoseUnit,
+  type VolumeUnit,
 } from "@/lib/hydro-calc/recipe-types"
 
 /**
@@ -48,6 +57,19 @@ interface FeedingRatesScreenProps {
   onPartsChange: (parts: NutrientPart[]) => void
   stockTankOption: StockTankOption
   onStockTankOptionChange: (option: StockTankOption) => void
+  /**
+   * Which volume the feed-chart rates below are quoted against. This card is
+   * where the grower picks it, and picking it here also re-points the stock
+   * tank size and mL usage rate on the recipe screen at the same unit — see
+   * `onVolumeUnitChange`.
+   */
+  volumeUnit: VolumeUnit
+  /**
+   * Converts every rate already entered and pushes the new unit through to the
+   * stock tank settings. The stock-tank toggles stay free to be moved back
+   * afterwards without disturbing this one.
+   */
+  onVolumeUnitChange: (unit: VolumeUnit) => void
   onBack: () => void
   onNext: () => void
 }
@@ -57,9 +79,22 @@ export function FeedingRatesScreen({
   onPartsChange,
   stockTankOption,
   onStockTankOptionChange,
+  volumeUnit,
+  onVolumeUnitChange,
   onBack,
   onNext
 }: FeedingRatesScreenProps) {
+  // Which unit the last flip synced the stock tank settings to, until the
+  // grower dismisses the note. Kept here rather than in page state because
+  // it's a one-off acknowledgement of what just happened, not a preference.
+  const [syncedUnitNotice, setSyncedUnitNotice] = useState<VolumeUnit | null>(null)
+
+  const handleVolumeUnitChange = (unit: VolumeUnit) => {
+    if (unit === volumeUnit) return
+    onVolumeUnitChange(unit)
+    setSyncedUnitNotice(unit)
+  }
+
   // With more than one part, keeping each part in its own tank is what holds
   // the recipe closest to the line being replicated — every other layout
   // merges the parts and re-solves them as one. See
@@ -120,12 +155,16 @@ export function FeedingRatesScreen({
     />
   )
 
+  const volumeNoun = volumeUnitNoun(volumeUnit)
+  const dryDoseLabel = doseUnitLabel(doseUnitFor("g", volumeUnit))
+  const liquidDoseLabel = doseUnitLabel(doseUnitFor("ml", volumeUnit))
+
   const addPart = () => {
     const newPart: NutrientPart = {
       id: Date.now().toString(),
       name: `Part ${String.fromCharCode(65 + parts.length)}`,
       dose: "",
-      unit: "g_per_gallon"
+      unit: doseUnitFor("g", volumeUnit)
     }
     onPartsChange([...parts, newPart])
   }
@@ -145,17 +184,67 @@ export function FeedingRatesScreen({
       {/* Nutrient Parts Section */}
       <Card className="border-2 border-border bg-card">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl text-foreground">
-            <Beaker className="h-5 w-5 text-primary" />
-            <span>Enter dosage rates from your feed chart</span>
-          </CardTitle>
-          <CardDescription>
-            Look at your nutrient label or feed chart and type in how much of each part you use per
-            gallon for the growth stage you&apos;re in. The unit starts at g/gal (good for dry powders).
-            Flip the switch on the right to ml/gal if your nutrients come as a liquid.
-          </CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1.5">
+              <CardTitle className="flex items-center gap-2 text-xl text-foreground">
+                <Beaker className="h-5 w-5 text-primary" />
+                <span>Enter dosage rates from your feed chart</span>
+              </CardTitle>
+              <CardDescription>
+                Look at your nutrient label or feed chart and type in how much of each part you use
+                per {volumeNoun} for the growth stage you&apos;re in. The unit starts at{" "}
+                {dryDoseLabel} (good for dry powders). Flip the switch on the right to{" "}
+                {liquidDoseLabel} if your nutrients come as a liquid.
+              </CardDescription>
+            </div>
+            <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
+              <button
+                type="button"
+                onClick={() => handleVolumeUnitChange("gallons")}
+                aria-pressed={volumeUnit === "gallons"}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  volumeUnit === "gallons"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                }`}
+              >
+                Gallons
+              </button>
+              <button
+                type="button"
+                onClick={() => handleVolumeUnitChange("liters")}
+                aria-pressed={volumeUnit === "liters"}
+                className={`border-l-2 border-border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  volumeUnit === "liters"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                }`}
+              >
+                Liters
+              </button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {syncedUnitNotice && (
+            <div className="flex items-start gap-3 rounded-lg border border-sky-500/50 bg-sky-500/10 px-3 py-2">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" />
+              <p className="flex-1 text-sm leading-relaxed text-sky-100">
+                Switched stock tank size and usage rates to{" "}
+                {volumeUnitNoun(syncedUnitNotice, true)} as well, toggle these independently if
+                needed
+              </p>
+              <button
+                type="button"
+                onClick={() => setSyncedUnitNotice(null)}
+                aria-label="Dismiss unit change note"
+                className="shrink-0 rounded p-0.5 text-sky-300 transition-colors hover:bg-sky-500/20 hover:text-sky-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           {/* Parts List */}
           <div className="space-y-4">
             {parts.map((part, index) => (
@@ -163,6 +252,7 @@ export function FeedingRatesScreen({
                 key={part.id}
                 part={part}
                 index={index}
+                volumeUnit={volumeUnit}
                 onUpdate={(updates) => updatePart(part.id, updates)}
                 onRemove={() => removePart(part.id)}
                 canRemove={parts.length > 1}
@@ -268,16 +358,24 @@ export function FeedingRatesScreen({
 function PartEntry({
   part,
   index,
+  volumeUnit,
   onUpdate,
   onRemove,
   canRemove
 }: {
   part: NutrientPart
   index: number
+  volumeUnit: VolumeUnit
   onUpdate: (updates: Partial<NutrientPart>) => void
   onRemove: () => void
   canRemove: boolean
 }) {
+  // This switch only picks how the dose is measured out — the card's Gallons /
+  // Liters toggle owns which volume it's quoted against.
+  const isLiquid = isLiquidDoseUnit(part.unit)
+  const liquidUnitLabel = doseUnitLabel(doseUnitFor("ml", volumeUnit))
+  const dryUnitLabel = doseUnitLabel(doseUnitFor("g", volumeUnit))
+
   return (
     <div className="rounded-lg border-2 border-border bg-secondary/20 p-4">
       <div className="flex flex-wrap items-start gap-4">
@@ -317,23 +415,23 @@ function PartEntry({
           />
         </div>
 
-        {/* Unit Toggle - ml/gal vs g/gal */}
+        {/* Unit Toggle - liquid mL vs dry grams, per the card's volume unit */}
         <div className="min-w-[160px]">
           <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">
             Unit
           </Label>
           <div className="flex items-center gap-2 rounded-lg border-2 border-border bg-card p-2">
-            <span className={`text-xs transition-colors ${part.unit === "ml_per_gallon" ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
-              ml/gal
+            <span className={`text-xs transition-colors ${isLiquid ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+              {liquidUnitLabel}
             </span>
             <Switch
-              checked={part.unit === "g_per_gallon"}
-              onCheckedChange={(checked) => 
-                onUpdate({ unit: checked ? "g_per_gallon" : "ml_per_gallon" })
+              checked={!isLiquid}
+              onCheckedChange={(checked) =>
+                onUpdate({ unit: doseUnitFor(checked ? "g" : "ml", volumeUnit) })
               }
             />
-            <span className={`text-xs transition-colors ${part.unit === "g_per_gallon" ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
-              g/gal
+            <span className={`text-xs transition-colors ${!isLiquid ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+              {dryUnitLabel}
             </span>
           </div>
         </div>

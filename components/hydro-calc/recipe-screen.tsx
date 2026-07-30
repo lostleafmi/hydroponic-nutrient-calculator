@@ -62,6 +62,7 @@ import {
   RAW_SALTS,
   calciumChlorideElementalCalciumPpm,
   checkRecipeSolubility,
+  convertVolumeValue,
   DEFAULT_MICRO_PROFILE_IRON_PPM,
   emptyElementalTargets,
   emptySaltAmounts,
@@ -89,6 +90,8 @@ import {
   sumCalciumNitrateGramsPerGallon,
   sumUreaNitrogenPpm,
   unionIncludedSalts,
+  volumeUnitNoun,
+  volumeUnitShortLabel,
   type DirectMixRecipe,
   type MicroKey,
   type MultiPartTankRecipe,
@@ -100,6 +103,7 @@ import {
   type SeparateNitrogenRecipe,
   type SeparateNitrogenTank,
   type TargetDeviation,
+  type VolumeUnit,
 } from "@/lib/hydro-calc/recipe-types"
 import {
   scaleDirectMixRecipe,
@@ -135,8 +139,6 @@ const EMPTY_DIRECT_RECIPE: DirectMixRecipe = {
 const CALCULATE_DEBOUNCE_MS = 250
 
 export interface RecipeInitialSettings {
-  stockTankSize?: string
-  stockTankUnit?: "gallons" | "liters"
   concentrationRatio?: string
   doserLayout?: "per-part" | "separate-ca"
   targetEcInput?: string
@@ -146,6 +148,20 @@ interface RecipeScreenProps {
   partsAnalysis: PartAnalysis[]
   parts: NutrientPart[]
   stockTankOption: StockTankOption
+  /**
+   * The volume unit the Feeding Rates card is set to. Used for the prose on
+   * this screen that talks about water by the gallon or liter; the two
+   * unit toggles below track it when it changes but can each be moved
+   * independently afterwards.
+   */
+  volumeUnit: VolumeUnit
+  stockTankSize: string
+  onStockTankSizeChange: (size: string) => void
+  stockTankUnit: VolumeUnit
+  onStockTankUnitChange: (unit: VolumeUnit) => void
+  /** Whether the "How to Use" card quotes mL per gallon or mL per liter. */
+  usageRateUnit: VolumeUnit
+  onUsageRateUnitChange: (unit: VolumeUnit) => void
   initialSettings?: RecipeInitialSettings
   onBack: () => void
 }
@@ -163,6 +179,13 @@ export function RecipeScreen({
   partsAnalysis,
   parts,
   stockTankOption,
+  volumeUnit,
+  stockTankSize,
+  onStockTankSizeChange,
+  stockTankUnit,
+  onStockTankUnitChange,
+  usageRateUnit,
+  onUsageRateUnitChange,
   initialSettings = {},
   onBack,
 }: RecipeScreenProps) {
@@ -195,10 +218,6 @@ export function RecipeScreen({
     }
   }, [])
 
-  const [stockTankSize, setStockTankSize] = useState(initialSettings.stockTankSize ?? "5")
-  const [stockTankUnit, setStockTankUnit] = useState<"gallons" | "liters">(
-    initialSettings.stockTankUnit ?? "gallons"
-  )
   const [concentrationRatio, setConcentrationRatio] = useState(
     initialSettings.concentrationRatio ?? "100"
   )
@@ -215,14 +234,17 @@ export function RecipeScreen({
     initialSettings.doserLayout ?? "per-part"
   )
 
-  // Default the size field to 1 gal when the user is in direct-mix mode
-  // (the field represents reservoir size there, not stock tank size)
-  useEffect(() => {
-    if (stockTankOption === "direct") {
-      setStockTankSize("1")
-      setStockTankUnit("gallons")
-    }
-  }, [stockTankOption])
+  /**
+   * Moving this toggle re-expresses the size that's already in the field so
+   * the tank doesn't silently change volume. It's a local override of the
+   * Feeding Rates unit and deliberately doesn't report back to it — see the
+   * volume-unit state in `HydroCalcPage`.
+   */
+  const handleStockTankUnitChange = (nextUnit: VolumeUnit) => {
+    if (nextUnit === stockTankUnit) return
+    onStockTankSizeChange(convertVolumeValue(stockTankSize, stockTankUnit, nextUnit))
+    onStockTankUnitChange(nextUnit)
+  }
 
   // Separate Ca is a sub-layout of doser mode only — outside it, the layout is
   // the grower's top-level choice on the Feeding Rates screen.
@@ -893,6 +915,10 @@ export function RecipeScreen({
         includedSalts: combinedIncludedSalts,
         stockTankSize,
         stockTankUnit,
+        // Which volume the feed rates in `parts` were entered against. Their
+        // own `unit` already says so per part (`g_per_liter` and friends) — this
+        // records the screen-level preference alongside them.
+        volumeUnit,
         concentrationRatio: recipeBasisDilutionRatio,
         targetEc: resolvedTargetEc,
         // Recorded for provenance only — `tanks` below already hold the scaled
@@ -1059,15 +1085,18 @@ export function RecipeScreen({
                   id="stock-size"
                   type="number"
                   min="1"
-                  max="100"
+                  // The same ceiling either way — a 100 gal tank is ~379 L, so a
+                  // fixed 100 would put every large tank out of range the moment
+                  // the field switched to liters.
+                  max={stockTankUnit === "liters" ? "400" : "100"}
                   value={stockTankSize}
-                  onChange={(e) => setStockTankSize(e.target.value)}
+                  onChange={(e) => onStockTankSizeChange(e.target.value)}
                   className="w-24 border-2 border-border"
                 />
                 <div className="flex rounded-lg border-2 border-border overflow-hidden">
                   <button
                     type="button"
-                    onClick={() => setStockTankUnit("gallons")}
+                    onClick={() => handleStockTankUnitChange("gallons")}
                     className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                       stockTankUnit === "gallons"
                         ? "bg-primary text-primary-foreground"
@@ -1078,7 +1107,7 @@ export function RecipeScreen({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setStockTankUnit("liters")}
+                    onClick={() => handleStockTankUnitChange("liters")}
                     className={`px-3 py-1.5 text-sm font-medium transition-colors border-l-2 border-border ${
                       stockTankUnit === "liters"
                         ? "bg-primary text-primary-foreground"
@@ -1246,6 +1275,7 @@ export function RecipeScreen({
           isDoserPreset={
             (DOSER_PRESET_RATIOS as readonly number[]).includes(recommendedRatio ?? -1)
           }
+          volumeUnit={volumeUnit}
         />
       )}
       {hasValidData && stockTankOption === "doser" && (
@@ -1264,6 +1294,8 @@ export function RecipeScreen({
           dilutionRatio={recipeBasisDilutionRatio}
           mlPerGallon={mlPerGallon}
           mlPerLiter={mlPerLiter}
+          usageRateUnit={usageRateUnit}
+          onUsageRateUnitChange={onUsageRateUnitChange}
           isDoser={false}
           isPerPartReplication={usesPerPartTanks}
         />
@@ -1507,16 +1539,27 @@ export function RecipeScreen({
               Add the required amount directly to your batch tank / reservoir (or pre-mix it
               separately).
             </p>
+            {/* Both bases are always spelled out; the grower's preferred unit
+                leads so the number they'll actually measure to is first. */}
             <p>
               Add{" "}
               <span className="font-mono font-semibold text-amber-50">
-                {formatGrams(activeDirectAddCalciumCarbonate.gramsPerGallon)}
+                {formatGrams(
+                  volumeUnit === "liters"
+                    ? activeDirectAddCalciumCarbonate.gramsPerLiter
+                    : activeDirectAddCalciumCarbonate.gramsPerGallon
+                )}
               </span>{" "}
-              of Calcium Carbonate per gallon (
+              of Calcium Carbonate per {volumeUnitNoun(volumeUnit)} (
               <span className="font-mono">
-                {formatGrams(activeDirectAddCalciumCarbonate.gramsPerLiter)}
+                {formatGrams(
+                  volumeUnit === "liters"
+                    ? activeDirectAddCalciumCarbonate.gramsPerGallon
+                    : activeDirectAddCalciumCarbonate.gramsPerLiter
+                )}
               </span>{" "}
-              per liter) of reservoir/batch water — not into any of the stock tanks below.
+              per {volumeUnitNoun(volumeUnit === "liters" ? "gallons" : "liters")}) of
+              reservoir/batch water — not into any of the stock tanks below.
             </p>
           </div>
         </div>
@@ -2302,10 +2345,10 @@ function SeparateNitrogenTankCards({
   /** Keyed by salt — see the memo of the same name for why these are combined across parts. */
   calciumFeedRateTooltips: Partial<Record<SaltKey, React.ReactNode>>
   stockTankSize: string
-  stockTankUnit: "gallons" | "liters"
+  stockTankUnit: VolumeUnit
 }) {
   const calciumTankName = tanks.find((tank) => tank.role === "calcium")?.name ?? null
-  const unitLabel = stockTankUnit === "gallons" ? "gallons" : "liters"
+  const unitLabel = volumeUnitNoun(stockTankUnit, true)
 
   if (tanks.length === 0) {
     return (
@@ -2334,7 +2377,7 @@ function SeparateNitrogenTankCards({
                   {separateNitrogenTankBadge(tank)}
                 </span>
                 <span className="ml-auto text-sm font-normal text-muted-foreground">
-                  {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
+                  {stockTankSize} {volumeUnitShortLabel(stockTankUnit)} tank
                 </span>
               </CardTitle>
               <CardDescription>
@@ -2431,7 +2474,7 @@ function PerPartStockTankCards({
   stockVolumeLiters: number
   dilutionRatio: number
   stockTankSize: string
-  stockTankUnit: "gallons" | "liters"
+  stockTankUnit: VolumeUnit
   isDoser: boolean
 }) {
   const analysisById = new Map(partsAnalysis.map((a) => [a.id, a]))
@@ -2486,7 +2529,7 @@ function PerPartStockTankCards({
         const saltEntries = getOrderedSaltEntries(tank.salts)
         const macroEntries = saltEntries.filter(([key]) => !MICRO_SALT_KEYS.has(key))
         const microEntries = saltEntries.filter(([key]) => MICRO_SALT_KEYS.has(key))
-        const unitLabel = stockTankUnit === "gallons" ? "gallons" : "liters"
+        const unitLabel = volumeUnitNoun(stockTankUnit, true)
         const tankFeedRateTooltips = feedRateTooltipsByPartId.get(tank.partId) ?? {}
 
         return (
@@ -2499,7 +2542,7 @@ function PerPartStockTankCards({
                   {tank.partName}
                 </span>
                 <span className="ml-auto text-sm font-normal text-muted-foreground">
-                  {stockTankSize} {stockTankUnit === "gallons" ? "gal" : "L"} tank
+                  {stockTankSize} {volumeUnitShortLabel(stockTankUnit)} tank
                 </span>
               </CardTitle>
               <CardDescription>
@@ -2674,6 +2717,7 @@ function RecommendedRatioCard({
   onReset,
   stockTankOption,
   isDoserPreset,
+  volumeUnit,
 }: {
   report: MultiTankSolubilityReport
   currentRatio: number
@@ -2682,6 +2726,7 @@ function RecommendedRatioCard({
   onReset: () => void
   stockTankOption: StockTankOption
   isDoserPreset: boolean
+  volumeUnit: VolumeUnit
 }) {
   const { limitingSalt, safe } = report
   const limitingSaltName = limitingSalt ? RAW_SALTS[limitingSalt].name : null
@@ -2781,7 +2826,7 @@ function RecommendedRatioCard({
               You changed the ratio to <span className="font-mono">1 : {currentRatio}</span>.
               {currentExceedsRecommended
                 ? " That's higher than what we recommend — your stock tanks will be more concentrated."
-                : " That's lower than what we recommend — you'll just use a bit more stock per gallon."}
+                : ` That's lower than what we recommend — you'll just use a bit more stock per ${volumeUnitNoun(volumeUnit)}.`}
             </p>
             <Button onClick={onReset} variant="outline" className="gap-2">
               <Sparkles className="h-4 w-4" />
@@ -2828,6 +2873,8 @@ function StockTankUsageCard({
   dilutionRatio,
   mlPerGallon,
   mlPerLiter,
+  usageRateUnit,
+  onUsageRateUnitChange,
   isDoser,
   isPerPartReplication = false,
 }: {
@@ -2835,6 +2882,13 @@ function StockTankUsageCard({
   dilutionRatio: number
   mlPerGallon: number
   mlPerLiter: number
+  /**
+   * Owned a level up so the Feeding Rates unit can point this at liters along
+   * with everything else, while still leaving the grower free to flip it back
+   * here on its own.
+   */
+  usageRateUnit: VolumeUnit
+  onUsageRateUnitChange: (unit: VolumeUnit) => void
   isDoser: boolean
   /**
    * True when each tank listed here corresponds to one part of the grower's
@@ -2845,10 +2899,9 @@ function StockTankUsageCard({
    */
   isPerPartReplication?: boolean
 }) {
-  const [mlUnit, setMlUnit] = useState<"gal" | "L">("gal")
-
-  const amount = mlUnit === "gal" ? formatMl(mlPerGallon) : formatMl(mlPerLiter)
-  const unitLabel = mlUnit === "gal" ? "gallon" : "liter"
+  const amount = usageRateUnit === "liters" ? formatMl(mlPerLiter) : formatMl(mlPerGallon)
+  const unitLabel = volumeUnitNoun(usageRateUnit)
+  const unitSuffix = volumeUnitShortLabel(usageRateUnit)
   const tankList = joinTankNames(tankLabels)
 
   return (
@@ -2869,9 +2922,9 @@ function StockTankUsageCard({
           <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
             <button
               type="button"
-              onClick={() => setMlUnit("gal")}
+              onClick={() => onUsageRateUnitChange("gallons")}
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                mlUnit === "gal"
+                usageRateUnit === "gallons"
                   ? "bg-primary text-primary-foreground"
                   : "bg-secondary text-muted-foreground hover:bg-secondary/80"
               }`}
@@ -2880,9 +2933,9 @@ function StockTankUsageCard({
             </button>
             <button
               type="button"
-              onClick={() => setMlUnit("L")}
+              onClick={() => onUsageRateUnitChange("liters")}
               className={`border-l-2 border-border px-3 py-1.5 text-sm font-medium transition-colors ${
-                mlUnit === "L"
+                usageRateUnit === "liters"
                   ? "bg-primary text-primary-foreground"
                   : "bg-secondary text-muted-foreground hover:bg-secondary/80"
               }`}
@@ -2925,7 +2978,7 @@ function StockTankUsageCard({
             >
               <p className="font-medium text-foreground">{label}</p>
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                {amount} mL/{mlUnit}
+                {amount} mL/{unitSuffix}
               </p>
             </li>
           ))}

@@ -10,7 +10,16 @@ import {
 } from "@/components/hydro-calc/guaranteed-analysis-screen"
 import { FeedingRatesScreen, type NutrientPart, type StockTankOption } from "@/components/hydro-calc/feeding-rates-screen"
 import { RecipeScreen, type RecipeInitialSettings } from "@/components/hydro-calc/recipe-screen"
-import { defaultStockTankOption, normalizeStockTankOption } from "@/lib/hydro-calc/recipe-types"
+import {
+  convertRateValue,
+  convertVolumeValue,
+  defaultStockTankOption,
+  doseUnitFor,
+  doseUnitVolumeUnit,
+  normalizeStockTankOption,
+  rebaseDoseUnit,
+  type VolumeUnit,
+} from "@/lib/hydro-calc/recipe-types"
 import {
   hydrateSavedFeedingParts,
   hydrateSavedPartsAnalysis,
@@ -43,7 +52,8 @@ function createInitialWizardState() {
 
 function syncFeedingPartsFromAnalysis(
   analysisParts: PartAnalysis[],
-  feedingParts: NutrientPart[]
+  feedingParts: NutrientPart[],
+  volumeUnit: VolumeUnit
 ): NutrientPart[] {
   const feedingById = new Map(feedingParts.map((part) => [part.id, part]))
   const usedFeedingIds = new Set<string>()
@@ -73,7 +83,7 @@ function syncFeedingPartsFromAnalysis(
       id: analysisPart.id,
       name: analysisPart.name,
       dose: "",
-      unit: "g_per_gallon" as const,
+      unit: doseUnitFor("g", volumeUnit),
     }
   })
 }
@@ -120,6 +130,22 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
     defaultStockTankOption(initialState.parts.length)
   )
 
+  /**
+   * The grower's volume preference, in three places that are allowed to
+   * disagree.
+   *
+   * `volumeUnit` is what the Feeding Rates card is set to, and it's the source
+   * of truth only at the moment it changes: flipping it re-quotes every feed
+   * rate and pushes the same unit onto the two below (see
+   * `handleVolumeUnitChange`). After that the stock tank size unit and the mL
+   * usage rate unit are the grower's to move on the recipe screen, and moving
+   * them never flips the feed chart back.
+   */
+  const [volumeUnit, setVolumeUnit] = useState<VolumeUnit>("gallons")
+  const [stockTankSize, setStockTankSize] = useState("5")
+  const [stockTankUnit, setStockTankUnit] = useState<VolumeUnit>("gallons")
+  const [usageRateUnit, setUsageRateUnit] = useState<VolumeUnit>("gallons")
+
   // Tracks which recipeInitialSettings generation is in use — incrementing forces
   // RecipeScreen to remount so its useState picks up the new initial values.
   const [recipeKey, setRecipeKey] = useState(0)
@@ -165,6 +191,12 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
         const savedParts = hydrateSavedFeedingParts(saved)
         if (savedParts) {
           setParts(savedParts)
+          // The saved rates carry their own basis, so the toggles come back
+          // reading the unit the formulation was actually entered in.
+          const savedVolumeUnit = doseUnitVolumeUnit(savedParts[0].unit)
+          setVolumeUnit(savedVolumeUnit)
+          setUsageRateUnit(savedVolumeUnit)
+          setStockTankUnit(savedVolumeUnit)
         }
         // Older saved formulations still carry the pre-rename "ab" value for
         // the per-part layout — see `normalizeStockTankOption`.
@@ -174,11 +206,14 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
         }
 
         // --- Pre-fill recipe screen settings ---
-        const settings: RecipeInitialSettings = {}
-        if (saved.stockTankSize) settings.stockTankSize = String(saved.stockTankSize)
+        // The tank size and its unit live on this page (the Feeding Rates unit
+        // toggle writes to them), so they're restored directly rather than
+        // through the remounted recipe screen's initial settings.
+        if (saved.stockTankSize) setStockTankSize(String(saved.stockTankSize))
         if (saved.stockTankUnit === "gallons" || saved.stockTankUnit === "liters") {
-          settings.stockTankUnit = saved.stockTankUnit
+          setStockTankUnit(saved.stockTankUnit)
         }
+        const settings: RecipeInitialSettings = {}
         if (saved.concentrationRatio) settings.concentrationRatio = String(saved.concentrationRatio)
         if (saved.doserLayout === "per-part" || saved.doserLayout === "separate-ca") {
           settings.doserLayout = saved.doserLayout
@@ -213,12 +248,47 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
 
   const handlePartsAnalysisChange = (nextPartsAnalysis: PartAnalysis[]) => {
     setPartsAnalysis(nextPartsAnalysis)
-    setParts((currentParts) => syncFeedingPartsFromAnalysis(nextPartsAnalysis, currentParts))
+    setParts((currentParts) =>
+      syncFeedingPartsFromAnalysis(nextPartsAnalysis, currentParts, volumeUnit)
+    )
   }
 
   const handlePartsChange = (nextParts: NutrientPart[]) => {
     setParts(nextParts)
     setPartsAnalysis((currentAnalysis) => syncAnalysisPartsFromFeeding(nextParts, currentAnalysis))
+  }
+
+  /**
+   * Flipping the Feeding Rates card's unit re-quotes every number already
+   * typed rather than reinterpreting it, so the actual dose the grower gets
+   * doesn't jump — 4 g/gal becomes 1.0567 g/L, the same feed either way. The
+   * stock tank size and mL usage rate follow to the new unit too (the tank
+   * size converted the same way), which is what the note on that card tells
+   * the grower just happened.
+   */
+  const handleVolumeUnitChange = (nextUnit: VolumeUnit) => {
+    if (nextUnit === volumeUnit) return
+    setVolumeUnit(nextUnit)
+    setParts((currentParts) =>
+      currentParts.map((part) => ({
+        ...part,
+        dose: convertRateValue(part.dose, doseUnitVolumeUnit(part.unit), nextUnit),
+        unit: rebaseDoseUnit(part.unit, nextUnit),
+      }))
+    )
+    setStockTankSize((currentSize) => convertVolumeValue(currentSize, stockTankUnit, nextUnit))
+    setStockTankUnit(nextUnit)
+    setUsageRateUnit(nextUnit)
+  }
+
+  const handleStockTankOptionChange = (option: StockTankOption) => {
+    setStockTankOption(option)
+    // In direct-mix mode the size field is the reservoir being fed, not a stock
+    // tank, so it starts from a single gallon's worth of feed — expressed in
+    // whichever unit is currently in play.
+    if (option === "direct") {
+      setStockTankSize(convertVolumeValue("1", "gallons", stockTankUnit))
+    }
   }
 
   const goToScreen = (screen: Screen) => {
@@ -328,7 +398,9 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
             parts={parts}
             onPartsChange={handlePartsChange}
             stockTankOption={stockTankOption}
-            onStockTankOptionChange={setStockTankOption}
+            onStockTankOptionChange={handleStockTankOptionChange}
+            volumeUnit={volumeUnit}
+            onVolumeUnitChange={handleVolumeUnitChange}
             onBack={() => goToScreen("analysis")}
             onNext={() => goToScreen("recipe")}
           />
@@ -339,6 +411,13 @@ export function HydroCalcPage({ loadFormulationId }: { loadFormulationId?: strin
             partsAnalysis={partsAnalysis}
             parts={parts}
             stockTankOption={stockTankOption}
+            volumeUnit={volumeUnit}
+            stockTankSize={stockTankSize}
+            onStockTankSizeChange={setStockTankSize}
+            stockTankUnit={stockTankUnit}
+            onStockTankUnitChange={setStockTankUnit}
+            usageRateUnit={usageRateUnit}
+            onUsageRateUnitChange={setUsageRateUnit}
             initialSettings={recipeInitialSettings}
             onBack={() => goToScreen("feeding")}
           />
