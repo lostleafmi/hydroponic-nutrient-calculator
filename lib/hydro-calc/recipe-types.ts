@@ -1793,9 +1793,23 @@ export function formatGrams(g: number): string {
   return `${g.toFixed(2)} g`
 }
 
+/**
+ * Enough decimals that a printed ppm reconciles with the grams it came from.
+ *
+ * The 1–10 band is where the micronutrients that aren't sub-1 ppm land, and it
+ * used to print one decimal: a Manganese target of 1.374 ppm — the ppm a
+ * grower gets back by working forward from the tank card's own g/gal and
+ * mL/gal — showed as "1.4 ppm", off by enough to read as a 2% discrepancy
+ * rather than as rounding. It also made the deviation callout capable of
+ * printing "1.4 vs 1.4" while flagging a gap. Two decimals there matches what
+ * `formatGrams` already does from 1 g up. Above 10 ppm one decimal is finer
+ * than any grower can mix to, and below 1 ppm three are needed to say anything
+ * at all.
+ */
 export function formatPpm(ppm: number): string {
   if (!Number.isFinite(ppm) || ppm <= 0) return "—"
   if (ppm < 1) return `${ppm.toFixed(3)} ppm`
+  if (ppm < 10) return `${ppm.toFixed(2)} ppm`
   return `${ppm.toFixed(1)} ppm`
 }
 
