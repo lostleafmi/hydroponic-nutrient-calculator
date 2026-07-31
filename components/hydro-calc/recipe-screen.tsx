@@ -110,6 +110,8 @@ import {
   scaleMultiPartTankRecipe,
   scaleSeparateNitrogenRecipe,
 } from "@/lib/hydro-calc/displayed-recipe"
+import { buildDryBulkBatch, type DryBatchSizeLb } from "@/lib/hydro-calc/dry-batch"
+import { DryBulkBatchCard, DryBulkBatchEntry } from "./dry-bulk-batch-card"
 
 /** Rendered before the first Server Action response arrives */
 const EMPTY_TARGETS = emptyElementalTargets()
@@ -233,6 +235,16 @@ export function RecipeScreen({
   const [doserLayout, setDoserLayout] = useState<"per-part" | "separate-ca">(
     initialSettings.doserLayout ?? "per-part"
   )
+
+  /**
+   * Which bulk dry batch the grower asked for, or null for the normal
+   * per-reservoir direct-mix list. An alternate *view* of the direct-mix
+   * recipe, so it's deliberately local to this screen: it never reaches the
+   * solver, the saved formulation or the exported tanks (see
+   * `lib/hydro-calc/dry-batch.ts`).
+   */
+  const [dryBatchSizeLb, setDryBatchSizeLb] = useState<DryBatchSizeLb | null>(null)
+  const [isDryBatchPickerOpen, setIsDryBatchPickerOpen] = useState(false)
 
   /**
    * Moving this toggle re-expresses the size that's already in the field so
@@ -517,6 +529,48 @@ export function RecipeScreen({
   // spirals into "Maximum update depth exceeded".
   const recipeBasisVolumeLiters = calcResult?.stockVolumeLiters ?? stockVolumeLiters
   const recipeBasisDilutionRatio = calcResult?.dilutionRatio ?? dilutionRatio
+
+  /**
+   * The same direct-mix salts as a bagged dry blend of 10 or 25 lb. Built from
+   * the displayed (Target-EC-scaled) amounts and the reservoir they were solved
+   * for, so the bags hold the recipe's exact ratios and the use rate printed on
+   * each one reproduces this screen's feed strength.
+   */
+  const dryBatch = useMemo(() => {
+    if (stockTankOption !== "direct" || dryBatchSizeLb === null) return null
+    return buildDryBulkBatch({
+      salts: directRecipe.salts,
+      reservoirLiters: recipeBasisVolumeLiters,
+      sizeLb: dryBatchSizeLb,
+      partsAnalysis,
+      directAddCalciumCarbonateGrams: directRecipe.directAddCalciumCarbonate?.grams ?? 0,
+    })
+  }, [
+    stockTankOption,
+    dryBatchSizeLb,
+    directRecipe.salts,
+    directRecipe.directAddCalciumCarbonate,
+    recipeBasisVolumeLiters,
+    partsAnalysis,
+  ])
+
+  // Dry batching only exists for direct mix, so switching layouts drops it
+  // rather than leaving a size armed to reappear on the next visit.
+  useEffect(() => {
+    if (stockTankOption === "direct") return
+    setDryBatchSizeLb(null)
+    setIsDryBatchPickerOpen(false)
+  }, [stockTankOption])
+
+  const handlePickDryBatchSize = (sizeLb: DryBatchSizeLb) => {
+    setDryBatchSizeLb(sizeLb)
+    setIsDryBatchPickerOpen(false)
+  }
+
+  const exitDryBatch = () => {
+    setDryBatchSizeLb(null)
+    setIsDryBatchPickerOpen(false)
+  }
 
   /**
    * Calculation-path tooltips for the two Calcium salts whose grams can come
@@ -1063,6 +1117,18 @@ export function RecipeScreen({
 
   return (
     <div className="space-y-6">
+      {/* Bulk dry batching — direct mix only, since it's a re-presentation of
+          that layout's already-solved salt list */}
+      {hasValidData && stockTankOption === "direct" && (
+        <DryBulkBatchEntry
+          sizeLb={dryBatchSizeLb}
+          isPickerOpen={isDryBatchPickerOpen}
+          onPickerOpenChange={setIsDryBatchPickerOpen}
+          onPickSize={handlePickDryBatchSize}
+          onExit={exitDryBatch}
+        />
+      )}
+
       {/* Stock Tank Settings / Reservoir Size */}
       <Card className="border-2 border-border bg-card">
         <CardHeader>
@@ -1649,8 +1715,15 @@ export function RecipeScreen({
         />
       )}
 
+      {/* Bulk dry batch — stands in for the per-reservoir salt list below while
+          a batch size is selected. The entry card at the top of the screen is
+          the way back. */}
+      {hasValidData && stockTankOption === "direct" && dryBatch && (
+        <DryBulkBatchCard batch={dryBatch} />
+      )}
+
       {/* Direct Mixing Instructions */}
-      {hasValidData && stockTankOption === "direct" && (
+      {hasValidData && stockTankOption === "direct" && !dryBatch && (
         <Card className="border-2 border-border bg-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl text-foreground">

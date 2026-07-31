@@ -61,6 +61,13 @@ import {
   scaleSeparateNitrogenRecipe,
   stockSaltGramsPerGallonOfStock,
 } from "@/lib/hydro-calc/displayed-recipe"
+import {
+  buildDryBulkBatch,
+  DRY_BATCH_SIZES_LB,
+  DRY_BATCH_USE_RATE_LITERS,
+  findDryBagCompatibilityViolations,
+  GRAMS_PER_POUND,
+} from "@/lib/hydro-calc/dry-batch"
 
 const STOCK_VOLUME_LITERS = 5
 const DILUTION_RATIO = 100
@@ -1736,6 +1743,165 @@ function reportDisplayedRoundTrip(
   return allPass
 }
 
+/**
+ * The bulk dry batch (see `lib/hydro-calc/dry-batch.ts`) is a re-presentation
+ * of the Direct Mix salt list, so what has to be checked isn't chemistry the
+ * solver already settled — it's that the re-presentation is lossless and that
+ * the bag split it invents is safe.
+ *
+ * Four things, for both bag sizes:
+ *
+ *  1. No bag holds a Calcium source beside a phosphate, sulfate or Magnesium
+ *     source. `buildDryBulkBatch` claims this can't happen by construction;
+ *     this checks the claim against real solved recipes rather than trusting it.
+ *  2. Every salt lands in exactly one bag, and none is dropped.
+ *  3. The bags sum to the selected weight, and every salt is the direct-mix
+ *     amount times one shared scale — i.e. the ratios the solver produced
+ *     survived the split untouched.
+ *  4. Dosing each bag at its own printed use rate reproduces the direct-mix
+ *     ppm. This is the closing check: a bag split that got the weights right
+ *     but the per-bag use rate wrong would pass 1–3 and still starve the
+ *     grower's reservoir.
+ */
+function reportDryBulkBatch(
+  directSalts: SaltAmounts,
+  reservoirLiters: number,
+  scenario: Scenario
+): boolean {
+  const activeKeys = SALT_DISPLAY_ORDER.filter((key) => directSalts[key] > 0)
+  const solvedTotal = activeKeys.reduce((total, key) => total + directSalts[key], 0)
+  if (!(solvedTotal > 0)) return true
+
+  const reservoirPpm = elementalPpmFromSaltAmounts(directSalts, reservoirLiters, 1)
+  let allPass = true
+
+  for (const sizeLb of DRY_BATCH_SIZES_LB) {
+    const batch = buildDryBulkBatch({
+      salts: directSalts,
+      reservoirLiters,
+      sizeLb,
+      partsAnalysis: scenario.partsAnalysis,
+    })
+
+    console.log(`\n  Dry bulk batch — ${sizeLb} lb`)
+    if (!batch) {
+      console.log("    EXPECTED a batch from a non-empty direct-mix recipe, got none")
+      return false
+    }
+
+    console.log(
+      `    split: ${batch.splitBasis} — ${batch.bags.length} bag${batch.bags.length === 1 ? "" : "s"}, ` +
+        `treats ${batch.treatsGallons.toFixed(0)} gal`
+    )
+
+    const violations = findDryBagCompatibilityViolations(batch.bags)
+    for (const violation of violations) {
+      console.log(`    FORBIDDEN BAG: ${violation}`)
+      allPass = false
+    }
+    if (violations.length === 0) {
+      console.log("    calcium kept clear of phosphate / sulfate / magnesium in every bag: ok")
+    }
+
+    // Each salt in exactly one bag, and the whole recipe accounted for.
+    const bagCountByKey = new Map<SaltKey, number>()
+    const batchSalts = emptySaltAmounts()
+    const usePerGallon = emptySaltAmounts()
+    for (const bag of batch.bags) {
+      console.log(
+        `    Bag ${bag.letter} — ${padRight(bag.title, 30)} ${padLeft(bag.totalGrams.toFixed(1), 9)} g` +
+          ` (${bag.totalPounds.toFixed(2)} lb)  ${bag.gramsPerGallonOfWater.toFixed(3)} g/gal` +
+          ` · ${bag.gramsPerBatchUseRateLiters.toFixed(3)} g/${DRY_BATCH_USE_RATE_LITERS} L`
+      )
+      const bagSaltTotal = bag.salts.reduce((total, salt) => total + salt.grams, 0)
+      if (Math.abs(bagSaltTotal - bag.totalGrams) > Math.max(bag.totalGrams * 1e-9, 1e-9)) {
+        console.log(
+          `      BAG TOTAL != ITS SALTS: ${bag.totalGrams.toFixed(6)} g vs ${bagSaltTotal.toFixed(6)} g`
+        )
+        allPass = false
+      }
+      for (const salt of bag.salts) {
+        bagCountByKey.set(salt.key, (bagCountByKey.get(salt.key) ?? 0) + 1)
+        batchSalts[salt.key] += salt.grams
+        // What the grower actually applies: this bag's use rate, split back
+        // across the bag by each salt's share of it.
+        usePerGallon[salt.key] +=
+          bag.totalGrams > 0 ? (salt.grams / bag.totalGrams) * bag.gramsPerGallonOfWater : 0
+      }
+    }
+
+    for (const key of activeKeys) {
+      // Calcium Carbonate is deliberately excluded from the bags (it's a direct
+      // reservoir addition), so it's never in a `salts` set the batch is built
+      // from either — a non-zero one here would be a solver change, not a bug.
+      const bags = bagCountByKey.get(key) ?? 0
+      if (bags !== 1) {
+        console.log(
+          `      ${RAW_SALTS[key].name} is in ${bags} bag${bags === 1 ? "" : "s"} — must be exactly 1`
+        )
+        allPass = false
+      }
+    }
+    for (const [key] of bagCountByKey) {
+      if (directSalts[key] > 0) continue
+      console.log(`      ${RAW_SALTS[key].name} is bagged but isn't in the recipe`)
+      allPass = false
+    }
+
+    // Bags sum to the selected weight.
+    const targetGrams = sizeLb * GRAMS_PER_POUND
+    const totalSkew = Math.abs(batch.totalGrams - targetGrams)
+    if (totalSkew > Math.max(targetGrams * 1e-9, 1e-6)) {
+      console.log(
+        `      BAGS DON'T SUM TO ${sizeLb} lb: ${batch.totalGrams.toFixed(6)} g vs ` +
+          `${targetGrams.toFixed(6)} g (off by ${totalSkew.toExponential(2)} g)`
+      )
+      allPass = false
+    } else {
+      console.log(
+        `    bags sum to ${batch.totalGrams.toFixed(3)} g = ${sizeLb} lb ` +
+          `(off by ${totalSkew.toExponential(2)} g): ok`
+      )
+    }
+
+    // One shared scale, applied to every salt — i.e. the solver's ratios intact.
+    const scale = targetGrams / solvedTotal
+    let ratiosHeld = true
+    for (const key of activeKeys) {
+      const expected = directSalts[key] * scale
+      if (Math.abs(batchSalts[key] - expected) <= Math.max(expected * 1e-9, 1e-9)) continue
+      console.log(
+        `      ${RAW_SALTS[key].name} scaled to ${batchSalts[key].toFixed(6)} g, expected ` +
+          `${expected.toFixed(6)} g (×${scale.toFixed(6)})`
+      )
+      ratiosHeld = false
+      allPass = false
+    }
+    if (ratiosHeld) {
+      console.log(`    every salt is its direct-mix amount ×${scale.toFixed(4)}: ok`)
+    }
+
+    // The use rates put the reservoir back where the direct mix had it.
+    const fromUseRates = elementalPpmFromSaltAmounts(usePerGallon, LITERS_PER_GALLON, 1)
+    console.log(
+      `    ${padRight("element", 8)}${padLeft("direct mix", 12)}${padLeft("from bags", 12)}${padLeft("diff", 10)}   status`
+    )
+    for (const key of [...MACRO_KEYS, ...MICRO_KEYS]) {
+      if (reservoirPpm[key] === 0 && fromUseRates[key] === 0) continue
+      const diff = fromUseRates[key] - reservoirPpm[key]
+      const ok = Math.abs(diff) <= Math.max(Math.abs(reservoirPpm[key]) * 1e-9, 1e-9)
+      if (!ok) allPass = false
+      console.log(
+        `    ${padRight(ELEMENT_SYMBOLS[key], 8)}${padLeft(fmt(reservoirPpm[key]), 12)}` +
+          `${padLeft(fmt(fromUseRates[key]), 12)}${padLeft(signed(diff), 10)}   ` +
+          `${ok ? "ok" : "USE RATE != DIRECT MIX"}`
+      )
+    }
+  }
+
+  return allPass
+}
+
 async function runScenario(scenario: Scenario): Promise<boolean> {
   const stockVolumeLiters = scenario.stockVolumeLiters ?? STOCK_VOLUME_LITERS
   const dilutionRatio = scenario.dilutionRatio ?? DILUTION_RATIO
@@ -1856,6 +2022,13 @@ async function runScenario(scenario: Scenario): Promise<boolean> {
   }
 
   if (!reportSeparateNitrogenMatchesPerPartTanks(result, scenario)) {
+    allPass = false
+  }
+
+  // Checked for every scenario rather than only the direct-mix ones: the Direct
+  // Mix recipe is solved on every request regardless of the layout on screen,
+  // and the bag split has to hold for any label a grower might bring.
+  if (!reportDryBulkBatch(displayed.direct.salts, result.stockVolumeLiters, scenario)) {
     allPass = false
   }
 
