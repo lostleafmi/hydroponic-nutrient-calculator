@@ -713,6 +713,9 @@ export function RecipeScreen({
     if (estimatedEc !== null) setTargetEcInput(estimatedEc.toFixed(2))
   }
 
+  /** The grower has moved Target EC far enough off the estimate to be worth saying so. */
+  const targetEcIsScaled = targetEcIsManual && Math.abs(ecScaleFactor - 1) > 0.005
+
   // What to show in the Estimated EC badge
   const displayedEc =
     parsedTargetEc > 0 ? parsedTargetEc : (estimatedEc ?? 0)
@@ -725,6 +728,14 @@ export function RecipeScreen({
   const usedDefaultMicroProfile = microEstimateSource === "default-profile"
 
   const hasValidData = hasValidRecipeInput(partsAnalysis, parts)
+
+  /**
+   * True while the bagged dry blend stands in for the per-reservoir salt list.
+   * Several cards on this screen describe mixing salts into water one at a
+   * time, which is not what the grower is doing here, so they step aside for
+   * the batch view's own instructions.
+   */
+  const isDryBatchView = hasValidData && stockTankOption === "direct" && dryBatch !== null
 
   const neededSalts = useMemo(() => {
     let entries: Array<[string, number]>
@@ -1129,69 +1140,87 @@ export function RecipeScreen({
         />
       )}
 
-      {/* Stock Tank Settings / Reservoir Size */}
+      {/* Stock Tank Settings / Reservoir Size — or, while a dry batch is on
+          screen, Target EC alone. A batch has no reservoir to size: the bags
+          are weighed in pounds and their use rates are grams per volume of
+          irrigation water, neither of which the reservoir volume can move.
+          Target EC still moves the use rates, so it's what's left to set. */}
       <Card className="border-2 border-border bg-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-xl text-foreground">
-            <FlaskConical className="h-5 w-5 text-primary" />
-            <span>{stockTankOption === "direct" ? "Reservoir Size" : "Stock Tank Settings"}</span>
+            {isDryBatchView ? (
+              <Gauge className="h-5 w-5 text-primary" />
+            ) : (
+              <FlaskConical className="h-5 w-5 text-primary" />
+            )}
+            <span>
+              {isDryBatchView
+                ? "Target EC"
+                : stockTankOption === "direct"
+                  ? "Reservoir Size"
+                  : "Stock Tank Settings"}
+            </span>
           </CardTitle>
           <CardDescription>
-            {stockTankOption === "direct"
-              ? "How big is your reservoir and what is your target EC"
-              : "How big are your stock tanks, and how much do you want to dilute them?"}
+            {isDryBatchView
+              ? `What feed strength these bags get dosed at. Changing it moves the use rate printed on each bag — every bag still weighs ${dryBatch?.sizeLb} lb, and still holds the same salts in the same proportions.`
+              : stockTankOption === "direct"
+                ? "How big is your reservoir and what is your target EC"
+                : "How big are your stock tanks, and how much do you want to dilute them?"}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-6">
-            <div className="min-w-[200px]">
-              <Label htmlFor="stock-size" className="mb-1.5 block text-sm font-medium">
-                {stockTankOption === "direct" ? "Reservoir Size" : "Stock Tank Size"}
-              </Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="stock-size"
-                  type="number"
-                  min="1"
-                  // The same ceiling either way — a 100 gal tank is ~379 L, so a
-                  // fixed 100 would put every large tank out of range the moment
-                  // the field switched to liters.
-                  max={stockTankUnit === "liters" ? "400" : "100"}
-                  value={stockTankSize}
-                  onChange={(e) => onStockTankSizeChange(e.target.value)}
-                  className="w-24 border-2 border-border"
-                />
-                <div className="flex rounded-lg border-2 border-border overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => handleStockTankUnitChange("gallons")}
-                    className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                      stockTankUnit === "gallons"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-                    }`}
-                  >
-                    gal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleStockTankUnitChange("liters")}
-                    className={`px-3 py-1.5 text-sm font-medium transition-colors border-l-2 border-border ${
-                      stockTankUnit === "liters"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-                    }`}
-                  >
-                    L
-                  </button>
+            {!isDryBatchView && (
+              <div className="min-w-[200px]">
+                <Label htmlFor="stock-size" className="mb-1.5 block text-sm font-medium">
+                  {stockTankOption === "direct" ? "Reservoir Size" : "Stock Tank Size"}
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="stock-size"
+                    type="number"
+                    min="1"
+                    // The same ceiling either way — a 100 gal tank is ~379 L, so a
+                    // fixed 100 would put every large tank out of range the moment
+                    // the field switched to liters.
+                    max={stockTankUnit === "liters" ? "400" : "100"}
+                    value={stockTankSize}
+                    onChange={(e) => onStockTankSizeChange(e.target.value)}
+                    className="w-24 border-2 border-border"
+                  />
+                  <div className="flex rounded-lg border-2 border-border overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => handleStockTankUnitChange("gallons")}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                        stockTankUnit === "gallons"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                      }`}
+                    >
+                      gal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStockTankUnitChange("liters")}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors border-l-2 border-border ${
+                        stockTankUnit === "liters"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                      }`}
+                    >
+                      L
+                    </button>
+                  </div>
                 </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {stockTankUnit === "gallons"
+                    ? `= ${(parseFloat(stockTankSize || "0") * LITERS_PER_GALLON).toFixed(1)} liters`
+                    : `= ${(parseFloat(stockTankSize || "0") / LITERS_PER_GALLON).toFixed(2)} gallons`}
+                </p>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {stockTankUnit === "gallons"
-                  ? `= ${(parseFloat(stockTankSize || "0") * LITERS_PER_GALLON).toFixed(1)} liters`
-                  : `= ${(parseFloat(stockTankSize || "0") / LITERS_PER_GALLON).toFixed(2)} gallons`}
-              </p>
-            </div>
+            )}
             {stockTankOption !== "direct" && (
               <div className="min-w-[150px]">
                 <Label htmlFor="ratio" className="mb-1.5 block text-sm font-medium">
@@ -1250,41 +1279,21 @@ export function RecipeScreen({
             )}
 
             {estimatedEc !== null && (
-              <div className="min-w-[150px]">
-                <Label htmlFor="target-ec" className="mb-1.5 block text-sm font-medium">
-                  Target EC
-                </Label>
-                <p className="mb-1.5 text-xs text-muted-foreground">
-                  Estimated EC automatically calculated based on inputs
-                </p>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="target-ec"
-                    type="number"
-                    min="0.1"
-                    max="10"
-                    step="0.1"
-                    value={targetEcInput}
-                    onChange={(e) => handleTargetEcChange(e.target.value)}
-                    className="w-24 border-2 border-border"
-                  />
-                  <span className="text-sm text-muted-foreground">mS/cm</span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {targetEcIsManual && Math.abs(ecScaleFactor - 1) > 0.005
-                    ? `All amounts — and the ppm above — scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm.`
-                    : "All amounts adjust automatically when you change this."}
-                </p>
-                {targetEcIsManual && Math.abs(ecScaleFactor - 1) > 0.005 && (
-                  <button
-                    type="button"
-                    onClick={resetTargetEc}
-                    className="mt-1 text-xs text-primary underline-offset-2 hover:underline"
-                  >
-                    Reset to estimated
-                  </button>
-                )}
-              </div>
+              <TargetEcField
+                value={targetEcInput}
+                onChange={handleTargetEcChange}
+                isScaled={targetEcIsScaled}
+                onReset={resetTargetEc}
+                note={
+                  isDryBatchView
+                    ? targetEcIsScaled
+                      ? `Use rates scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm. The bag weights don't move.`
+                      : "The use rate on each bag adjusts automatically when you change this."
+                    : targetEcIsScaled
+                      ? `All amounts — and the ppm above — scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm.`
+                      : "All amounts adjust automatically when you change this."
+                }
+              />
             )}
           </div>
 
@@ -1516,8 +1525,10 @@ export function RecipeScreen({
           salt the grower didn't check, purely to fully match a target
           (currently only Potassium — see `SaltAutoAddNote`). This is a
           user-friendly failsafe, not a warning: the recipe below already
-          matches the label, no action is needed. */}
-      {hasValidData && activeAutoAddedSalts.length > 0 && (
+          matches the label, no action is needed. Hidden in the dry batch view,
+          which is a weighing sheet for salts already decided — how the solver
+          arrived at them isn't actionable there. */}
+      {hasValidData && !isDryBatchView && activeAutoAddedSalts.length > 0 && (
         <div className="flex items-start gap-3 rounded-lg border-2 border-sky-500/50 bg-sky-500/10 p-4">
           <Info className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
           <p className="text-sm leading-relaxed text-sky-100">
@@ -1633,8 +1644,11 @@ export function RecipeScreen({
         </div>
       )}
 
-      {/* Mixing-safety banner — non-doser modes only (doser banner shown above settings) */}
-      {hasValidData && stockTankOption !== "doser" && (
+      {/* Mixing-safety banner — non-doser modes only (doser banner shown above
+          settings). Not in the dry batch view: its direct-mix form is about the
+          order salts go into water, and nothing is being dissolved here. The
+          batch's own instructions carry the safety rules that do apply. */}
+      {hasValidData && stockTankOption !== "doser" && !isDryBatchView && (
         <MixingSafetyBanner
           option={stockTankOption}
           tankCount={
@@ -1719,7 +1733,11 @@ export function RecipeScreen({
           a batch size is selected. The entry card at the top of the screen is
           the way back. */}
       {hasValidData && stockTankOption === "direct" && dryBatch && (
-        <DryBulkBatchCard batch={dryBatch} />
+        <DryBulkBatchCard
+          batch={dryBatch}
+          useRateUnit={usageRateUnit}
+          onUseRateUnitChange={onUsageRateUnitChange}
+        />
       )}
 
       {/* Direct Mixing Instructions */}
@@ -2184,6 +2202,61 @@ function feedRateGramsTooltip(
         {gramsPerGallon} g/gal × {reservoirGallons.toFixed(1)} gal (this stock tank&apos;s full
         reservoir at your dilution ratio) = {formatGrams(grams)}
       </p>
+    </div>
+  )
+}
+
+/**
+ * The Target EC input. Shared by the Reservoir Size / Stock Tank Settings card
+ * and by the card that stands in for it while a dry batch is on screen — the
+ * two describe different consequences (every gram vs. only the use rates), so
+ * the wording is passed in, but the control itself has to stay one thing.
+ */
+function TargetEcField({
+  value,
+  onChange,
+  isScaled,
+  onReset,
+  note,
+}: {
+  value: string
+  onChange: (value: string) => void
+  /** True once the grower has moved this meaningfully off the estimate. */
+  isScaled: boolean
+  onReset: () => void
+  note: string
+}) {
+  return (
+    <div className="min-w-[150px]">
+      <Label htmlFor="target-ec" className="mb-1.5 block text-sm font-medium">
+        Target EC
+      </Label>
+      <p className="mb-1.5 text-xs text-muted-foreground">
+        Estimated EC automatically calculated based on inputs
+      </p>
+      <div className="flex items-center gap-2">
+        <Input
+          id="target-ec"
+          type="number"
+          min="0.1"
+          max="10"
+          step="0.1"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-24 border-2 border-border"
+        />
+        <span className="text-sm text-muted-foreground">mS/cm</span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+      {isScaled && (
+        <button
+          type="button"
+          onClick={onReset}
+          className="mt-1 text-xs text-primary underline-offset-2 hover:underline"
+        >
+          Reset to estimated
+        </button>
+      )}
     </div>
   )
 }

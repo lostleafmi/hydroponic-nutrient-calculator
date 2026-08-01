@@ -1,23 +1,29 @@
 /**
- * Dry bulk batching: the already-solved Direct Mix salt list, re-expressed as a
- * fixed weight of dry pre-blend split across bags that are safe to store
- * together.
+ * Dry bulk batching: the already-solved Direct Mix salt list, re-expressed as
+ * bags of dry pre-blend that are safe to store together, each weighed out to a
+ * fixed 10 or 25 lb.
  *
  * Nothing here re-solves anything. The solver's Direct Mix amounts are grams
  * sized for one reservoir at the grower's own feed strength (see
  * `calculateDirectMixRecipe`); this module keeps their ratios exactly and only
  *
  *   1. partitions them into bags no salt may share, and
- *   2. multiplies every one by the single scale that makes the bags sum to 10
- *      or 25 lb.
+ *   2. multiplies each bag's salts by the one scale that brings that bag, on
+ *      its own, to 10 or 25 lb.
  *
- * Because the scale is one number applied to every salt, the use rate the
- * grower ends up with is a property of the *recipe*, not of the batch size: a
- * bag holding 12% of the reservoir's dry weight is dosed at 12% of the
- * reservoir's total grams per gallon whether it was bagged at 10 lb or 25.
- * That's why `DryBag.gramsPerGallonOfWater` is derived from the unscaled solved
- * grams rather than from the batch, and why picking a different bag size never
- * changes it.
+ * The scale is per bag rather than per batch, so two bags both come out at
+ * 10 lb even when the recipe puts four times as much weight in one as in the
+ * other. Every bag is then a round number the grower can weigh to and label,
+ * at the cost of the bags no longer emptying together — which is what the note
+ * `buildDryBulkBatch` adds for a multi-bag split says out loud.
+ *
+ * Use rates are read off the *unscaled* solved grams, so they're a property of
+ * the recipe rather than of the bag size: a bag holding 12% of the reservoir's
+ * dry weight is dosed at 12% of the reservoir's total grams per gallon whether
+ * it was bagged at 10 lb or 25. The one input that does move them is Target EC,
+ * which scales every solved gram before this module sees it — and because it
+ * scales all of them by the same factor, it moves the use rates without
+ * touching the ratios, and so without touching the bags.
  *
  * A dry pre-blend is a concentrate the moment it meets water, so the bag split
  * is stricter than the stock-tank split in `recipe-types.ts`: Calcium is kept
@@ -42,15 +48,10 @@ import {
 } from "./recipe-types"
 
 export const GRAMS_PER_POUND = 453.59237
-export const OUNCES_PER_POUND = 16
-export const GRAMS_PER_OUNCE = GRAMS_PER_POUND / OUNCES_PER_POUND
 
-/** The two bag sizes offered, in pounds of total dry product across all bags. */
+/** The two bag sizes offered, in pounds of dry product per individual bag. */
 export const DRY_BATCH_SIZES_LB = [10, 25] as const
 export type DryBatchSizeLb = (typeof DRY_BATCH_SIZES_LB)[number]
-
-/** Litres the metric use rate is quoted against, matching the feed-chart basis. */
-export const DRY_BATCH_USE_RATE_LITERS = 10
 
 /**
  * A guaranteed analysis has to name at least this many parts before the bags
@@ -126,20 +127,6 @@ const DRY_CALCIUM_FORBIDDEN_SET = new Set<SaltKey>(DRY_CALCIUM_FORBIDDEN_SALTS)
 const BAG_EXCLUDED_SALTS = new Set<SaltKey>(["calciumCarbonate"])
 
 /**
- * Macro salts a grower can practically premix micronutrients into, best first —
- * the biggest, most free-flowing crystals in a typical bag. Falls back to
- * whichever macro the bag holds most of (see `pickMicroCarrier`).
- */
-const PREFERRED_MICRO_CARRIERS: SaltKey[] = [
-  "potassiumNitrate",
-  "monoPotassiumPhosphate",
-  "monoAmmoniumPhosphate",
-  "potassiumSulfate",
-  "magnesiumSulfate",
-  "calciumNitrate",
-]
-
-/**
  * A new salt in `RAW_SALTS` that carries Phosphorus or Magnesium has to widen
  * `DRY_CALCIUM_FORBIDDEN_SALTS`, or the next batch would quietly bag it with
  * the Calcium. Both lists are derived from the composition table above, so this
@@ -174,11 +161,8 @@ export interface DryBagSalt {
   key: SaltKey
   name: string
   formula: string
-  /** Grams of this salt in the finished bag, at the chosen batch size. */
+  /** Grams of this salt in the finished bag, at the chosen bag size. */
   grams: number
-  ounces: number
-  /** Share of this bag's total weight, 0–100. */
-  percentOfBag: number
   isMicro: boolean
 }
 
@@ -191,39 +175,22 @@ export interface DryBag {
   /** The guaranteed-analysis part this bag stands in for, when bags are cut per part. */
   partName: string | null
   salts: DryBagSalt[]
+  /** `sizeLb` × `GRAMS_PER_POUND` — every bag is weighed out to the same total. */
   totalGrams: number
   totalPounds: number
-  /** True for the one bag the whole micronutrient package was pooled into. */
-  holdsMicronutrients: boolean
-  /**
-   * The salt the micros should be premixed into before they go anywhere near
-   * the rest of the bag (see `pickMicroCarrier`). Null when the bag holds no
-   * micros.
-   */
-  microCarrier: SaltKey | null
-  /**
-   * False when `microCarrier` is itself a micronutrient, which happens only for
-   * a bag that is nothing but the micro package. The premix step still applies —
-   * boric acid outweighs sodium molybdate by orders of magnitude — but it can't
-   * be described as premixing into a macro.
-   */
-  microCarrierIsMacro: boolean
   /** Grams of this finished blend per US gallon of irrigation water. */
   gramsPerGallonOfWater: number
-  /** Grams of this finished blend per `DRY_BATCH_USE_RATE_LITERS` of irrigation water. */
-  gramsPerBatchUseRateLiters: number
+  /** Grams of this finished blend per liter of irrigation water. */
+  gramsPerLiterOfWater: number
 }
 
 export interface DryBulkBatch {
   sizeLb: DryBatchSizeLb
-  /** What the bags must sum to: `sizeLb` × `GRAMS_PER_POUND`. */
-  targetGrams: number
-  /** What they actually sum to — equal to `targetGrams` bar floating point. */
+  /** What each individual bag is weighed out to: `sizeLb` × `GRAMS_PER_POUND`. */
+  bagTargetGrams: number
+  /** Dry product across every bag — `bagTargetGrams` × the number of bags. */
   totalGrams: number
   bags: DryBag[]
-  /** Irrigation water the whole batch feeds, at the recipe's own strength. */
-  treatsGallons: number
-  treatsLiters: number
   /**
    * `"per-part"` when each bag stands in for one part of the original
    * guaranteed analysis, `"calcium-vs-rest"` for the default two-bag split.
@@ -321,30 +288,6 @@ function pickMicroHost(drafts: BagDraft[], salts: SaltAmounts): BagDraft | null 
 }
 
 /**
- * The salt a bag's micros get premixed into: a preferred coarse macro if the bag
- * holds one, otherwise whichever macro it holds most of.
- *
- * A bag holding nothing but micros — which happens when the recipe's only
- * macros are Calcium salts — falls back to its own largest micro. The premix
- * still matters there: Boric Acid can outweigh Sodium Molybdate by a factor of
- * a thousand in the same bag, so the small one has to be dispersed into the
- * large one rather than the two shaken together and hoped for.
- */
-function pickMicroCarrier(
-  keys: SaltKey[],
-  salts: SaltAmounts
-): { key: SaltKey; isMacro: boolean } | null {
-  const macros = keys.filter((key) => !MICRO_SALT_KEYS.has(key))
-  const pool = macros.length > 0 ? macros : keys
-  if (pool.length === 0) return null
-
-  const preferred = PREFERRED_MICRO_CARRIERS.filter((key) => pool.includes(key))
-  const candidates = preferred.length > 0 ? preferred : pool
-  const key = candidates.reduce((best, next) => (salts[next] > salts[best] ? next : best), candidates[0])
-  return { key, isMacro: macros.length > 0 }
-}
-
-/**
  * Cut the solved Direct Mix salt list into bags that are safe to store and
  * scoop together, without touching a single amount.
  *
@@ -413,8 +356,7 @@ function draftBags(salts: SaltAmounts, partsAnalysis: PartAnalysis[]): {
       // Nothing but Calcium and micros in the recipe, so there's no base bag to
       // host them. The chelates would be safe beside concentrated Calcium (see
       // `CALCIUM_INCOMPATIBLE_SALTS`), but the Calcium bag is kept to Calcium
-      // alone so its label stays true — the micros get a bag of their own, and
-      // `pickMicroCarrier` premixes them into the largest of themselves.
+      // alone so its label stays true — so the micros get a bag of their own.
       baseDrafts.push({ role: "base", partName: null, keys: microKeys })
     }
   }
@@ -481,17 +423,17 @@ export function buildDryBulkBatch({
   const solvedTotalGrams = totalOf(salts, eligible)
   if (eligible.length === 0 || !(solvedTotalGrams > 0) || !(reservoirLiters > 0)) return null
 
-  const targetGrams = sizeLb * GRAMS_PER_POUND
-  const scale = targetGrams / solvedTotalGrams
+  const bagTargetGrams = sizeLb * GRAMS_PER_POUND
 
   const { drafts, splitBasis, notes } = draftBags(salts, partsAnalysis)
   const baseBagCount = drafts.filter((draft) => draft.role === "base").length
 
   const bags: DryBag[] = drafts.map((draft, index) => {
     const solvedBagGrams = totalOf(salts, draft.keys)
-    const bagGrams = solvedBagGrams * scale
-    const holdsMicronutrients = draft.keys.some((key) => MICRO_SALT_KEYS.has(key))
-    const carrier = holdsMicronutrients ? pickMicroCarrier(draft.keys, salts) : null
+    // One scale per bag, so this bag alone hits the chosen weight. Within the
+    // bag it's still a single multiplier, which is what keeps the solver's
+    // ratios — and so the use rate below — untouched.
+    const bagScale = solvedBagGrams > 0 ? bagTargetGrams / solvedBagGrams : 0
 
     return {
       letter: String.fromCharCode(65 + index),
@@ -501,31 +443,29 @@ export function buildDryBulkBatch({
       // Re-ordered rather than trusted: the drafts append micros and any
       // unclaimed salts, so only `SALT_DISPLAY_ORDER` guarantees a bag reads in
       // the same order as every other salt list in the app.
-      salts: SALT_DISPLAY_ORDER.filter((key) => draft.keys.includes(key)).map((key) => {
-        const grams = salts[key] * scale
-        return {
-          key,
-          name: RAW_SALTS[key].name,
-          formula: RAW_SALTS[key].formula,
-          grams,
-          ounces: grams / GRAMS_PER_OUNCE,
-          percentOfBag: bagGrams > 0 ? (grams / bagGrams) * 100 : 0,
-          isMicro: MICRO_SALT_KEYS.has(key),
-        }
-      }),
-      totalGrams: bagGrams,
-      totalPounds: bagGrams / GRAMS_PER_POUND,
-      holdsMicronutrients,
-      microCarrier: carrier?.key ?? null,
-      microCarrierIsMacro: carrier?.isMacro ?? false,
-      // Off the solved grams, not the batch: this is how strong the recipe is,
+      salts: SALT_DISPLAY_ORDER.filter((key) => draft.keys.includes(key)).map((key) => ({
+        key,
+        name: RAW_SALTS[key].name,
+        formula: RAW_SALTS[key].formula,
+        grams: salts[key] * bagScale,
+        isMicro: MICRO_SALT_KEYS.has(key),
+      })),
+      totalGrams: solvedBagGrams * bagScale,
+      totalPounds: (solvedBagGrams * bagScale) / GRAMS_PER_POUND,
+      // Off the solved grams, not the bag: this is how strong the recipe is,
       // which the bag size can't change. See the module comment.
       gramsPerGallonOfWater: (solvedBagGrams / reservoirLiters) * LITERS_PER_GALLON,
-      gramsPerBatchUseRateLiters: (solvedBagGrams / reservoirLiters) * DRY_BATCH_USE_RATE_LITERS,
+      gramsPerLiterOfWater: solvedBagGrams / reservoirLiters,
     }
   })
 
-  const treatsLiters = (targetGrams / solvedTotalGrams) * reservoirLiters
+  if (bags.length > 1) {
+    notes.push(
+      `Each bag is weighed out to ${sizeLb} lb on its own, not ${sizeLb} lb shared between them, ` +
+        "so the bags won't run out together — whichever one your recipe uses least of lasts the " +
+        "longest. Mix a fresh bag of whichever empties first; the use rates don't change."
+    )
+  }
 
   if (directAddCalciumCarbonateGrams > 0) {
     notes.push(
@@ -537,11 +477,9 @@ export function buildDryBulkBatch({
 
   return {
     sizeLb,
-    targetGrams,
+    bagTargetGrams,
     totalGrams: bags.reduce((total, bag) => total + bag.totalGrams, 0),
     bags,
-    treatsLiters,
-    treatsGallons: treatsLiters / LITERS_PER_GALLON,
     splitBasis,
     notes,
   }
@@ -581,24 +519,6 @@ export function formatBagGrams(grams: number): string {
   if (grams < 1) return `${grams.toFixed(3)} g`
   if (grams < 100) return `${grams.toFixed(2)} g`
   return `${grams.toFixed(1)} g`
-}
-
-export function formatBagOunces(ounces: number): string {
-  if (!Number.isFinite(ounces) || ounces <= 0) return "—"
-  if (ounces < 0.1) return `${ounces.toFixed(3)} oz`
-  return `${ounces.toFixed(2)} oz`
-}
-
-export function formatBagPercent(percent: number): string {
-  if (!Number.isFinite(percent) || percent <= 0) return "—"
-  if (percent < 0.01) return "<0.01%"
-  if (percent < 1) return `${percent.toFixed(2)}%`
-  return `${percent.toFixed(1)}%`
-}
-
-export function formatBagPounds(pounds: number): string {
-  if (!Number.isFinite(pounds) || pounds <= 0) return "—"
-  return `${pounds.toFixed(2)} lb`
 }
 
 /** The use rate, at the precision a grower can actually measure a scoop to. */

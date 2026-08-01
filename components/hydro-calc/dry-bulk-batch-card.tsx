@@ -4,10 +4,10 @@
  * The Direct Mix recipe as a bag of dry powder instead of a reservoir dose.
  *
  * Presentation only: every gram shown here is the solver's own Direct Mix
- * amount, rescaled by one factor and filed into a bag (see
- * `lib/hydro-calc/dry-batch.ts`). Nothing on this screen can change an
- * elemental target or a salt amount, which is why it's offered as an alternate
- * view of the direct-mix list rather than as another tank layout.
+ * amount, rescaled to fill a bag (see `lib/hydro-calc/dry-batch.ts`). Nothing
+ * on this screen can change an elemental target or a salt amount, which is why
+ * it's offered as an alternate view of the direct-mix list rather than as
+ * another tank layout.
  */
 
 import {
@@ -30,27 +30,25 @@ import {
 } from "lucide-react"
 import {
   DRY_BATCH_SIZES_LB,
-  DRY_BATCH_USE_RATE_LITERS,
   formatBagGrams,
-  formatBagOunces,
-  formatBagPercent,
-  formatBagPounds,
   formatUseRateGrams,
   type DryBag,
   type DryBatchSizeLb,
   type DryBulkBatch,
 } from "@/lib/hydro-calc/dry-batch"
-import { RAW_SALTS } from "@/lib/hydro-calc/recipe-types"
+import type { VolumeUnit } from "@/lib/hydro-calc/recipe-types"
 
 /**
  * The one thing this whole screen has to say before anything else. Kept as a
- * constant because it's repeated in shortened form as step 1 of the tutorial,
- * and the two must not drift apart.
+ * constant because it's repeated as step 1 of the tutorial, and the two must
+ * not drift apart.
  */
 export const DRY_BATCH_DISCLAIMER =
-  "Mixing dry inputs into stock tanks is the preferred method over this, dosing from stock " +
-  "tanks ensures certainty that all of the macro and micronutrients will be dosed at the " +
-  "correct amounts."
+  "Please consider mixing stock tanks instead of using this method, mixing into stock tanks " +
+  "ensures certainty that all of the macro and micronutrients will be dosed at the correct " +
+  'amounts. To switch to this method go back to the "Feeding rates" tab by clicking "Feeding ' +
+  'rates" at the top or bottom of this screen and select "Separate nitrogen for tapering before ' +
+  'harvest" or "Combine into A+B tanks".'
 
 /**
  * The entry point, shown at the top of the Direct Mix formulation. Opens the
@@ -81,12 +79,12 @@ export function DryBulkBatchEntry({
               <p className="font-semibold text-foreground">
                 {sizeLb === null
                   ? "Want to weigh out a bulk dry blend instead?"
-                  : `Mixing a ${sizeLb} lb dry batch`}
+                  : `Mixing ${sizeLb} lb bags`}
               </p>
               <p className="text-sm text-muted-foreground">
                 {sizeLb === null
-                  ? "Same recipe, scaled up and split into bags that are safe to store together, so you can blend it once and scoop from it later."
-                  : "Showing the bagged dry blend below instead of the per-reservoir salt list."}
+                  ? "Same recipe, split into bags that are safe to store together and scaled so each one weighs 10 or 25 lb, so you can blend it once and scoop from it later."
+                  : `Showing the bagged dry blend below — ${sizeLb} lb per bag — instead of the per-reservoir salt list.`}
               </p>
             </div>
           </div>
@@ -130,10 +128,10 @@ export function DryBulkBatchEntry({
       <Dialog open={isPickerOpen} onOpenChange={onPickerOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>How big a batch?</DialogTitle>
+            <DialogTitle>How big a bag?</DialogTitle>
             <DialogDescription>
-              This is the total dry weight of all bags added together — the recipe&apos;s ratios
-              stay exactly as solved either way.
+              This is the weight of each individual bag, not of all of them added together — the
+              recipe&apos;s ratios stay exactly as solved either way.
             </DialogDescription>
           </DialogHeader>
 
@@ -145,7 +143,7 @@ export function DryBulkBatchEntry({
                 onClick={() => onPickSize(size)}
                 className="rounded-lg border-2 border-border bg-secondary/40 p-4 text-left transition-colors hover:border-primary/60 hover:bg-primary/5"
               >
-                <p className="text-lg font-semibold text-foreground">{size} lb</p>
+                <p className="text-lg font-semibold text-foreground">{size} lb per bag</p>
                 <p className="text-xs text-muted-foreground">
                   {size === 10
                     ? "A season for a small room — fits a single bucket per bag."
@@ -176,10 +174,20 @@ const CALCIUM_BAG_STYLE = {
   icon: "text-sky-400",
 } as const
 
-export function DryBulkBatchCard({ batch }: { batch: DryBulkBatch }) {
-  const microBag = batch.bags.find((bag) => bag.holdsMicronutrients) ?? null
-  const calciumBag = batch.bags.find((bag) => bag.role === "calcium") ?? null
-
+export function DryBulkBatchCard({
+  batch,
+  useRateUnit,
+  onUseRateUnitChange,
+}: {
+  batch: DryBulkBatch
+  /**
+   * Whether every bag quotes its use rate per gallon or per liter. Owned a
+   * level up so it stays in step with the rest of the screen's unit toggles,
+   * and so all the bags move together rather than one card at a time.
+   */
+  useRateUnit: VolumeUnit
+  onUseRateUnitChange: (unit: VolumeUnit) => void
+}) {
   let baseIndex = 0
 
   return (
@@ -192,85 +200,57 @@ export function DryBulkBatchCard({ batch }: { batch: DryBulkBatch }) {
         <p className="text-sm font-bold leading-relaxed text-amber-100">{DRY_BATCH_DISCLAIMER}</p>
       </div>
 
-      <Card className="border-2 border-border bg-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl text-foreground">
-            <Package className="h-5 w-5 text-primary" />
-            <span>
-              {batch.sizeLb} lb Dry Batch — {batch.bags.length}{" "}
-              {batch.bags.length === 1 ? "bag" : "bags"}
-            </span>
-          </CardTitle>
-          <CardDescription>
-            {batch.splitBasis === "per-part"
-              ? "One bag per part of your original analysis, with every calcium salt pulled into a bag of its own."
-              : "Split into a base bag and a calcium bag, because calcium can never be pre-blended with phosphorus or magnesium."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <SummaryTile
-              label="Total dry weight"
-              value={`${batch.sizeLb} lb`}
-              sub={`${batch.totalGrams.toFixed(0)} g across all bags`}
-            />
-            <SummaryTile
-              label="Bags to keep separate"
-              value={String(batch.bags.length)}
-              sub={
-                calciumBag
-                  ? `Bag ${calciumBag.letter} is calcium — never pre-blend it with the rest`
-                  : "No calcium salt in this recipe"
-              }
-            />
-            <SummaryTile
-              label="Treats about"
-              value={`${Math.round(batch.treatsGallons).toLocaleString()} gal`}
-              sub={`${Math.round(batch.treatsLiters).toLocaleString()} L of irrigation water at this feed strength`}
-            />
-          </div>
-
-          {batch.notes.map((note) => (
-            <p
-              key={note}
-              className="rounded border border-border bg-secondary/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
-            >
-              {note}
-            </p>
-          ))}
-        </CardContent>
-      </Card>
+      {batch.notes.map((note) => (
+        <p
+          key={note}
+          className="rounded border border-border bg-secondary/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+        >
+          {note}
+        </p>
+      ))}
 
       {batch.bags.map((bag) => {
         const style =
           bag.role === "calcium"
             ? CALCIUM_BAG_STYLE
             : BASE_BAG_STYLES[baseIndex++ % BASE_BAG_STYLES.length]
-        return <DryBagCard key={bag.letter} bag={bag} style={style} />
+        return (
+          <DryBagCard
+            key={bag.letter}
+            bag={bag}
+            sizeLb={batch.sizeLb}
+            style={style}
+            useRateUnit={useRateUnit}
+            onUseRateUnitChange={onUseRateUnitChange}
+          />
+        )
       })}
 
-      <DryBatchInstructions batch={batch} microBag={microBag} calciumBag={calciumBag} />
-    </div>
-  )
-}
-
-function SummaryTile({ label, value, sub }: { label: string; value: string; sub: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-secondary/30 p-3">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="font-mono text-lg font-semibold text-foreground">{value}</p>
-      <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{sub}</p>
+      <DryBatchInstructions />
     </div>
   )
 }
 
 function DryBagCard({
   bag,
+  sizeLb,
   style,
+  useRateUnit,
+  onUseRateUnitChange,
 }: {
   bag: DryBag
+  sizeLb: DryBulkBatch["sizeLb"]
   style: { border: string; header: string; icon: string }
+  useRateUnit: VolumeUnit
+  onUseRateUnitChange: (unit: VolumeUnit) => void
 }) {
+  const description =
+    bag.role === "calcium"
+      ? "Do not ever mix dry calcium salts with phosphorous or magnesium"
+      : bag.partName
+        ? `The non-calcium salts your ${bag.partName} declared.`
+        : null
+
   return (
     <Card className={`border-2 ${style.border} bg-card`}>
       <CardHeader className={style.header}>
@@ -281,19 +261,9 @@ function DryBagCard({
               Bag {bag.letter} — {bag.title}
             </span>
           </span>
-          <span className="font-mono text-base font-semibold">
-            {formatBagPounds(bag.totalPounds)} ({formatBagGrams(bag.totalGrams)})
-          </span>
+          <span className="font-mono text-base font-semibold">{sizeLb} lb</span>
         </CardTitle>
-        <CardDescription>
-          {bag.role === "calcium"
-            ? "Calcium salts only. This bag stays sealed and separate — it never gets pre-blended with, or dissolved alongside, the phosphorus and magnesium in the other bags."
-            : bag.partName
-              ? `The non-calcium salts your ${bag.partName} declared.`
-              : "Everything that isn't a calcium source — potassium, phosphate, sulfate and magnesium salts."}
-          {bag.holdsMicronutrients &&
-            " Your whole micronutrient package is in here too, so it only has to be premixed once."}
-        </CardDescription>
+        {description && <CardDescription>{description}</CardDescription>}
       </CardHeader>
       <CardContent className="pt-4">
         <div className="space-y-1.5">
@@ -312,34 +282,53 @@ function DryBagCard({
                 </p>
                 <p className="font-mono text-xs text-muted-foreground">{salt.formula}</p>
               </div>
-              <div className="text-right">
-                <p className="font-mono font-semibold text-foreground">
-                  {formatBagGrams(salt.grams)}
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                    / {formatBagOunces(salt.ounces)}
-                  </span>
-                </p>
-                <p className="font-mono text-xs text-muted-foreground">
-                  {formatBagPercent(salt.percentOfBag)} of bag
-                </p>
-              </div>
+              <p className="font-mono font-semibold text-foreground">
+                {formatBagGrams(salt.grams)}
+              </p>
             </div>
           ))}
         </div>
 
         <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-            <Blend className={`h-4 w-4 ${style.icon}`} />
-            How much of Bag {bag.letter} to use
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <Blend className={`h-4 w-4 ${style.icon}`} />
+              How much of Bag {bag.letter} to use
+            </p>
+            <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
+              <button
+                type="button"
+                onClick={() => onUseRateUnitChange("gallons")}
+                aria-pressed={useRateUnit === "gallons"}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  useRateUnit === "gallons"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                }`}
+              >
+                Gallons
+              </button>
+              <button
+                type="button"
+                onClick={() => onUseRateUnitChange("liters")}
+                aria-pressed={useRateUnit === "liters"}
+                className={`border-l-2 border-border px-3 py-1 text-xs font-medium transition-colors ${
+                  useRateUnit === "liters"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                }`}
+              >
+                Liters
+              </button>
+            </div>
+          </div>
           <p className="mt-1 font-mono text-sm text-foreground">
-            {formatUseRateGrams(bag.gramsPerGallonOfWater)} per gallon
-            <span className="text-muted-foreground"> · </span>
-            {formatUseRateGrams(bag.gramsPerBatchUseRateLiters)} per {DRY_BATCH_USE_RATE_LITERS} L
+            {useRateUnit === "liters"
+              ? `${formatUseRateGrams(bag.gramsPerLiterOfWater)} per liter`
+              : `${formatUseRateGrams(bag.gramsPerGallonOfWater)} per gallon`}
           </p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Of irrigation water, and unchanged by the batch size you picked — it&apos;s the same
-            feed strength the per-reservoir recipe mixes to.
+            Automatically scales to the estimated EC or target EC if adjusted.
           </p>
         </div>
       </CardContent>
@@ -347,20 +336,7 @@ function DryBagCard({
   )
 }
 
-function DryBatchInstructions({
-  batch,
-  microBag,
-  calciumBag,
-}: {
-  batch: DryBulkBatch
-  microBag: DryBag | null
-  calciumBag: DryBag | null
-}) {
-  const carrierName = microBag?.microCarrier ? RAW_SALTS[microBag.microCarrier].name : null
-  const baseBagLetters = batch.bags
-    .filter((bag) => bag.role === "base")
-    .map((bag) => `Bag ${bag.letter}`)
-
+function DryBatchInstructions() {
   return (
     <Card className="border-2 border-border bg-card">
       <CardHeader>
@@ -368,77 +344,39 @@ function DryBatchInstructions({
           <Sparkles className="h-5 w-5 text-primary" />
           <span>How to Blend These Bags</span>
         </CardTitle>
-        <CardDescription>
-          Work through these in order. Steps 3 and 5 are the two that actually decide whether the
-          blend feeds evenly and safely.
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <ol className="space-y-4">
           <Step n={1} title="Consider stock tanks first">
-            <p>
-              Dry blending is the fallback, not the goal. Dosing from stock tanks is the only way
-              to be certain every macro and micronutrient lands at the amount this recipe solved
-              for — a dry blend can only ever be as even as your mixing was.
-            </p>
+            <p>{DRY_BATCH_DISCLAIMER}</p>
           </Step>
 
           <Step n={2} title="Weigh every salt accurately">
             <p>
-              Macros to 0.1 g, micronutrients to 0.01 g if your scale resolves it. Weigh out of any
-              draft or airflow — a fan is enough to move a 0.2 g micro reading. Zero the scale on
-              your container before each salt.
+              Use a precise scale that measures to .01, ensure that you are weighing on a level
+              surface in a room without any air movement as this can affect the scales accuracy.
+              Gallon size bags work well for weighing out batches of salts.
             </p>
           </Step>
 
           <Step n={3} title="Premix the micronutrients — don't skip this">
             <p>
-              The micros are a fraction of a percent of{" "}
-              {microBag ? `Bag ${microBag.letter}` : "the bag"}, so tipping them straight into a
-              full bucket leaves them in clumps and streaks. A scoop from the top of that bucket
-              would then carry several times the iron a scoop from the bottom does.
-            </p>
-            <p>
-              {carrierName && microBag?.microCarrierIsMacro ? (
-                <>
-                  Instead: set aside about a cup of the{" "}
-                  <span className="font-semibold text-foreground">{carrierName}</span> already in
-                  Bag {microBag.letter}. Mix all of the micros into that cup until the color is
-                  completely uniform, then blend that premix into the rest of the bag.
-                </>
-              ) : carrierName ? (
-                <>
-                  Bag {microBag?.letter} is the micro package itself — there&apos;s no macro salt in
-                  it to disperse them into, because every macro in this recipe is a calcium salt.
-                  Premix one tier down instead: mix the smallest micros into the{" "}
-                  <span className="font-semibold text-foreground">{carrierName}</span>, which is the
-                  bulk of that bag, and only then combine the rest.
-                </>
-              ) : (
-                <>
-                  Instead: set aside about a cup of the largest macronutrient salt in that same bag
-                  — potassium nitrate or MKP, whichever it holds. Mix all of the micros into that
-                  cup until the color is completely uniform, then blend that premix into the rest
-                  of the bag.
-                </>
-              )}
-            </p>
-            <p>
-              Never premix micros into a salt from a different bag. Doing that moves weight across
-              bags and breaks the split the safety rules depend on.
+              Your micronutrients need to be blended in evenly through the dry mix to ensure
+              correct dosing, the best way to do this is to mix them into one of your larger weight
+              salts that also goes into the same part, mixing them together in a bag before adding
+              them in with everything else is an easy way to ensure this.
             </p>
           </Step>
 
           <Step n={4} title="Mix each bag in its own clean, dry bucket">
             <p>
-              Add that bag&apos;s salts to a clean, completely dry bucket — a trace of moisture
-              cakes the blend. Seal the lid, then roll and tumble the bucket end over end for
-              several minutes, or stir it through with a clean dry tool.
-            </p>
-            <p>
-              Let it rest a few minutes and repeat: the fines settle downward on the first pass, so
-              a second round is usually what makes the blend actually uniform. It&apos;s ready when
-              scoops from the top and the bottom look identical.
+              Ensure the bucket you are adding your salts into to blend them together is clean and
+              completely dry, moisture will cake up the blend. Seal the lid and then roll and
+              tumble the bucket end over end for several minutes, you can also stir it through with
+              a clean dry tool but I would still recommend rolling and tumbling as well to ensure
+              is mixed well. Allow the bucket to rest so the fine salts settle downward and then
+              mix it again to ensure everything is fully mixed. Scoops from the top to the bottom
+              should look identical.
             </p>
           </Step>
 
@@ -448,36 +386,17 @@ function DryBatchInstructions({
               className="flex items-start gap-3 rounded-lg border-2 border-destructive/70 bg-destructive/10 p-3"
             >
               <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-              <div className="space-y-1.5 text-sm font-semibold leading-relaxed text-destructive">
-                <p>
-                  Never mix calcium together with phosphorus or magnesium in concentrate form —
-                  and that includes these dry pre-blends, which become a concentrate the instant
-                  they meet water. Never dissolve them together in a small volume of water either.
-                </p>
-                <p>
-                  {calciumBag
-                    ? `Bag ${calciumBag.letter} and ${
-                        baseBagLetters.length > 1
-                          ? baseBagLetters.join(", ")
-                          : (baseBagLetters[0] ?? "the base bag")
-                      } stay separate`
-                    : "The bags stay separate"}{" "}
-                  until they&apos;re diluted into the full volume of irrigation water — added one
-                  after the other, stirring between each, never poured together first and never
-                  pre-dissolved in the same jug.
-                </p>
-              </div>
+              <p className="text-sm font-semibold leading-relaxed text-destructive">
+                Never mix calcium with phosphorous or magnesium in concentrate form (In this dry
+                mix or in stock tank concentrate). They need to stay separate until you are adding
+                them to a batch tank or they will clump up and the nutrients will become
+                unavailable to the plants.
+              </p>
             </div>
           </Step>
 
           <Step n={6} title="Store it airtight, dry and labeled">
-            <p>
-              Airtight container, out of humidity and sunlight. Label each one with the bag name
-              (e.g. &ldquo;Bag {batch.bags[0]?.letter ?? "A"} — {batch.bags[0]?.title ?? "Base"}
-              &rdquo;), the date you blended it, and its use rate in grams per gallon straight off
-              the card above. An unlabeled bucket of white powder is indistinguishable from every
-              other bucket of white powder six months later.
-            </p>
+            <p>Label each part and store it out of high humidity and light</p>
           </Step>
         </ol>
       </CardContent>

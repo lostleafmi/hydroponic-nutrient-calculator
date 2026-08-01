@@ -64,7 +64,6 @@ import {
 import {
   buildDryBulkBatch,
   DRY_BATCH_SIZES_LB,
-  DRY_BATCH_USE_RATE_LITERS,
   findDryBagCompatibilityViolations,
   GRAMS_PER_POUND,
 } from "@/lib/hydro-calc/dry-batch"
@@ -1755,13 +1754,17 @@ function reportDisplayedRoundTrip(
  *     source. `buildDryBulkBatch` claims this can't happen by construction;
  *     this checks the claim against real solved recipes rather than trusting it.
  *  2. Every salt lands in exactly one bag, and none is dropped.
- *  3. The bags sum to the selected weight, and every salt is the direct-mix
- *     amount times one shared scale — i.e. the ratios the solver produced
- *     survived the split untouched.
+ *  3. Each bag on its own weighs the selected size, and within that bag every
+ *     salt is the direct-mix amount times one shared scale — i.e. the ratios
+ *     the solver produced survived the split untouched. The scale differs
+ *     between bags, which is exactly what "10 lb per bag rather than 10 lb
+ *     split across the bags" means.
  *  4. Dosing each bag at its own printed use rate reproduces the direct-mix
  *     ppm. This is the closing check: a bag split that got the weights right
  *     but the per-bag use rate wrong would pass 1–3 and still starve the
- *     grower's reservoir.
+ *     grower's reservoir. It's also what pins the per-bag scales to the one
+ *     recipe: the use rate is read off the unscaled grams, so a bag rescaled
+ *     without its ratios held would land here as a ppm miss.
  */
 function reportDryBulkBatch(
   directSalts: SaltAmounts,
@@ -1783,15 +1786,14 @@ function reportDryBulkBatch(
       partsAnalysis: scenario.partsAnalysis,
     })
 
-    console.log(`\n  Dry bulk batch — ${sizeLb} lb`)
+    console.log(`\n  Dry bulk batch — ${sizeLb} lb per bag`)
     if (!batch) {
       console.log("    EXPECTED a batch from a non-empty direct-mix recipe, got none")
       return false
     }
 
     console.log(
-      `    split: ${batch.splitBasis} — ${batch.bags.length} bag${batch.bags.length === 1 ? "" : "s"}, ` +
-        `treats ${batch.treatsGallons.toFixed(0)} gal`
+      `    split: ${batch.splitBasis} — ${batch.bags.length} bag${batch.bags.length === 1 ? "" : "s"}`
     )
 
     const violations = findDryBagCompatibilityViolations(batch.bags)
@@ -1804,14 +1806,14 @@ function reportDryBulkBatch(
     }
 
     // Each salt in exactly one bag, and the whole recipe accounted for.
+    const targetGrams = sizeLb * GRAMS_PER_POUND
     const bagCountByKey = new Map<SaltKey, number>()
-    const batchSalts = emptySaltAmounts()
     const usePerGallon = emptySaltAmounts()
     for (const bag of batch.bags) {
       console.log(
         `    Bag ${bag.letter} — ${padRight(bag.title, 30)} ${padLeft(bag.totalGrams.toFixed(1), 9)} g` +
           ` (${bag.totalPounds.toFixed(2)} lb)  ${bag.gramsPerGallonOfWater.toFixed(3)} g/gal` +
-          ` · ${bag.gramsPerBatchUseRateLiters.toFixed(3)} g/${DRY_BATCH_USE_RATE_LITERS} L`
+          ` · ${bag.gramsPerLiterOfWater.toFixed(3)} g/L`
       )
       const bagSaltTotal = bag.salts.reduce((total, salt) => total + salt.grams, 0)
       if (Math.abs(bagSaltTotal - bag.totalGrams) > Math.max(bag.totalGrams * 1e-9, 1e-9)) {
@@ -1820,9 +1822,43 @@ function reportDryBulkBatch(
         )
         allPass = false
       }
+
+      // Each bag reaches the selected weight on its own — not one shared
+      // weight divided between them.
+      const bagSkew = Math.abs(bag.totalGrams - targetGrams)
+      if (bagSkew > Math.max(targetGrams * 1e-9, 1e-6)) {
+        console.log(
+          `      BAG ${bag.letter} ISN'T ${sizeLb} lb: ${bag.totalGrams.toFixed(6)} g vs ` +
+            `${targetGrams.toFixed(6)} g (off by ${bagSkew.toExponential(2)} g)`
+        )
+        allPass = false
+      }
+
+      // …and it got there by one scale applied to every salt in it, so the
+      // solver's ratios inside the bag are untouched. The scale is the bag's
+      // own; a different bag reaching the same weight from less solved
+      // material has a bigger one.
+      const solvedBagGrams = bag.salts.reduce((total, salt) => total + directSalts[salt.key], 0)
+      const bagScale = solvedBagGrams > 0 ? targetGrams / solvedBagGrams : 0
+      let bagRatiosHeld = true
+      for (const salt of bag.salts) {
+        const expected = directSalts[salt.key] * bagScale
+        if (Math.abs(salt.grams - expected) <= Math.max(expected * 1e-9, 1e-9)) continue
+        console.log(
+          `      ${RAW_SALTS[salt.key].name} scaled to ${salt.grams.toFixed(6)} g, expected ` +
+            `${expected.toFixed(6)} g (×${bagScale.toFixed(6)})`
+        )
+        bagRatiosHeld = false
+        allPass = false
+      }
+      if (bagRatiosHeld) {
+        console.log(
+          `      = ${sizeLb} lb, every salt its direct-mix amount ×${bagScale.toFixed(4)}: ok`
+        )
+      }
+
       for (const salt of bag.salts) {
         bagCountByKey.set(salt.key, (bagCountByKey.get(salt.key) ?? 0) + 1)
-        batchSalts[salt.key] += salt.grams
         // What the grower actually applies: this bag's use rate, split back
         // across the bag by each salt's share of it.
         usePerGallon[salt.key] +=
@@ -1848,37 +1884,20 @@ function reportDryBulkBatch(
       allPass = false
     }
 
-    // Bags sum to the selected weight.
-    const targetGrams = sizeLb * GRAMS_PER_POUND
-    const totalSkew = Math.abs(batch.totalGrams - targetGrams)
-    if (totalSkew > Math.max(targetGrams * 1e-9, 1e-6)) {
+    // The batch total is now just the bag count times the bag size — worth
+    // printing, since it's the number the grower ends up carrying home.
+    const expectedTotal = targetGrams * batch.bags.length
+    const totalSkew = Math.abs(batch.totalGrams - expectedTotal)
+    if (totalSkew > Math.max(expectedTotal * 1e-9, 1e-6)) {
       console.log(
-        `      BAGS DON'T SUM TO ${sizeLb} lb: ${batch.totalGrams.toFixed(6)} g vs ` +
-          `${targetGrams.toFixed(6)} g (off by ${totalSkew.toExponential(2)} g)`
+        `      BATCH TOTAL != ${batch.bags.length} × ${sizeLb} lb: ${batch.totalGrams.toFixed(6)} g ` +
+          `vs ${expectedTotal.toFixed(6)} g (off by ${totalSkew.toExponential(2)} g)`
       )
       allPass = false
     } else {
       console.log(
-        `    bags sum to ${batch.totalGrams.toFixed(3)} g = ${sizeLb} lb ` +
-          `(off by ${totalSkew.toExponential(2)} g): ok`
+        `    ${batch.bags.length} × ${sizeLb} lb = ${batch.totalGrams.toFixed(3)} g of dry product: ok`
       )
-    }
-
-    // One shared scale, applied to every salt — i.e. the solver's ratios intact.
-    const scale = targetGrams / solvedTotal
-    let ratiosHeld = true
-    for (const key of activeKeys) {
-      const expected = directSalts[key] * scale
-      if (Math.abs(batchSalts[key] - expected) <= Math.max(expected * 1e-9, 1e-9)) continue
-      console.log(
-        `      ${RAW_SALTS[key].name} scaled to ${batchSalts[key].toFixed(6)} g, expected ` +
-          `${expected.toFixed(6)} g (×${scale.toFixed(6)})`
-      )
-      ratiosHeld = false
-      allPass = false
-    }
-    if (ratiosHeld) {
-      console.log(`    every salt is its direct-mix amount ×${scale.toFixed(4)}: ok`)
     }
 
     // The use rates put the reservoir back where the direct mix had it.
