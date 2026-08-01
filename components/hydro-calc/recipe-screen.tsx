@@ -1163,7 +1163,7 @@ export function RecipeScreen({
           </CardTitle>
           <CardDescription>
             {isDryBatchView
-              ? `What feed strength these bags get dosed at. Changing it moves the use rate printed on each bag — every bag still weighs ${dryBatch?.sizeLb} lb, and still holds the same salts in the same proportions.`
+              ? `What feed strength these batches get dosed at. Changing it moves the use rate printed on each batch — every batch still weighs ${dryBatch?.sizeLb} lb, and still holds the same salts in the same proportions.`
               : stockTankOption === "direct"
                 ? "How big is your reservoir and what is your target EC"
                 : "How big are your stock tanks, and how much do you want to dilute them?"}
@@ -1287,8 +1287,8 @@ export function RecipeScreen({
                 note={
                   isDryBatchView
                     ? targetEcIsScaled
-                      ? `Use rates scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm. The bag weights don't move.`
-                      : "The use rate on each bag adjusts automatically when you change this."
+                      ? `Use rates scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm. The batch weights don't move.`
+                      : "The use rate on each batch adjusts automatically when you change this."
                     : targetEcIsScaled
                       ? `All amounts — and the ppm above — scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm.`
                       : "All amounts adjust automatically when you change this."
@@ -1547,8 +1547,10 @@ export function RecipeScreen({
           but not in the ratio this label asks for, so the ppm above (measured
           from the real salt amounts) can't land on the label-derived figure.
           Distinct from the "check more salts" warning below, which is about an
-          element having no source at all. */}
-      {hasValidData && activeDeviations.length > 0 && (
+          element having no source at all. Hidden for direct-mix (and so for
+          the dry batch view too, which is a presentation of direct-mix) —
+          solver math is unchanged, only this notice is suppressed there. */}
+      {hasValidData && stockTankOption !== "direct" && activeDeviations.length > 0 && (
         <div
           role="alert"
           className="flex items-start gap-3 rounded-lg border-2 border-amber-500/60 bg-amber-500/10 p-4"

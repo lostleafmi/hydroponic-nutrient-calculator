@@ -169,7 +169,7 @@ export interface DryBagSalt {
 export interface DryBag {
   /** "A", "B", "C" … in the order the bags are meant to be weighed out. */
   letter: string
-  /** What the bag holds, e.g. "Base (no calcium)" — the UI prints "Bag A — …". */
+  /** What the bag holds, e.g. "Base (no calcium)" — the UI prints "Part A — …". */
   title: string
   role: DryBagRole
   /** The guaranteed-analysis part this bag stands in for, when bags are cut per part. */
@@ -337,7 +337,7 @@ function draftBags(salts: SaltAmounts, partsAnalysis: PartAnalysis[]): {
           `${unclaimed.map((key) => RAW_SALTS[key].name).join(", ")} ` +
             `${unclaimed.length === 1 ? "isn't" : "aren't"} declared on any part — the solver ` +
             `reached for ${unclaimed.length === 1 ? "it" : "them"} to match your label, so ` +
-            `${unclaimed.length === 1 ? "it rides" : "they ride"} in Bag ` +
+            `${unclaimed.length === 1 ? "it rides" : "they ride"} in Part ` +
             `${String.fromCharCode(65 + baseDrafts.indexOf(host))}.`
         )
       } else {
@@ -376,7 +376,7 @@ function draftBags(salts: SaltAmounts, partsAnalysis: PartAnalysis[]): {
 
   if (calciumKeys.length === 0) {
     notes.push(
-      "This recipe has no calcium salt in it, so there's no calcium bag to keep separate — " +
+      "This recipe has no calcium salt in it, so there's no calcium batch to keep separate — " +
         "everything below is safe in one blend."
     )
   }
@@ -461,15 +461,15 @@ export function buildDryBulkBatch({
 
   if (bags.length > 1) {
     notes.push(
-      `Each bag is weighed out to ${sizeLb} lb on its own, not ${sizeLb} lb shared between them, ` +
-        "so the bags won't run out together — whichever one your recipe uses least of lasts the " +
-        "longest. Mix a fresh bag of whichever empties first; the use rates don't change."
+      `Each batch is weighed out to ${sizeLb} lb on its own, not ${sizeLb} lb shared between them, ` +
+        "so the batches won't run out together — whichever one your recipe uses least of lasts the " +
+        "longest. Mix a fresh batch of whichever empties first; the use rates don't change."
     )
   }
 
   if (directAddCalciumCarbonateGrams > 0) {
     notes.push(
-      "Your recipe also calls for Calcium Carbonate. It stays out of these bags — it barely " +
+      "Your recipe also calls for Calcium Carbonate. It stays out of these batches — it barely " +
         "dissolves, so it goes straight into the reservoir as the note above describes, and it " +
         `isn't counted in the ${sizeLb} lb.`
     )

@@ -79,12 +79,12 @@ export function DryBulkBatchEntry({
               <p className="font-semibold text-foreground">
                 {sizeLb === null
                   ? "Want to weigh out a bulk dry blend instead?"
-                  : `Mixing ${sizeLb} lb bags`}
+                  : `Mixing ${sizeLb} lb batches`}
               </p>
               <p className="text-sm text-muted-foreground">
                 {sizeLb === null
-                  ? "Same recipe, split into bags that are safe to store together and scaled so each one weighs 10 or 25 lb, so you can blend it once and scoop from it later."
-                  : `Showing the bagged dry blend below — ${sizeLb} lb per bag — instead of the per-reservoir salt list.`}
+                  ? "Same recipe, split into batches that are safe to store together and scaled so each one weighs 10 or 25 lb, so you can blend it once and scoop from it later."
+                  : `Showing the dry blend below — ${sizeLb} lb per batch — instead of the per-reservoir salt list.`}
               </p>
             </div>
           </div>
@@ -128,9 +128,9 @@ export function DryBulkBatchEntry({
       <Dialog open={isPickerOpen} onOpenChange={onPickerOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>How big a bag?</DialogTitle>
+            <DialogTitle>How big a batch?</DialogTitle>
             <DialogDescription>
-              This is the weight of each individual bag, not of all of them added together — the
+              This is the weight of each individual batch, not of all of them added together — the
               recipe&apos;s ratios stay exactly as solved either way.
             </DialogDescription>
           </DialogHeader>
@@ -143,11 +143,11 @@ export function DryBulkBatchEntry({
                 onClick={() => onPickSize(size)}
                 className="rounded-lg border-2 border-border bg-secondary/40 p-4 text-left transition-colors hover:border-primary/60 hover:bg-primary/5"
               >
-                <p className="text-lg font-semibold text-foreground">{size} lb per bag</p>
+                <p className="text-lg font-semibold text-foreground">{size} lb per batch</p>
                 <p className="text-xs text-muted-foreground">
                   {size === 10
-                    ? "A season for a small room — fits a single bucket per bag."
-                    : "Bulk. Plan on a bag or bucket per part and somewhere dry to keep them."}
+                    ? "A season for a small room — fits a single bucket per batch."
+                    : "Bulk. Plan on a batch or bucket per part and somewhere dry to keep them."}
                 </p>
               </button>
             ))}
@@ -258,7 +258,7 @@ function DryBagCard({
           <span className="flex items-center gap-2">
             <Package className={`h-5 w-5 ${style.icon}`} />
             <span>
-              Bag {bag.letter} — {bag.title}
+              Part {bag.letter} — {bag.title}
             </span>
           </span>
           <span className="font-mono text-base font-semibold">{sizeLb} lb</span>
@@ -280,7 +280,6 @@ function DryBagCard({
                 >
                   {salt.name}
                 </p>
-                <p className="font-mono text-xs text-muted-foreground">{salt.formula}</p>
               </div>
               <p className="font-mono font-semibold text-foreground">
                 {formatBagGrams(salt.grams)}
@@ -293,7 +292,7 @@ function DryBagCard({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
               <Blend className={`h-4 w-4 ${style.icon}`} />
-              How much of Bag {bag.letter} to use
+              How much of Part {bag.letter} to use
             </p>
             <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
               <button
@@ -342,7 +341,7 @@ function DryBatchInstructions() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl text-foreground">
           <Sparkles className="h-5 w-5 text-primary" />
-          <span>How to Blend These Bags</span>
+          <span>How to Blend These Batches</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -368,7 +367,7 @@ function DryBatchInstructions() {
             </p>
           </Step>
 
-          <Step n={4} title="Mix each bag in its own clean, dry bucket">
+          <Step n={4} title="Mix each batch in its own clean, dry bucket">
             <p>
               Ensure the bucket you are adding your salts into to blend them together is clean and
               completely dry, moisture will cake up the blend. Seal the lid and then roll and
