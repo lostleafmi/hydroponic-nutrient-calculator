@@ -111,6 +111,7 @@ import {
   scaleSeparateNitrogenRecipe,
 } from "@/lib/hydro-calc/displayed-recipe"
 import { buildDryBulkBatch, type DryBatchSizeLb } from "@/lib/hydro-calc/dry-batch"
+import { SHOW_CALCULATOR_USAGE_RATES } from "@/lib/hydro-calc/usage-rate-display"
 import { DryBulkBatchCard, DryBulkBatchEntry } from "./dry-bulk-batch-card"
 
 /** Rendered before the first Server Action response arrives */
@@ -1163,7 +1164,7 @@ export function RecipeScreen({
           </CardTitle>
           <CardDescription>
             {isDryBatchView
-              ? `What feed strength these batches get dosed at. Changing it moves the use rate printed on each batch — every batch still weighs ${dryBatch?.sizeLb} lb, and still holds the same salts in the same proportions.`
+              ? `What feed strength these batches get dosed at. Changing it moves how much of a batch a reservoir takes — every batch still weighs ${dryBatch?.sizeLb} lb, and still holds the same salts in the same proportions.`
               : stockTankOption === "direct"
                 ? "How big is your reservoir and what is your target EC"
                 : "How big are your stock tanks, and how much do you want to dilute them?"}
@@ -1287,8 +1288,8 @@ export function RecipeScreen({
                 note={
                   isDryBatchView
                     ? targetEcIsScaled
-                      ? `Use rates scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm. The batch weights don't move.`
-                      : "The use rate on each batch adjusts automatically when you change this."
+                      ? `Dosing scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm. The batch weights don't move.`
+                      : "How much of each batch a reservoir takes adjusts automatically when you change this."
                     : targetEcIsScaled
                       ? `All amounts — and the ppm above — scaled to hit ${parsedTargetEc.toFixed(2)} mS/cm.`
                       : "All amounts adjust automatically when you change this."
@@ -1364,8 +1365,11 @@ export function RecipeScreen({
         />
       )}
 
-      {/* How to Use — hidden in doser mode (injector handles dosing automatically) */}
-      {hasValidData && stockTankOption !== "direct" && stockTankOption !== "doser" && stockTankUsageLabels.length > 0 && (
+      {/* How to Use — the mL-per-volume dose for each finished tank. Gated off
+          with the rest of the usage rates (see `SHOW_CALCULATOR_USAGE_RATES`);
+          the rate itself is still computed above and still saved. Hidden in
+          doser mode either way (the injector handles dosing automatically). */}
+      {SHOW_CALCULATOR_USAGE_RATES && hasValidData && stockTankOption !== "direct" && stockTankOption !== "doser" && stockTankUsageLabels.length > 0 && (
         <StockTankUsageCard
           tankLabels={stockTankUsageLabels}
           dilutionRatio={recipeBasisDilutionRatio}
@@ -1620,28 +1624,45 @@ export function RecipeScreen({
               Add the required amount directly to your batch tank / reservoir (or pre-mix it
               separately).
             </p>
-            {/* Both bases are always spelled out; the grower's preferred unit
-                leads so the number they'll actually measure to is first. */}
-            <p>
-              Add{" "}
-              <span className="font-mono font-semibold text-amber-50">
-                {formatGrams(
-                  volumeUnit === "liters"
-                    ? activeDirectAddCalciumCarbonate.gramsPerLiter
-                    : activeDirectAddCalciumCarbonate.gramsPerGallon
-                )}
-              </span>{" "}
-              of Calcium Carbonate per {volumeUnitNoun(volumeUnit)} (
-              <span className="font-mono">
-                {formatGrams(
-                  volumeUnit === "liters"
-                    ? activeDirectAddCalciumCarbonate.gramsPerGallon
-                    : activeDirectAddCalciumCarbonate.gramsPerLiter
-                )}
-              </span>{" "}
-              per {volumeUnitNoun(volumeUnit === "liters" ? "gallons" : "liters")}) of
-              reservoir/batch water — not into any of the stock tanks below.
-            </p>
+            {SHOW_CALCULATOR_USAGE_RATES ? (
+              /* Both bases are always spelled out; the grower's preferred unit
+                 leads so the number they'll actually measure to is first. */
+              <p>
+                Add{" "}
+                <span className="font-mono font-semibold text-amber-50">
+                  {formatGrams(
+                    volumeUnit === "liters"
+                      ? activeDirectAddCalciumCarbonate.gramsPerLiter
+                      : activeDirectAddCalciumCarbonate.gramsPerGallon
+                  )}
+                </span>{" "}
+                of Calcium Carbonate per {volumeUnitNoun(volumeUnit)} (
+                <span className="font-mono">
+                  {formatGrams(
+                    volumeUnit === "liters"
+                      ? activeDirectAddCalciumCarbonate.gramsPerGallon
+                      : activeDirectAddCalciumCarbonate.gramsPerLiter
+                  )}
+                </span>{" "}
+                per {volumeUnitNoun(volumeUnit === "liters" ? "gallons" : "liters")}) of
+                reservoir/batch water — not into any of the stock tanks below.
+              </p>
+            ) : (
+              /* Without the per-volume rate, the total still has to be here:
+                 Calcium Carbonate is the one salt missing from every card
+                 below, so this is the only place it's quantified. `grams` is
+                 on the same denominator as those cards' amounts. */
+              <p>
+                Add{" "}
+                <span className="font-mono font-semibold text-amber-50">
+                  {formatGrams(activeDirectAddCalciumCarbonate.grams)}
+                </span>{" "}
+                of Calcium Carbonate
+                {stockTankOption === "direct"
+                  ? " straight into your reservoir/batch water — not into the pitcher with the rest of these salts."
+                  : " straight into the reservoir water you make from one full set of stock tanks — not into any of the stock tanks below."}
+              </p>
+            )}
           </div>
         </div>
       )}

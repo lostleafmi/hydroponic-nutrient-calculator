@@ -37,6 +37,7 @@ import {
   type DryBulkBatch,
 } from "@/lib/hydro-calc/dry-batch"
 import type { VolumeUnit } from "@/lib/hydro-calc/recipe-types"
+import { SHOW_CALCULATOR_USAGE_RATES } from "@/lib/hydro-calc/usage-rate-display"
 
 /**
  * The one thing this whole screen has to say before anything else. Kept as a
@@ -288,48 +289,54 @@ function DryBagCard({
           ))}
         </div>
 
-        <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-              <Blend className={`h-4 w-4 ${style.icon}`} />
-              How much of Part {bag.letter} to use
-            </p>
-            <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
-              <button
-                type="button"
-                onClick={() => onUseRateUnitChange("gallons")}
-                aria-pressed={useRateUnit === "gallons"}
-                className={`px-3 py-1 text-xs font-medium transition-colors ${
-                  useRateUnit === "gallons"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-                }`}
-              >
-                Gallons
-              </button>
-              <button
-                type="button"
-                onClick={() => onUseRateUnitChange("liters")}
-                aria-pressed={useRateUnit === "liters"}
-                className={`border-l-2 border-border px-3 py-1 text-xs font-medium transition-colors ${
-                  useRateUnit === "liters"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-                }`}
-              >
-                Liters
-              </button>
+        {/* Irrigation use rate for this bag — gated with the rest of the
+            calculator's usage rates (see `SHOW_CALCULATOR_USAGE_RATES`). The
+            grams-per-volume figures stay on the batch either way; this is only
+            whether the formulation prints them. */}
+        {SHOW_CALCULATOR_USAGE_RATES && (
+          <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                <Blend className={`h-4 w-4 ${style.icon}`} />
+                How much of Part {bag.letter} to use
+              </p>
+              <div className="flex shrink-0 overflow-hidden rounded-lg border-2 border-border">
+                <button
+                  type="button"
+                  onClick={() => onUseRateUnitChange("gallons")}
+                  aria-pressed={useRateUnit === "gallons"}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    useRateUnit === "gallons"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                  }`}
+                >
+                  Gallons
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUseRateUnitChange("liters")}
+                  aria-pressed={useRateUnit === "liters"}
+                  className={`border-l-2 border-border px-3 py-1 text-xs font-medium transition-colors ${
+                    useRateUnit === "liters"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                  }`}
+                >
+                  Liters
+                </button>
+              </div>
             </div>
+            <p className="mt-1 font-mono text-sm text-foreground">
+              {useRateUnit === "liters"
+                ? `${formatUseRateGrams(bag.gramsPerLiterOfWater)} per liter`
+                : `${formatUseRateGrams(bag.gramsPerGallonOfWater)} per gallon`}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Automatically scales to the estimated EC or target EC if adjusted.
+            </p>
           </div>
-          <p className="mt-1 font-mono text-sm text-foreground">
-            {useRateUnit === "liters"
-              ? `${formatUseRateGrams(bag.gramsPerLiterOfWater)} per liter`
-              : `${formatUseRateGrams(bag.gramsPerGallonOfWater)} per gallon`}
-          </p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Automatically scales to the estimated EC or target EC if adjusted.
-          </p>
-        </div>
+        )}
       </CardContent>
     </Card>
   )
